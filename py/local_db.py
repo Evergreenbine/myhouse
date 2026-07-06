@@ -265,16 +265,16 @@ def add_contract(tenant_id, room_id, start_date, end_date='',
                  monthly_rent=0, water_price=0, electric_price=0,
                  deposit=0, contract_file='', status='active'):
     c = _conn()
-    c.execute("""INSERT INTO contracts
+    cur = c.execute("""INSERT INTO contracts
         (tenant_id,room_id,start_date,end_date,monthly_rent,
          water_unit_price,electric_unit_price,deposit,contract_file,status)
         VALUES (?,?,?,?,?,?,?,?,?,?)""",
         (tenant_id, room_id, start_date, end_date, monthly_rent,
          water_price, electric_price, deposit, contract_file, status))
-    c.commit(); pk = c.lastrowid; c.close()
+    c.commit(); pk = cur.lastrowid; c.close()
     return pk
 
-def get_contracts(active_only=True):
+def get_contracts(active_only=True, building_id=None):
     c = _conn()
     sql = ("SELECT c.*,t.name AS tenant_name,t.phone AS tenant_phone,"
            "r.room_number,b.name AS building_name "
@@ -282,10 +282,17 @@ def get_contracts(active_only=True):
            "JOIN tenants t ON c.tenant_id=t.id "
            "JOIN rooms r ON c.room_id=r.id "
            "JOIN buildings b ON r.building_id=b.id")
+    wh = []
+    params = []
     if active_only:
-        sql += " WHERE c.status='active'"
+        wh.append("c.status='active'")
+    if building_id:
+        wh.append("r.building_id=?")
+        params.append(building_id)
+    if wh:
+        sql += " WHERE " + " AND ".join(wh)
     sql += " ORDER BY c.id DESC"
-    rows = c.execute(sql).fetchall()
+    rows = c.execute(sql, params).fetchall()
     c.close()
     return [dict(r) for r in rows]
 
@@ -301,6 +308,17 @@ def get_contract(cid):
     c.close()
     return dict(r) if r else None
 
+def update_contract(cid, tenant_id, room_id, start_date, end_date='',
+                    monthly_rent=0, water_price=0, electric_price=0,
+                    deposit=0, contract_file='', status='active'):
+    c = _conn()
+    c.execute("""UPDATE contracts SET tenant_id=?,room_id=?,start_date=?,end_date=?,
+        monthly_rent=?,water_unit_price=?,electric_unit_price=?,deposit=?,
+        contract_file=?,status=? WHERE id=?""",
+        (tenant_id, room_id, start_date, end_date, monthly_rent,
+         water_price, electric_price, deposit, contract_file, status, cid))
+    c.commit(); c.close()
+
 def end_contract(cid):
     c = _conn()
     c.execute("UPDATE contracts SET status='ended' WHERE id=?", (cid,))
@@ -308,25 +326,45 @@ def end_contract(cid):
 
 def add_meter(room_id, mtype, meter_no='', init_reading=0.0):
     c = _conn()
-    c.execute("INSERT INTO meters (room_id,type,meter_no,init_reading) VALUES (?,?,?,?)",
+    cur = c.execute("INSERT INTO meters (room_id,type,meter_no,init_reading) VALUES (?,?,?,?)",
               (room_id, mtype, meter_no, init_reading))
-    c.commit(); pk = c.lastrowid; c.close()
+    c.commit(); pk = cur.lastrowid; c.close()
     return pk
 
-def get_meters(room_id=None):
+def get_meters(room_id=None, building_id=None, mtype=None):
     c = _conn()
+    wh = []
+    params = []
     if room_id:
-        rows = c.execute("SELECT m.*,r.room_number FROM meters m JOIN rooms r ON m.room_id=r.id WHERE m.room_id=? ORDER BY m.type", (room_id,)).fetchall()
-    else:
-        rows = c.execute("SELECT m.*,r.room_number,b.name AS building_name FROM meters m JOIN rooms r ON m.room_id=r.id JOIN buildings b ON r.building_id=b.id ORDER BY r.id,m.type").fetchall()
+        wh.append("m.room_id=?")
+        params.append(room_id)
+    if building_id:
+        wh.append("r.building_id=?")
+        params.append(building_id)
+    if mtype:
+        wh.append("m.type=?")
+        params.append(mtype)
+    sql = ("SELECT m.*,r.room_number,r.floor,b.name AS building_name "
+           "FROM meters m JOIN rooms r ON m.room_id=r.id "
+           "JOIN buildings b ON r.building_id=b.id")
+    if wh:
+        sql += " WHERE " + " AND ".join(wh)
+    sql += " ORDER BY COALESCE(r.floor,1),CAST(r.room_number AS INTEGER),r.room_number,m.type"
+    rows = c.execute(sql, params).fetchall()
     c.close()
     return [dict(r) for r in rows]
 
 def get_meter(mid):
     c = _conn()
-    r = c.execute("SELECT * FROM meters WHERE id=?", (mid,)).fetchone()
+    r = c.execute("SELECT m.*,r.building_id,r.room_number,r.floor,b.name AS building_name FROM meters m JOIN rooms r ON m.room_id=r.id JOIN buildings b ON r.building_id=b.id WHERE m.id=?", (mid,)).fetchone()
     c.close()
     return dict(r) if r else None
+
+def update_meter(mid, room_id, mtype, meter_no='', init_reading=0.0):
+    c = _conn()
+    c.execute("UPDATE meters SET room_id=?,type=?,meter_no=?,init_reading=? WHERE id=?",
+              (room_id, mtype, meter_no, init_reading, mid))
+    c.commit(); c.close()
 
 def add_reading(meter_id, reading_date, reading, photo='', remark=''):
     c = _conn()

@@ -1,10 +1,10 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import json, os, sys, traceback
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from datetime import date, datetime, timedelta
 from user_auth import load_user_config, save_user_config
-from local_db import init as init_db, load_app_user, save_app_user, add_building, get_buildings, get_building, update_building, add_room, get_rooms, get_room, update_room, add_tenant, get_tenants, get_tenant, update_tenant, set_tenant_status, add_contract, get_contracts, get_contract, end_contract, add_meter, get_meters, get_meter, add_reading, get_readings, get_latest_reading, add_bill, get_bills, get_bill, update_bill_status, add_payment, get_payments, delete_payment
+from local_db import init as init_db, load_app_user, save_app_user, add_building, get_buildings, get_building, update_building, add_room, get_rooms, get_room, update_room, add_tenant, get_tenants, get_tenant, update_tenant, set_tenant_status, add_contract, get_contracts, get_contract, update_contract, end_contract, add_meter, get_meters, get_meter, update_meter, add_reading, get_readings, get_latest_reading, add_bill, get_bills, get_bill, update_bill_status, add_payment, get_payments, delete_payment
 PORT = 18520
 
 class APIHandler(BaseHTTPRequestHandler):
@@ -157,14 +157,16 @@ class APIHandler(BaseHTTPRequestHandler):
                     elif action=="update": update_tenant(data.get("id"),data.get("name",""),data.get("phone",""),data.get("id_card",""),data.get("status","active"),data.get("building_id"));result={"success":True}
                     elif action=="set_status": set_tenant_status(data.get("id"),data.get("status","active"));result={"success":True}
                 elif table=="contracts":
-                    if action=="list": result = get_contracts(data.get("active_only",True))
+                    if action=="list": result = get_contracts(data.get("active_only",True),data.get("building_id"))
                     elif action=="get": result = get_contract(data.get("id"))
                     elif action=="add": result = add_contract(data.get("tenant_id"),data.get("room_id"),data.get("start_date",""),data.get("end_date",""),data.get("monthly_rent",0),data.get("water_price",0),data.get("electric_price",0),data.get("deposit",0),data.get("contract_file",""),data.get("status","active"))
+                    elif action=="update": update_contract(data.get("id"),data.get("tenant_id"),data.get("room_id"),data.get("start_date",""),data.get("end_date",""),data.get("monthly_rent",0),data.get("water_price",0),data.get("electric_price",0),data.get("deposit",0),data.get("contract_file",""),data.get("status","active"));result={"success":True}
                     elif action=="end": end_contract(data.get("id"));result={"success":True}
                 elif table=="meters":
-                    if action=="list": result = get_meters(data.get("room_id"))
+                    if action=="list": result = get_meters(data.get("room_id"),data.get("building_id"),data.get("type"))
                     elif action=="get": result = get_meter(data.get("id"))
                     elif action=="add": result = add_meter(data.get("room_id"),data.get("type","water"),data.get("meter_no",""),data.get("init_reading",0))
+                    elif action=="update": update_meter(data.get("id"),data.get("room_id"),data.get("type","water"),data.get("meter_no",""),data.get("init_reading",0));result={"success":True}
                 elif table=="readings":
                     if action=="list": result = get_readings(data.get("meter_id"),data.get("limit",50))
                     elif action=="add": result = add_reading(data.get("meter_id"),data.get("reading_date",""),data.get("reading",0),data.get("photo",""),data.get("remark",""))

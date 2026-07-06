@@ -246,6 +246,11 @@ function esc(v) { return String(v == null ? '' : v).replace(/[&<>'"]/g, function
 var buildingQuery = '';
 var currentRoomBuildingId = null;
 var currentTenantBuildingId = null;
+var currentContractBuildingId = null;
+var currentWaterMeterBuildingId = null;
+var currentElectricMeterBuildingId = null;
+var currentBillBuildingId = null;
+var currentPaymentBuildingId = null;
 async function loadBuildings() {
   var blds = await rental('buildings','list') || [];
   var rooms = await rental('rooms','list') || [];
@@ -477,11 +482,387 @@ function doUpdateTenant(id) {
     currentTenantBuildingId = buildingId; CM(); loadTenants();
   });
 }
-async function loadContracts() { var cs = await rental('contracts','list',{active_only:true}) || []; renderMain('<div class="page-title">\u5408\u540c\u4fe1\u606f</div><div class="toolbar"><button class="btn btn-primary btn-sm">+ \u65b0\u7b7e\u5408\u540c</button><span style="font-size:12px;color:var(--text-sec);margin-left:12px">\u5171 '+cs.length+' \u4efd\u6709\u6548\u5408\u540c</span></div><div class="empty-state"><div class="icon">&#x1F4C4;</div><div>\u5408\u540c\u5217\u8868\u5df2\u52a0\u8f7d</div></div>'); }
-async function loadWaterMeters() { var ms = await rental('meters','list') || []; ms = ms.filter(function(m){return m.type=='water'}); renderMain('<div class="page-title">\u6c34\u8868\u4fe1\u606f</div><div class="toolbar"><button class="btn btn-primary btn-sm">+ \u6dfb\u52a0\u6c34\u8868</button><span style="font-size:12px;color:var(--text-sec);margin-left:12px">\u5171 '+ms.length+' \u4e2a\u6c34\u8868</span></div><div class="empty-state"><div class="icon">&#x1F4A7;</div><div>\u6c34\u8868\u5217\u8868\u5df2\u52a0\u8f7d</div></div>'); }
-async function loadElectricMeters() { var ms = await rental('meters','list') || []; ms = ms.filter(function(m){return m.type=='electric'}); renderMain('<div class="page-title">\u7535\u8868\u4fe1\u606f</div><div class="toolbar"><button class="btn btn-primary btn-sm">+ \u6dfb\u52a0\u7535\u8868</button><span style="font-size:12px;color:var(--text-sec);margin-left:12px">\u5171 '+ms.length+' \u4e2a\u7535\u8868</span></div><div class="empty-state"><div class="icon">&#x26A1;</div><div>\u7535\u8868\u5217\u8868\u5df2\u52a0\u8f7d</div></div>'); }
-async function loadBills() { var bs = await rental('bills','list') || []; renderMain('<div class="page-title">\u8d26\u5355\u7ba1\u7406</div><div class="summary-row"><div class="stat-card"><div>\u672c\u6708\u8d26\u5355</div><div class="stat-val">'+bs.length+'</div></div></div><div class="empty-state"><div class="icon">&#x1F4CA;</div><div>\u8d26\u5355\u5217\u8868\u5df2\u52a0\u8f7d</div></div>'); }
-async function loadPayments() { var ps = await rental('payments','list') || []; renderMain('<div class="page-title">\u6536\u6b3e\u8bb0\u5f55</div><div class="summary-row"><div class="stat-card"><div>\u6536\u6b3e\u7b14\u6570</div><div class="stat-val">'+ps.length+'</div></div></div><div class="empty-state"><div class="icon">&#x1F4B3;</div><div>\u6536\u6b3e\u8bb0\u5f55\u5df2\u52a0\u8f7d</div></div>'); }
+
+async function loadContracts() {
+  var buildings = await rental('buildings','list') || [];
+  if (buildings.length == 0) {
+    currentContractBuildingId = null;
+    renderMain('<div class="toolbar"><button class="btn btn-primary btn-sm" onclick="switchSide(&quot;buildings&quot;)">+ 先添加楼栋</button></div><div class="toolbar-divider"></div><div class="empty-state"><div class="icon">&#x1F4C4;</div><div>请先添加楼栋，再录入合同</div></div>');
+    return;
+  }
+  if (!currentContractBuildingId || !buildings.some(function(b){ return Number(b.id) == Number(currentContractBuildingId); })) currentContractBuildingId = buildings[0].id;
+  var cs = await rental('contracts','list',{building_id:currentContractBuildingId}) || [];
+  var h = '<div class="tab-action-row"><div class="building-tabs">';
+  buildings.forEach(function(b){
+    var active = Number(b.id) == Number(currentContractBuildingId) ? ' active' : '';
+    h += '<div class="building-tab'+active+'" onclick="switchContractBuilding('+Number(b.id)+')">'+esc(b.name)+'</div>';
+  });
+  h += '</div><button class="btn btn-primary btn-sm" onclick="showAddContract()">+ 新签合同</button></div>';
+  if (cs.length == 0) h += '<div class="empty-state"><div class="icon">&#x1F4C4;</div><div>当前楼栋暂无合同，点击上方按钮新签</div></div>';
+  else {
+    h += '<div class="table-wrap"><table><thead><tr><th>租客</th><th>房间</th><th>月租</th><th>合同期</th><th>保证金</th><th class="status-cell">状态</th></tr></thead><tbody>';
+    cs.forEach(function(c){
+      h += '<tr><td><span class="name-link" onclick="editContract('+Number(c.id)+')">'+esc(c.tenant_name||'')+'</span></td><td>'+esc(c.room_number||'')+'</td><td>¥'+Number(c.monthly_rent||0).toFixed(2)+'</td><td>'+esc((c.start_date||'')+' ~ '+(c.end_date||''))+'</td><td>¥'+Number(c.deposit||0).toFixed(2)+'</td><td class="status-cell"><span class="status-dot '+(c.status=='active'?'rented':'idle')+'" title="'+(c.status=='active'?'有效':'已终止')+'"></span></td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '<div class="list-meta">共 '+cs.length+' 份合同</div>';
+  renderMain(h);
+}
+function switchContractBuilding(id) { currentContractBuildingId = id; loadContracts(); }
+async function showAddContract() {
+  var bid = currentContractBuildingId;
+  var rooms = await rental('rooms','list',{building_id:bid}) || [];
+  var tenants = await rental('tenants','list',{active_only:true,building_id:bid}) || [];
+  if (tenants.length == 0) { alert('该楼栋没有租客，请先添加租客'); return; }
+  if (rooms.length == 0) { alert('该楼栋没有房间，请先添加房间'); return; }
+  var h = '<div class="soft-form">';
+  h += '<div class="form-group"><label>租客</label><select class="soft-input" id="f_contract_tenant">';
+  tenants.forEach(function(t){ h += '<option value="'+Number(t.id)+'">'+esc(t.name)+'</option>'; });
+  h += '</select></div>';
+  h += '<div class="form-group"><label>房间</label><select class="soft-input" id="f_contract_room">';
+  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'">'+esc(r.room_number)+'</option>'; });
+  h += '</select></div>';
+  h += '<div class="form-group"><label>合同开始</label><input class="soft-input" type="date" id="f_contract_start"></div>';
+  h += '<div class="form-group"><label>合同结束</label><input class="soft-input" type="date" id="f_contract_end"></div>';
+  h += '<div class="form-group"><label>月租（元）</label><input class="soft-input" type="number" id="f_contract_rent" placeholder="0.00"></div>';
+  h += '<div class="form-group"><label>水价（元/吨）</label><input class="soft-input" type="number" id="f_contract_water" placeholder="0.00"></div>';
+  h += '<div class="form-group"><label>电价（元/度）</label><input class="soft-input" type="number" id="f_contract_electric" placeholder="0.00"></div>';
+  h += '<div class="form-group"><label>保证金（元）</label><input class="soft-input" type="number" id="f_contract_deposit" placeholder="0.00"></div>';
+  h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddContract()">保存</button></div></div>';
+  M(h);
+}
+function doAddContract() {
+  var data = {
+    tenant_id: document.getElementById('f_contract_tenant').value,
+    room_id: document.getElementById('f_contract_room').value,
+    start_date: document.getElementById('f_contract_start').value,
+    end_date: document.getElementById('f_contract_end').value,
+    monthly_rent: parseFloat(document.getElementById('f_contract_rent').value) || 0,
+    water_price: parseFloat(document.getElementById('f_contract_water').value) || 0,
+    electric_price: parseFloat(document.getElementById('f_contract_electric').value) || 0,
+    deposit: parseFloat(document.getElementById('f_contract_deposit').value) || 0
+  };
+  if (!data.start_date) { alert('请选择合同开始日期'); return; }
+  rental('contracts','add',data).then(function(res){
+    if (!res || res.error) { alert((res && res.error) || '新增失败，请检查后端服务'); return; }
+    CM(); loadContracts();
+  });
+}
+async function editContract(id) {
+  var c = await rental('contracts','get',{id:id});
+  if (!c || c.error) { alert('未找到合同'); return; }
+  var bid = currentContractBuildingId;
+  var rooms = await rental('rooms','list',{building_id:bid}) || [];
+  var tenants = await rental('tenants','list',{active_only:true,building_id:bid}) || [];
+  var allTenants = await rental('tenants','list',{active_only:false,building_id:bid}) || [];
+  allTenants.forEach(function(t){ if(!tenants.some(function(x){return Number(x.id)==Number(t.id)})) tenants.push(t); });
+  var h = '<div class="soft-form">';
+  h += '<div class="form-group"><label>租客</label><select class="soft-input" id="f_contract_tenant">';
+  tenants.forEach(function(t){ h += '<option value="'+Number(t.id)+'"'+(Number(t.id)==Number(c.tenant_id)?' selected':'')+'>'+esc(t.name)+'</option>'; });
+  h += '</select></div>';
+  h += '<div class="form-group"><label>房间</label><select class="soft-input" id="f_contract_room">';
+  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'"'+(Number(r.id)==Number(c.room_id)?' selected':'')+'>'+esc(r.room_number)+'</option>'; });
+  h += '</select></div>';
+  h += '<div class="form-group"><label>合同开始</label><input class="soft-input" type="date" id="f_contract_start" value="'+esc(c.start_date||'')+'"></div>';
+  h += '<div class="form-group"><label>合同结束</label><input class="soft-input" type="date" id="f_contract_end" value="'+esc(c.end_date||'')+'"></div>';
+  h += '<div class="form-group"><label>月租（元）</label><input class="soft-input" type="number" id="f_contract_rent" value="'+Number(c.monthly_rent||0)+'"></div>';
+  h += '<div class="form-group"><label>水价（元/吨）</label><input class="soft-input" type="number" id="f_contract_water" value="'+Number(c.water_unit_price||0)+'"></div>';
+  h += '<div class="form-group"><label>电价（元/度）</label><input class="soft-input" type="number" id="f_contract_electric" value="'+Number(c.electric_unit_price||0)+'"></div>';
+  h += '<div class="form-group"><label>保证金（元）</label><input class="soft-input" type="number" id="f_contract_deposit" value="'+Number(c.deposit||0)+'"></div>';
+  h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doUpdateContract('+Number(id)+')">保存</button></div></div>';
+  M(h);
+}
+function doUpdateContract(id) {
+  var data = {
+    id: id,
+    tenant_id: document.getElementById('f_contract_tenant').value,
+    room_id: document.getElementById('f_contract_room').value,
+    start_date: document.getElementById('f_contract_start').value,
+    end_date: document.getElementById('f_contract_end').value,
+    monthly_rent: parseFloat(document.getElementById('f_contract_rent').value) || 0,
+    water_price: parseFloat(document.getElementById('f_contract_water').value) || 0,
+    electric_price: parseFloat(document.getElementById('f_contract_electric').value) || 0,
+    deposit: parseFloat(document.getElementById('f_contract_deposit').value) || 0
+  };
+  if (!data.start_date) { alert('请选择合同开始日期'); return; }
+  rental('contracts','update',data).then(function(res){
+    if (!res || res.error) { alert((res && res.error) || '保存失败，请检查后端服务'); return; }
+    CM(); loadContracts();
+  });
+}
+
+async function loadWaterMeters() {
+  var buildings = await rental('buildings','list') || [];
+  if (buildings.length == 0) {
+    currentWaterMeterBuildingId = null;
+    renderMain('<div class="toolbar"><button class="btn btn-primary btn-sm" onclick="switchSide(&quot;buildings&quot;)">+ 先添加楼栋</button></div><div class="toolbar-divider"></div><div class="empty-state"><div class="icon">&#x1F4A7;</div><div>请先添加楼栋，再录入水表</div></div>');
+    return;
+  }
+  if (!currentWaterMeterBuildingId || !buildings.some(function(b){ return Number(b.id) == Number(currentWaterMeterBuildingId); })) currentWaterMeterBuildingId = buildings[0].id;
+  var ms = await rental('meters','list',{building_id:currentWaterMeterBuildingId,type:'water'}) || [];
+  var h = '<div class="tab-action-row"><div class="building-tabs">';
+  buildings.forEach(function(b){
+    var active = Number(b.id) == Number(currentWaterMeterBuildingId) ? ' active' : '';
+    h += '<div class="building-tab'+active+'" onclick="switchWaterMeterBuilding('+Number(b.id)+')">'+esc(b.name)+'</div>';
+  });
+  h += '</div><button class="btn btn-primary btn-sm" onclick="showAddWaterMeter()">+ 添加水表</button></div>';
+  if (ms.length == 0) h += '<div class="empty-state"><div class="icon">&#x1F4A7;</div><div>当前楼栋暂无水表，点击上方按钮添加</div></div>';
+  else {
+    h += '<div class="table-wrap"><table><thead><tr><th>表编号</th><th>房间</th><th>初始读数</th></tr></thead><tbody>';
+    ms.forEach(function(m){
+      h += '<tr><td><span class="name-link" onclick="editWaterMeter('+Number(m.id)+')">'+esc(m.meter_no||'')+'</span></td><td>'+esc(m.room_number||'')+'</td><td>'+Number(m.init_reading||0)+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '<div class="list-meta">共 '+ms.length+' 个水表</div>';
+  renderMain(h);
+}
+function switchWaterMeterBuilding(id) { currentWaterMeterBuildingId = id; loadWaterMeters(); }
+async function showAddWaterMeter() {
+  var bid = currentWaterMeterBuildingId;
+  var rooms = await rental('rooms','list',{building_id:bid}) || [];
+  if (rooms.length == 0) { alert('该楼栋没有房间，请先添加房间'); return; }
+  var h = '<div class="soft-form">';
+  h += '<div class="form-group"><label>房间</label><select class="soft-input" id="f_wmeter_room">';
+  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'">'+esc(r.room_number)+'</option>'; });
+  h += '</select></div>';
+  h += '<div class="form-group"><label>表编号</label><input class="soft-input" id="f_wmeter_no" placeholder="如：WS-001"></div>';
+  h += '<div class="form-group"><label>初始读数</label><input class="soft-input" type="number" id="f_wmeter_reading" placeholder="0"></div>';
+  h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddWaterMeter()">保存</button></div></div>';
+  M(h);
+}
+function doAddWaterMeter() {
+  var data = {
+    room_id: document.getElementById('f_wmeter_room').value,
+    type: 'water',
+    meter_no: document.getElementById('f_wmeter_no').value.trim(),
+    init_reading: parseFloat(document.getElementById('f_wmeter_reading').value) || 0
+  };
+  rental('meters','add',data).then(function(res){
+    if (!res || res.error) { alert((res && res.error) || '新增失败，请检查后端服务'); return; }
+    CM(); loadWaterMeters();
+  });
+}
+async function editWaterMeter(id) {
+  var m = await rental('meters','get',{id:id});
+  if (!m || m.error) { alert('未找到水表'); return; }
+  var bid = currentWaterMeterBuildingId;
+  var rooms = await rental('rooms','list',{building_id:bid}) || [];
+  var h = '<div class="soft-form">';
+  h += '<div class="form-group"><label>房间</label><select class="soft-input" id="f_wmeter_room">';
+  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'"'+(Number(r.id)==Number(m.room_id)?' selected':'')+'>'+esc(r.room_number)+'</option>'; });
+  h += '</select></div>';
+  h += '<div class="form-group"><label>表编号</label><input class="soft-input" id="f_wmeter_no" value="'+esc(m.meter_no||'')+'"></div>';
+  h += '<div class="form-group"><label>初始读数</label><input class="soft-input" type="number" id="f_wmeter_reading" value="'+Number(m.init_reading||0)+'"></div>';
+  h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doUpdateWaterMeter('+Number(id)+')">保存</button></div></div>';
+  M(h);
+}
+function doUpdateWaterMeter(id) {
+  var data = {
+    id: id,
+    room_id: document.getElementById('f_wmeter_room').value,
+    type: 'water',
+    meter_no: document.getElementById('f_wmeter_no').value.trim(),
+    init_reading: parseFloat(document.getElementById('f_wmeter_reading').value) || 0
+  };
+  rental('meters','update',data).then(function(res){
+    if (!res || res.error) { alert((res && res.error) || '保存失败，请检查后端服务'); return; }
+    CM(); loadWaterMeters();
+  });
+}
+
+async function loadElectricMeters() {
+  var buildings = await rental('buildings','list') || [];
+  if (buildings.length == 0) {
+    currentElectricMeterBuildingId = null;
+    renderMain('<div class="toolbar"><button class="btn btn-primary btn-sm" onclick="switchSide(&quot;buildings&quot;)">+ 先添加楼栋</button></div><div class="toolbar-divider"></div><div class="empty-state"><div class="icon">&#x26A1;</div><div>请先添加楼栋，再录入电表</div></div>');
+    return;
+  }
+  if (!currentElectricMeterBuildingId || !buildings.some(function(b){ return Number(b.id) == Number(currentElectricMeterBuildingId); })) currentElectricMeterBuildingId = buildings[0].id;
+  var ms = await rental('meters','list',{building_id:currentElectricMeterBuildingId,type:'electric'}) || [];
+  var h = '<div class="tab-action-row"><div class="building-tabs">';
+  buildings.forEach(function(b){
+    var active = Number(b.id) == Number(currentElectricMeterBuildingId) ? ' active' : '';
+    h += '<div class="building-tab'+active+'" onclick="switchElectricMeterBuilding('+Number(b.id)+')">'+esc(b.name)+'</div>';
+  });
+  h += '</div><button class="btn btn-primary btn-sm" onclick="showAddElectricMeter()">+ 添加电表</button></div>';
+  if (ms.length == 0) h += '<div class="empty-state"><div class="icon">&#x26A1;</div><div>当前楼栋暂无电表，点击上方按钮添加</div></div>';
+  else {
+    h += '<div class="table-wrap"><table><thead><tr><th>表编号</th><th>房间</th><th>初始读数</th></tr></thead><tbody>';
+    ms.forEach(function(m){
+      h += '<tr><td><span class="name-link" onclick="editElectricMeter('+Number(m.id)+')">'+esc(m.meter_no||'')+'</span></td><td>'+esc(m.room_number||'')+'</td><td>'+Number(m.init_reading||0)+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '<div class="list-meta">共 '+ms.length+' 个电表</div>';
+  renderMain(h);
+}
+function switchElectricMeterBuilding(id) { currentElectricMeterBuildingId = id; loadElectricMeters(); }
+async function showAddElectricMeter() {
+  var bid = currentElectricMeterBuildingId;
+  var rooms = await rental('rooms','list',{building_id:bid}) || [];
+  if (rooms.length == 0) { alert('该楼栋没有房间，请先添加房间'); return; }
+  var h = '<div class="soft-form">';
+  h += '<div class="form-group"><label>房间</label><select class="soft-input" id="f_emeter_room">';
+  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'">'+esc(r.room_number)+'</option>'; });
+  h += '</select></div>';
+  h += '<div class="form-group"><label>表编号</label><input class="soft-input" id="f_emeter_no" placeholder="如：ES-001"></div>';
+  h += '<div class="form-group"><label>初始读数</label><input class="soft-input" type="number" id="f_emeter_reading" placeholder="0"></div>';
+  h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddElectricMeter()">保存</button></div></div>';
+  M(h);
+}
+function doAddElectricMeter() {
+  var data = {
+    room_id: document.getElementById('f_emeter_room').value,
+    type: 'electric',
+    meter_no: document.getElementById('f_emeter_no').value.trim(),
+    init_reading: parseFloat(document.getElementById('f_emeter_reading').value) || 0
+  };
+  rental('meters','add',data).then(function(res){
+    if (!res || res.error) { alert((res && res.error) || '新增失败，请检查后端服务'); return; }
+    CM(); loadElectricMeters();
+  });
+}
+async function editElectricMeter(id) {
+  var m = await rental('meters','get',{id:id});
+  if (!m || m.error) { alert('未找到电表'); return; }
+  var bid = currentElectricMeterBuildingId;
+  var rooms = await rental('rooms','list',{building_id:bid}) || [];
+  var h = '<div class="soft-form">';
+  h += '<div class="form-group"><label>房间</label><select class="soft-input" id="f_emeter_room">';
+  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'"'+(Number(r.id)==Number(m.room_id)?' selected':'')+'>'+esc(r.room_number)+'</option>'; });
+  h += '</select></div>';
+  h += '<div class="form-group"><label>表编号</label><input class="soft-input" id="f_emeter_no" value="'+esc(m.meter_no||'')+'"></div>';
+  h += '<div class="form-group"><label>初始读数</label><input class="soft-input" type="number" id="f_emeter_reading" value="'+Number(m.init_reading||0)+'"></div>';
+  h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doUpdateElectricMeter('+Number(id)+')">保存</button></div></div>';
+  M(h);
+}
+function doUpdateElectricMeter(id) {
+  var data = {
+    id: id,
+    room_id: document.getElementById('f_emeter_room').value,
+    type: 'electric',
+    meter_no: document.getElementById('f_emeter_no').value.trim(),
+    init_reading: parseFloat(document.getElementById('f_emeter_reading').value) || 0
+  };
+  rental('meters','update',data).then(function(res){
+    if (!res || res.error) { alert((res && res.error) || '保存失败，请检查后端服务'); return; }
+    CM(); loadElectricMeters();
+  });
+}
+
+async function loadBills() {
+  var buildings = await rental('buildings','list') || [];
+  if (buildings.length == 0) {
+    currentBillBuildingId = null;
+    renderMain('<div class="toolbar"><button class="btn btn-primary btn-sm" onclick="switchSide(&quot;buildings&quot;)">+ 先添加楼栋</button></div><div class="toolbar-divider"></div><div class="empty-state"><div class="icon">&#x1F4CA;</div><div>请先添加楼栋</div></div>');
+    return;
+  }
+  if (!currentBillBuildingId || !buildings.some(function(b){ return Number(b.id) == Number(currentBillBuildingId); })) currentBillBuildingId = buildings[0].id;
+  var bs = await rental('bills','list',{contract_id:null}) || [];
+  bs = bs.filter(function(b){ return Number(b.building_id) == Number(currentBillBuildingId) || String(b.building_name).indexOf('') >= 0; });
+  var h = '<div class="tab-action-row"><div class="building-tabs">';
+  buildings.forEach(function(b){
+    var active = Number(b.id) == Number(currentBillBuildingId) ? ' active' : '';
+    h += '<div class="building-tab'+active+'" onclick="switchBillBuilding('+Number(b.id)+')">'+esc(b.name)+'</div>';
+  });
+  h += '</div><button class="btn btn-primary btn-sm" onclick="showAddBill()">+ 添加账单</button></div>';
+  if (bs.length == 0) h += '<div class="empty-state"><div class="icon">&#x1F4CA;</div><div>当前楼栋暂无账单</div></div>';
+  else {
+    h += '<div class="table-wrap"><table><thead><tr><th>租客</th><th>房间</th><th>账期</th><th>合计</th><th class="status-cell">状态</th></tr></thead><tbody>';
+    bs.forEach(function(b){
+      h += '<tr><td><span class="name-link" onclick="editBill('+Number(b.id)+')">'+esc(b.tenant_name||'')+'</span></td><td>'+esc(b.room_number||'')+'</td><td>'+esc(b.billing_month||'')+'</td><td>¥'+Number(b.total_amount||0).toFixed(2)+'</td><td class="status-cell"><span class="status-dot '+(b.status=='paid'?'rented':b.status=='partial'?'':'idle')+'" title="'+(b.status=='paid'?'已付':b.status=='partial'?'部分':'未付')+'"></span></td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '<div class="list-meta">共 '+bs.length+' 单账单</div>';
+  renderMain(h);
+}
+function switchBillBuilding(id) { currentBillBuildingId = id; loadBills(); }
+async function showAddBill() {
+  var contracts = await rental('contracts','list',{active_only:true}) || [];
+  if (contracts.length == 0) { alert('没有有效合同，请先新签合同'); return; }
+  var h = '<div class="soft-form">';
+  h += '<div class="form-group"><label>合同</label><select class="soft-input" id="f_bill_contract">';
+  contracts.forEach(function(c){ h += '<option value="'+Number(c.id)+'">'+esc(c.tenant_name||'')+' - '+esc(c.room_number||'')+'</option>'; });
+  h += '</select></div>';
+  h += '<div class="form-group"><label>账期（月份）</label><input class="soft-input" type="month" id="f_bill_month"></div>';
+  h += '<div class="form-group"><label>房租</label><input class="soft-input" type="number" id="f_bill_rent" placeholder="0.00"></div>';
+  h += '<div class="form-group"><label>水费</label><input class="soft-input" type="number" id="f_bill_water" placeholder="0.00"></div>';
+  h += '<div class="form-group"><label>电费</label><input class="soft-input" type="number" id="f_bill_electric" placeholder="0.00"></div>';
+  h += '<div class="form-group"><label>其他费用</label><input class="soft-input" type="number" id="f_bill_other" placeholder="0.00"></div>';
+  h += '<div class="form-group"><label>备注</label><input class="soft-input" id="f_bill_remark" placeholder="备注信息"></div>';
+  h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddBill()">保存</button></div></div>';
+  M(h);
+}
+function doAddBill() {
+  var data = {
+    contract_id: document.getElementById('f_bill_contract').value,
+    billing_month: document.getElementById('f_bill_month').value,
+    rent_amount: parseFloat(document.getElementById('f_bill_rent').value) || 0,
+    water_fee: parseFloat(document.getElementById('f_bill_water').value) || 0,
+    electric_fee: parseFloat(document.getElementById('f_bill_electric').value) || 0,
+    other_fee: parseFloat(document.getElementById('f_bill_other').value) || 0,
+    remark: document.getElementById('f_bill_remark').value.trim()
+  };
+  if (!data.billing_month) { alert('请选择账期'); return; }
+  rental('bills','add',data).then(function(res){
+    if (!res || res.error) { alert((res && res.error) || '新增失败，请检查后端服务'); return; }
+    CM(); loadBills();
+  });
+}
+async function editBill(id) {
+  var b = await rental('bills','get',{id:id});
+  if (!b || b.error) { alert('未找到账单'); return; }
+  var h = '<div class="soft-form">';
+  h += '<div class="form-group"><label>租客</label><div class="locked-field">'+esc(b.tenant_name||'')+'</div></div>';
+  h += '<div class="form-group"><label>房间</label><div class="locked-field">'+esc(b.room_number||'')+'</div></div>';
+  h += '<div class="form-group"><label>账期</label><div class="locked-field">'+esc(b.billing_month||'')+'</div></div>';
+  h += '<div class="form-group"><label>房租</label><div class="locked-field">¥'+Number(b.rent_amount||0).toFixed(2)+'</div></div>';
+  h += '<div class="form-group"><label>水费</label><div class="locked-field">¥'+Number(b.water_fee||0).toFixed(2)+'</div></div>';
+  h += '<div class="form-group"><label>电费</label><div class="locked-field">¥'+Number(b.electric_fee||0).toFixed(2)+'</div></div>';
+  h += '<div class="form-group"><label>其他费用</label><div class="locked-field">¥'+Number(b.other_fee||0).toFixed(2)+'</div></div>';
+  h += '<div class="form-group"><label>合计</label><div class="locked-field" style="font-weight:600">¥'+Number(b.total_amount||0).toFixed(2)+'</div></div>';
+  var statusLabel = b.status=='paid'?'已付':b.status=='partial'?'部分付款':'未付';
+  h += '<div class="form-group"><label>状态</label>';
+  if (b.status != 'paid') {
+    h += '<button class="btn btn-success btn-sm" onclick="doPayBill('+Number(id)+')">标记为已付款</button>';
+  } else {
+    h += '<div class="locked-field" style="color:var(--green)">已付款</div>';
+  }
+  h += '</div>';
+  h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">关闭</button></div></div>';
+  M(h);
+}
+function doPayBill(id) {
+  rental('bills','update_status',{id:id,status:'paid'}).then(function(res){
+    if (res && !res.error) { CM(); loadBills(); }
+    else { alert('操作失败'); }
+  });
+}
+
+async function loadPayments() {
+  var paymentsData = await rental('payments','list') || [];
+  var h = '<div class="page-header">收款记录</div>';
+  if (paymentsData.length == 0) h += '<div class="empty-state"><div class="icon">&#x1F4B3;</div><div>暂无收款记录</div></div>';
+  else {
+    h += '<div class="table-wrap"><table><thead><tr><th>账单月份</th><th>金额</th><th>付款日期</th><th>付款方式</th><th>备注</th><th>操作</th></tr></thead><tbody>';
+    paymentsData.forEach(function(p){
+      h += '<tr><td>'+esc(p.billing_month||'')+'</td><td>¥'+Number(p.amount||0).toFixed(2)+'</td><td>'+esc(p.pay_date||'')+'</td><td>'+esc(p.pay_method||'')+'</td><td>'+esc(p.remark||'')+'</td><td><button class="btn btn-danger btn-sm" onclick="deletePayment('+Number(p.id)+')">删除</button></td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '<div class="list-meta">共 '+paymentsData.length+' 笔收款</div>';
+  renderMain(h);
+}
+function deletePayment(id) {
+  if (!confirm('确定删除该收款记录？')) return;
+  rental('payments','delete',{id:id}).then(function(res){
+    if (res && !res.error) { loadPayments(); }
+    else { alert('删除失败'); }
+  });
+}
 initLabels();
 loadBuildings();
 </script>
