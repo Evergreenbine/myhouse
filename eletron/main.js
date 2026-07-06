@@ -10,7 +10,7 @@ function createWindow() {
     height: 800,
     minWidth: 1000,
     minHeight: 700,
-    title: '租房管理',
+    title: '租房管理系统',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

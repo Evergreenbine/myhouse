@@ -20,6 +20,9 @@ class APIHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self._send_json({})
 
+    def do_POST(self):
+        return self.do_GET()
+
     def _get_empno(self):
         try:
             from local_db import load_app_user
@@ -69,8 +72,8 @@ class APIHandler(BaseHTTPRequestHandler):
                         "ai_provider": _get("ai_provider",""),
                         "ai_model": _get("ai_model","deepseek-v4-flash"),
                         "ai_persona": _get("ai_persona","warm"),
-                        "ai_nickname": _get("ai_nickname","鍝堝熀绫?),
-                        "user_nickname": _get("user_nickname","涓讳汉"),
+                        "ai_nickname": _get("ai_nickname","哈基米"),
+                        "user_nickname": _get("user_nickname","主人"),
                         "ai_avatar": _get("ai_avatar","cat_icon.png"),
                         "lunch_start": _get("lunch_start","12:05"),
                         "lunch_end": _get("lunch_end","13:05"),
