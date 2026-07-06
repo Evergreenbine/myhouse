@@ -391,14 +391,16 @@ def get_latest_reading(meter_id):
 def add_bill(contract_id, billing_month, rent_amount, water_fee=0,
              electric_fee=0, other_fee=0, remark=''):
     total = round(rent_amount + water_fee + electric_fee + other_fee, 2)
-    c = _conn()
-    c.execute("""INSERT INTO bills
+    conn = _conn()
+    cur = conn.cursor()
+    cur.execute("""INSERT INTO bills
         (contract_id,billing_month,rent_amount,water_fee,electric_fee,
          other_fee,total_amount,remark)
         VALUES (?,?,?,?,?,?,?,?)""",
         (contract_id, billing_month, rent_amount, water_fee,
          electric_fee, other_fee, total, remark))
-    c.commit(); pk = c.lastrowid; c.close()
+    pk = cur.lastrowid
+    conn.commit(); conn.close()
     return pk
 
 def get_bills(month=None, contract_id=None):
@@ -430,6 +432,34 @@ def get_bill(bid):
                   "WHERE b.id=?", (bid,)).fetchone()
     c.close()
     return dict(r) if r else None
+
+def update_bill(bid, contract_id=None, billing_month=None, rent_amount=None,
+                water_fee=None, electric_fee=None, other_fee=None, remark=None):
+    c = _conn()
+    sets, params = [], []
+    if contract_id is not None: sets.append("contract_id=?"); params.append(contract_id)
+    if billing_month is not None: sets.append("billing_month=?"); params.append(billing_month)
+    if rent_amount is not None: sets.append("rent_amount=?"); params.append(rent_amount)
+    if water_fee is not None: sets.append("water_fee=?"); params.append(water_fee)
+    if electric_fee is not None: sets.append("electric_fee=?"); params.append(electric_fee)
+    if other_fee is not None: sets.append("other_fee=?"); params.append(other_fee)
+    if remark is not None: sets.append("remark=?"); params.append(remark)
+    if sets:
+        rent = rent_amount if rent_amount is not None else 0
+        wf = water_fee if water_fee is not None else 0
+        ef = electric_fee if electric_fee is not None else 0
+        of = other_fee if other_fee is not None else 0
+        cur = c.execute("SELECT rent_amount,water_fee,electric_fee,other_fee FROM bills WHERE id=?", (bid,)).fetchone()
+        if cur:
+            r = rent_amount if rent_amount is not None else cur["rent_amount"]
+            w = water_fee if water_fee is not None else cur["water_fee"]
+            e = electric_fee if electric_fee is not None else cur["electric_fee"]
+            o = other_fee if other_fee is not None else cur["other_fee"]
+            total = round(r + w + e + o, 2)
+            sets.append("total_amount=?"); params.append(total)
+        params.append(bid)
+        c.execute("UPDATE bills SET "+",".join(sets)+" WHERE id=?", params)
+    c.commit(); c.close()
 
 def update_bill_status(bid, status):
     c = _conn()

@@ -4,7 +4,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from datetime import date, datetime, timedelta
 from user_auth import load_user_config, save_user_config
-from local_db import init as init_db, load_app_user, save_app_user, add_building, get_buildings, get_building, update_building, add_room, get_rooms, get_room, update_room, add_tenant, get_tenants, get_tenant, update_tenant, set_tenant_status, add_contract, get_contracts, get_contract, update_contract, end_contract, add_meter, get_meters, get_meter, update_meter, add_reading, get_readings, get_latest_reading, add_bill, get_bills, get_bill, update_bill_status, add_payment, get_payments, delete_payment
+from local_db import init as init_db, load_app_user, save_app_user, add_building, get_buildings, get_building, update_building, add_room, get_rooms, get_room, update_room, add_tenant, get_tenants, get_tenant, update_tenant, set_tenant_status, add_contract, get_contracts, get_contract, update_contract, end_contract, add_meter, get_meters, get_meter, update_meter, add_reading, get_readings, get_latest_reading, add_bill, get_bills, get_bill, update_bill, update_bill_status, add_payment, get_payments, delete_payment
 PORT = 18520
 
 class APIHandler(BaseHTTPRequestHandler):
@@ -131,6 +131,14 @@ class APIHandler(BaseHTTPRequestHandler):
                 return self._send_json({"logged_in": False})
 
 
+            elif path == "/api/user/config" and self.command == "POST":
+                import json
+                body = {}
+                cl = self.rfile.read(int(self.headers.get("Content-Length",0)))
+                if cl: body = json.loads(cl.decode("utf-8"))
+                save_app_user(body)
+                return self._send_json({"success":True})
+
             elif path == "/api/rental":
                 import json
                 body = {}
@@ -175,11 +183,20 @@ class APIHandler(BaseHTTPRequestHandler):
                     if action=="list": result = get_bills(data.get("month"),data.get("contract_id"))
                     elif action=="get": result = get_bill(data.get("id"))
                     elif action=="add": result = add_bill(data.get("contract_id"),data.get("billing_month",""),data.get("rent_amount",0),data.get("water_fee",0),data.get("electric_fee",0),data.get("other_fee",0),data.get("remark",""))
+                    elif action=="update": update_bill(data.get("id"),data.get("contract_id"),data.get("billing_month"),data.get("rent_amount"),data.get("water_fee"),data.get("electric_fee"),data.get("other_fee"),data.get("remark"));result={"success":True}
                     elif action=="update_status": update_bill_status(data.get("id"),data.get("status","unpaid"));result={"success":True}
                 elif table=="payments":
                     if action=="list": result = get_payments(data.get("bill_id"))
                     elif action=="add": result = add_payment(data.get("bill_id"),data.get("amount",0),data.get("pay_date"),data.get("pay_method",""),data.get("remark",""))
                     elif action=="delete": delete_payment(data.get("id"));result={"success":True}
+                elif table=="_ai":
+                    if action=="chat":
+                        try:
+                            from ai_service import ai_svc
+                            reply = ai_svc.call(data.get("prompt",""), system_prompt="你是租房管理系统助手，根据用户提供的系统数据回答问题。回答简洁实用，用中文。")
+                            result = {"reply": reply}
+                        except Exception as e:
+                            result = {"reply": "AI 服务调用失败："+str(e)}
                 if result is None: result = {"error":"unknown table or action"}
                 return self._send_json(result)
 

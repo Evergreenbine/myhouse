@@ -26,7 +26,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
 
 /* Top bar */
 #top-bar{display:flex;align-items:center;padding:0 24px;background:var(--white);border-bottom:1px solid var(--border-light);gap:0;flex-shrink:0;height:56px;box-shadow:0 1px 2px rgba(31,35,41,0.03);z-index:2}
-#app-title{font-size:16px;font-weight:600;color:var(--text);width:184px;margin-right:0;letter-spacing:-0.2px}
+#app-title{font-size:16px;font-weight:600;color:var(--text);width:184px;margin-right:0;letter-spacing:-0.2px;cursor:pointer;transition:color 0.15s}
+#app-title:hover{color:var(--blue)}
 .spacer{flex:1}
 
 /* Section tabs */
@@ -71,6 +72,12 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator,input[type="month"]:
 .soft-input{height:38px;border:1px solid #DDE6F2;border-radius:8px;padding:0 12px;font-size:14px;outline:none;width:100%;background:#F8FAFD;color:var(--text);box-shadow:inset 0 1px 2px rgba(31,35,41,0.02);transition:all 0.2s;appearance:none;-webkit-appearance:none}
 .soft-input:focus{background:var(--white);border-color:var(--blue);box-shadow:0 0 0 3px rgba(51,112,255,0.12)}
 .soft-form{padding-top:2px}
+.date-trigger{height:38px;border:1px solid #DDE6F2;border-radius:8px;padding:0 36px 0 14px;font-size:14px;width:100%;background:#F8FAFD;color:var(--text);box-shadow:inset 0 1px 2px rgba(31,35,41,0.02);transition:all 0.2s;cursor:pointer;display:flex;align-items:center;position:relative;user-select:none}
+.date-trigger:hover{background:var(--white);border-color:#C5C8CC}
+.date-trigger.filled{color:var(--text)}
+.date-trigger .date-icon{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:16px;opacity:0.35;pointer-events:none}
+.date-trigger .placeholder{color:#BBBFC4}
+.date-hidden{position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;cursor:pointer}
 
 /* Toolbar */
 .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
@@ -88,16 +95,8 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator,input[type="month"]:
 .status-dot.rented{background:var(--green)}
 .status-dot.idle{background:#C9CDD4}
 .status-cell{text-align:center;width:72px}
-.custom-select{position:relative}
-.select-trigger{height:38px;border:1px solid #DDE6F2;border-radius:8px;padding:0 34px 0 12px;background:#F8FAFD;color:var(--text);display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:14px;box-shadow:inset 0 1px 2px rgba(31,35,41,0.02);transition:all 0.2s}
-.select-trigger:hover{background:var(--white);border-color:#C9D8FF}
-.select-trigger::after{content:"";position:absolute;right:14px;top:15px;width:7px;height:7px;border-right:1.5px solid var(--text-third);border-bottom:1.5px solid var(--text-third);transform:rotate(45deg)}
-.select-menu{display:none;position:absolute;left:0;right:0;top:42px;background:var(--white);border:1px solid var(--border-light);border-radius:8px;box-shadow:var(--shadow-md);padding:6px;z-index:1001;max-height:180px;overflow-y:auto}
-.custom-select.open .select-menu{display:block}
-.select-option{padding:8px 10px;border-radius:6px;font-size:14px;cursor:pointer;color:var(--text)}
-.select-option:hover{background:#F7FAFF;color:var(--blue)}
-.select-option.active{background:var(--blue-light);color:var(--blue);font-weight:600}
-.locked-field{height:38px;border:1px solid #E2E8F2;border-radius:8px;padding:0 12px;background:#F8FAFD;color:var(--text-sec);display:flex;align-items:center;font-size:14px}
+
+.locked-field{height:32px;border:1px solid #d9d9d9;border-radius:6px;padding:0 12px;background:#F8FAFD;color:var(--text-sec);display:flex;align-items:center;font-size:14px}
 .status-switch-row{display:flex;align-items:center;gap:12px}
 .status-switch{width:46px;height:26px;border:none;border-radius:999px;background:#C9CDD4;position:relative;cursor:pointer;transition:all 0.2s}
 .status-switch::after{content:"";position:absolute;width:22px;height:22px;left:2px;top:2px;background:var(--white);border-radius:50%;box-shadow:0 1px 3px rgba(31,35,41,0.22);transition:all 0.2s}
@@ -128,7 +127,7 @@ table a:hover{text-decoration:underline}
 
 /* Modal */
 .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:1000}
-.modal{background:white;border-radius:12px;padding:28px;min-width:400px;max-width:540px;box-shadow:0 8px 40px rgba(0,0,0,0.12);max-height:85vh;overflow-y:auto}
+.modal{background:white;border-radius:12px;padding:28px;min-width:520px;max-width:640px;box-shadow:0 8px 40px rgba(0,0,0,0.12);max-height:85vh;overflow-y:auto}
 .modal-title{font-size:16px;font-weight:600;margin-bottom:20px;color:var(--text);letter-spacing:-0.2px}
 .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -144,7 +143,114 @@ table a:hover{text-decoration:underline}
 /* Empty state */
 .empty-state{text-align:center;padding:60px 20px;color:var(--text-third)}
 .empty-state .icon{font-size:48px;margin-bottom:12px;opacity:0.3}
+
+/* Rent Plan */
+.plan-filters{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.plan-filters select.soft-input,.plan-filters input.soft-input{width:auto;min-width:120px}
+.plan-building-group{margin-bottom:24px}
+.plan-building-title{font-size:15px;font-weight:600;color:var(--text);padding:8px 0 10px;border-bottom:1px solid var(--border-light);margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.plan-building-title .count{font-weight:400;font-size:12px;color:var(--text-third)}
+.plan-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.plan-card{background:var(--white);border:1px solid var(--border-light);border-radius:10px;padding:16px;position:relative;transition:all 0.15s;box-shadow:var(--shadow-sm)}
+.plan-card:hover{box-shadow:0 2px 12px rgba(0,0,0,0.06);border-color:#C8D6E5}
+.plan-card .card-dot{position:absolute;top:14px;right:14px;width:14px;height:14px;border-radius:50%;cursor:pointer;transition:all 0.15s;z-index:2}
+.plan-card .card-dot:hover{transform:scale(1.3)}
+.plan-card .card-dot.paid{background:var(--green);box-shadow:0 0 0 3px rgba(52,199,89,0.2)}
+.plan-card .card-dot.unpaid{background:var(--red);box-shadow:0 0 0 3px rgba(245,74,69,0.2)}
+.plan-card .card-dot.partial{background:var(--orange);box-shadow:0 0 0 3px rgba(255,149,0,0.2)}
+.plan-card .card-header{display:flex;align-items:center;gap:8px;margin-bottom:10px;padding-right:28px}
+.plan-card .card-tenant{font-size:14px;font-weight:600;color:var(--text)}
+.plan-card .card-room{font-size:12px;color:var(--text-third);background:var(--bg);padding:2px 8px;border-radius:4px}
+.plan-card .card-items{display:flex;flex-wrap:wrap;gap:8px 16px}
+.plan-card .card-item{font-size:12px;color:var(--text-sec)}
+.plan-card .card-item span{font-weight:500;color:var(--text)}
+.plan-card .card-total{margin-top:10px;padding-top:10px;border-top:1px dashed var(--border-light);display:flex;justify-content:space-between;align-items:center}
+.plan-card .card-total .amount{font-size:18px;font-weight:700;color:var(--blue)}
+.plan-card .card-total .status-tag{font-size:11px}
+.plan-summary{display:flex;gap:12px;margin-bottom:20px}
+.plan-card{cursor:pointer}
+
+/* Drawer */
+.drawer-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.3);z-index:999;opacity:0;visibility:hidden;transition:all 0.25s ease}
+.drawer-overlay.open{opacity:1;visibility:visible}
+.drawer{position:fixed;top:0;right:-460px;width:440px;height:100%;background:var(--white);box-shadow:-4px 0 24px rgba(0,0,0,0.1);z-index:1000;transition:right 0.25s ease;display:flex;flex-direction:column}
+.drawer.open{right:0}
+.drawer-header{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid var(--border-light);flex-shrink:0}
+.drawer-header .drawer-title{font-size:16px;font-weight:600}
+.drawer-header .drawer-close{cursor:pointer;width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;font-size:20px;color:var(--text-sec);transition:all 0.15s}
+.drawer-header .drawer-close:hover{background:var(--bg);color:var(--text)}
+.drawer-body{flex:1;overflow-y:auto;padding:20px 24px}
+.drawer-footer{padding:16px 24px;border-top:1px solid var(--border-light);flex-shrink:0;display:flex;justify-content:flex-end;gap:10px}
+.drawer-section{margin-bottom:20px}
+.drawer-section .section-label{font-size:12px;color:var(--text-sec);font-weight:500;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.drawer-section .section-label::after{content:"";flex:1;height:1px;background:var(--border-light)}
+.drawer-section .compare-row{display:flex;gap:12px}
+.drawer-section .compare-item{flex:1;background:var(--bg);border-radius:8px;padding:10px 12px}
+.drawer-section .compare-item .compare-label{font-size:11px;color:var(--text-third);margin-bottom:2px}
+.drawer-section .compare-item .compare-val{font-size:14px;font-weight:600;color:var(--text)}
+.upload-area{height:80px;border:1.5px dashed #DDE3EA;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--text-third);font-size:13px;cursor:pointer;transition:all 0.15s;position:relative;overflow:hidden}
+.upload-area:hover{border-color:var(--blue);color:var(--blue);background:#F7FAFF}
+.upload-area img{max-width:100%;max-height:100%;object-fit:contain}
+.upload-area input[type="file"]{position:absolute;inset:0;opacity:0;cursor:pointer}
+.upload-area .upload-preview{display:flex;align-items:center;gap:6px}
+.drawer .form-group{margin-bottom:14px}
+.drawer .form-group label{font-size:13px}
+.drawer input.soft-input,.drawer select.soft-input{height:36px}
+
+/* Steps */
+.drawer-steps{display:flex;align-items:center;padding:12px 24px;background:#F8FAFD;border-bottom:1px solid var(--border-light);flex-shrink:0;gap:0}
+.drawer-steps .step{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-third);flex:1;text-align:center;justify-content:center;position:relative}
+.drawer-steps .step .step-num{width:22px;height:22px;border-radius:50%;background:#DEE0E3;color:white;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0}
+.drawer-steps .step.active .step-num{background:var(--blue)}
+.drawer-steps .step.done .step-num{background:var(--green)}
+.drawer-steps .step.active{color:var(--blue);font-weight:500}
+.drawer-steps .step.done{color:var(--green)}
+.drawer-steps .step-line{width:24px;height:1px;background:#DEE0E3;flex-shrink:0}
+.drawer-steps .step.done+.step-line{background:var(--green)}
+
+/* AI Float Button */
+#ai-float-btn{position:fixed;right:24px;bottom:50px;width:52px;height:52px;border-radius:50%;background:var(--white);box-shadow:0 4px 16px rgba(51,112,255,0.2),0 2px 6px rgba(0,0,0,0.08);cursor:pointer;z-index:900;display:flex;align-items:center;justify-content:center;transition:all 0.2s;border:none;overflow:hidden}
+#ai-float-btn:hover{transform:scale(1.08);box-shadow:0 6px 24px rgba(51,112,255,0.3),0 2px 8px rgba(0,0,0,0.12)}
+#ai-float-btn img{width:36px;height:36px;object-fit:contain;border-radius:50%}
+#ai-float-btn .ai-dot{position:absolute;top:4px;right:4px;width:10px;height:10px;background:var(--green);border-radius:50%;border:2px solid var(--white)}
+
+/* AI Chat Panel */
+.ai-chat-panel{position:fixed;right:24px;bottom:110px;width:380px;height:480px;background:var(--white);border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,0.15);z-index:901;display:none;flex-direction:column;overflow:hidden}
+.ai-chat-panel.open{display:flex}
+.ai-chat-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:linear-gradient(135deg,#3370FF,#5B8DEF);color:white;flex-shrink:0}
+.ai-chat-header .ai-title{font-size:14px;font-weight:600}
+.ai-chat-header .ai-close{background:rgba(255,255,255,0.2);border:none;color:white;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center}
+.ai-chat-header .ai-close:hover{background:rgba(255,255,255,0.3)}
+.ai-chat-body{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+.ai-chat-footer{padding:12px;border-top:1px solid var(--border-light);display:flex;gap:8px;flex-shrink:0}
+.ai-chat-footer input{flex:1;height:36px;border:1px solid var(--border);border-radius:8px;padding:0 12px;font-size:13px;outline:none;background:#F8FAFD}
+.ai-chat-footer input:focus{border-color:var(--blue)}
+.ai-chat-footer button{height:36px;padding:0 16px;border-radius:8px;background:var(--blue);color:white;border:none;cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap}
+.ai-chat-footer button:hover{background:var(--blue-hover)}
+.ai-msg{padding:10px 14px;border-radius:10px;font-size:13px;max-width:85%;word-break:break-word;line-height:1.5}
+.ai-msg.user{align-self:flex-end;background:var(--blue);color:white;border-bottom-right-radius:4px}
+.ai-msg.bot{align-self:flex-start;background:#F2F4F7;color:var(--text);border-bottom-left-radius:4px}
+.ai-msg.loading{color:var(--text-third);font-style:italic}
+
+
+select.soft-input{appearance:auto;-webkit-appearance:auto;height:38px;padding:0 10px;cursor:pointer}
+.modal .soft-form{max-height:70vh;overflow-y:auto;padding-right:4px}
+
+/* Custom scrollbar */
+.modal::-webkit-scrollbar{width:4px}
+.modal::-webkit-scrollbar-track{background:transparent}
+.modal::-webkit-scrollbar-thumb{background:#D0D5DE;border-radius:4px}
+.modal::-webkit-scrollbar-thumb:hover{background:#B0B5BE}
+#main-content::-webkit-scrollbar{width:4px}
+#main-content::-webkit-scrollbar-track{background:transparent}
+#main-content::-webkit-scrollbar-thumb{background:#D0D5DE;border-radius:4px}
+#main-content::-webkit-scrollbar-thumb:hover{background:#B0B5BE}
+
+
 </style>
+
+
+
 </head>
 <body>
 <div id="app">
@@ -152,6 +258,7 @@ table a:hover{text-decoration:underline}
     <span id="app-title"></span>
     <div class="section-tab active" onclick="switchSection('basic')" id="tab-basic"></div>
     <div class="section-tab" onclick="switchSection('rent')" id="tab-rent"></div>
+    <div class="section-tab" onclick="switchSection('settings')" id="tab-settings" style="display:none"></div>
     <div class="spacer"></div>
   </div>
 
@@ -170,21 +277,51 @@ table a:hover{text-decoration:underline}
 
     <div class="section-page" id="section-rent">
       <div id="sidebar-rent">
-        <div class="side-item active" onclick="switchSideRent('bills')" id="side-bills"></div>
+        <div class="side-item active" onclick="switchSideRent('plan')" id="side-plan"></div>
+        <div class="side-item" onclick="switchSideRent('bills')" id="side-bills"></div>
         <div class="side-item" onclick="switchSideRent('payments')" id="side-payments"></div>
       </div>
       <div id="main-content-rent"></div>
+    </div>
+
+    <!-- 设置板块 -->
+    <div class="section-page" id="section-settings">
+      <div id="main-content-settings" style="flex:1;overflow-y:auto;margin:16px 18px;padding:24px 28px;background:var(--white);border:1px solid var(--border-light);border-radius:10px;box-shadow:var(--shadow-sm)"></div>
     </div>
   </div>
 
   <div id="bottom-bar"><span id="bottom-status"></span></div>
 </div>
 
+<!-- AI 悬浮按钮 -->
+<button id="ai-float-btn" onclick="toggleAIChat()" title="AI 助手">
+  <img src="ai-icon.jpg" onerror="this.style.display='none';this.parentElement.innerHTML='🤖'" style="width:36px;height:36px;object-fit:contain;border-radius:50%">
+  <span class="ai-dot"></span>
+</button>
+
+<!-- AI 对话框 -->
+<div class="ai-chat-panel" id="ai-chat-panel">
+  <div class="ai-chat-header">
+    <span class="ai-title">🤖 租房助手</span>
+    <button class="ai-close" onclick="toggleAIChat()">✕</button>
+  </div>
+  <div class="ai-chat-body" id="ai-chat-body">
+    <div class="ai-msg bot">你好！我是租房助手，可以帮你：<br>• 查询租客信息<br>• 分析缴费情况<br>• 解答租房问题<br><br>有什么可以帮你的？</div>
+  </div>
+  <div class="ai-chat-footer">
+    <input id="ai-input" placeholder="输入你的问题..." onkeydown="if(event.key==='Enter')sendAIMsg()">
+    <button onclick="sendAIMsg()">发送</button>
+  </div>
+</div>
+
 <script>
 var API = 'http://127.0.0.1:18520';
+
+
 function S(id, text) { document.getElementById(id).textContent = text; }
 function initLabels() {
   S('app-title', '\u79df\u623f\u7ba1\u7406\u7cfb\u7edf');
+  document.getElementById('app-title').onclick = function(){ switchSection('settings'); };
   S('tab-basic', '\u57fa\u7840\u4fe1\u606f');
   S('tab-rent', '\u6536\u79df\u7ba1\u7406');
   S('side-buildings', '\u697c\u680b\u4fe1\u606f');
@@ -193,6 +330,7 @@ function initLabels() {
   S('side-contracts', '\u5408\u540c\u4fe1\u606f');
   S('side-water', '\u6c34\u8868\u4fe1\u606f');
   S('side-electric', '\u7535\u8868\u4fe1\u606f');
+  S('side-plan', '\u6536\u79df\u8ba1\u5212');
   S('side-bills', '\u8d26\u5355\u7ba1\u7406');
   S('side-payments', '\u6536\u6b3e\u8bb0\u5f55');
   S('bottom-status', '\u5df2\u5c31\u7eea');
@@ -223,7 +361,8 @@ function switchSection(name) {
   document.querySelectorAll('.section-tab').forEach(function(t){ t.classList.remove('active'); });
   document.querySelectorAll('.section-page').forEach(function(p){ p.classList.remove('active'); });
   if (name == 'basic') { document.getElementById('tab-basic').classList.add('active'); document.getElementById('section-basic').classList.add('active'); switchSide('buildings'); }
-  else { document.getElementById('tab-rent').classList.add('active'); document.getElementById('section-rent').classList.add('active'); switchSideRent('bills'); }
+  else if (name == 'rent') { document.getElementById('tab-rent').classList.add('active'); document.getElementById('section-rent').classList.add('active'); switchSideRent('plan'); }
+  else if (name == 'settings') { document.getElementById('tab-settings').classList.add('active'); document.getElementById('section-settings').classList.add('active'); loadSettings(); }
   currentSection = name;
 }
 var currentSide = 'buildings';
@@ -234,15 +373,39 @@ function switchSide(name) {
   currentSide = name;
   if (name == 'buildings') loadBuildings(); else if (name == 'rooms') loadRooms(); else if (name == 'tenants') loadTenants(); else if (name == 'contracts') loadContracts(); else if (name == 'water') loadWaterMeters(); else loadElectricMeters();
 }
-var currentSideRent = 'bills';
+var currentSideRent = 'plan';
 function switchSideRent(name) {
   document.querySelectorAll('#sidebar-rent .side-item').forEach(function(s){ s.classList.remove('active'); });
-  document.getElementById(name == 'bills' ? 'side-bills' : 'side-payments').classList.add('active');
+  var map = {plan:'side-plan', bills:'side-bills', payments:'side-payments'};
+  document.getElementById(map[name]).classList.add('active');
   currentSideRent = name;
-  if (name == 'bills') loadBills(); else loadPayments();
+  if (name == 'plan') loadRentPlan();
+  else if (name == 'bills') loadBills();
+  else loadPayments();
 }
-function renderMain(html) { if (currentSection == 'basic') document.getElementById('main-content').innerHTML = html; else document.getElementById('main-content-rent').innerHTML = html; }
+function renderMain(html) {
+  if (currentSection == 'basic') document.getElementById('main-content').innerHTML = html;
+  else if (currentSection == 'rent') document.getElementById('main-content-rent').innerHTML = html;
+  else document.getElementById('main-content-settings').innerHTML = html;
+}
 function esc(v) { return String(v == null ? '' : v).replace(/[&<>'"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]; }); }
+function dateField(id, value, type) {
+  type = type || 'date';
+  var cls = value ? ' filled' : '';
+  var label = value || '<span class="placeholder">'+(type=='month'?'请选择月份':'请选择日期')+'</span>';
+  var h = '<div class="date-trigger'+cls+'" id="dt_'+id+'" onclick="document.getElementById(\''+id+'\').showPicker()"><span class="date-text">'+label+'</span><span class="date-icon">'+(type=='month'?'📆':'📅')+'</span>';
+  h += '<input class="date-hidden" type="'+type+'" id="'+id+'" value="'+value+'" onchange="datePicked(\''+id+'\')"></div>';
+  return h;
+}
+function datePicked(id) {
+  var input = document.getElementById(id);
+  var dt = document.getElementById('dt_'+id);
+  if (dt && input) {
+    var val = input.value;
+    dt.querySelector('.date-text').innerHTML = val || '<span class="placeholder">请选择日期</span>';
+    dt.classList.toggle('filled', !!val);
+  }
+}
 var buildingQuery = '';
 var currentRoomBuildingId = null;
 var currentTenantBuildingId = null;
@@ -308,30 +471,6 @@ async function loadRooms() {
   renderMain(h);
 }
 function switchRoomBuilding(id) { currentRoomBuildingId = id; loadRooms(); }
-function roomBuildingPicker(buildings, selectedId) {
-  var selected = buildings.find(function(b){ return Number(b.id) == Number(selectedId); }) || buildings[0];
-  var h = '<input type="hidden" id="f_room_building" value="'+Number(selected.id)+'"><div class="custom-select" id="room_building_picker"><div class="select-trigger" onclick="toggleRoomBuildingMenu()"><span id="room_building_label">'+esc(selected.name)+'</span></div><div class="select-menu">';
-  buildings.forEach(function(b){
-    var active = Number(b.id) == Number(selected.id) ? ' active' : '';
-    h += '<div class="select-option'+active+'" onclick="selectRoomBuildingFromPicker('+Number(b.id)+', this)">'+esc(b.name)+'</div>';
-  });
-  return h + '</div></div>';
-}
-function toggleRoomBuildingMenu() {
-  var el = document.getElementById('room_building_picker');
-  if (el) el.classList.toggle('open');
-}
-function selectRoomBuildingFromPicker(id, optionEl) {
-  var name = optionEl.textContent;
-  document.getElementById('f_room_building').value = id;
-  document.getElementById('room_building_label').textContent = name;
-  var picker = document.getElementById('room_building_picker');
-  if (picker) {
-    picker.classList.remove('open');
-    picker.querySelectorAll('.select-option').forEach(function(o){ o.classList.remove('active'); });
-    optionEl.classList.add('active');
-  }
-}
 function roomStatusSwitch(selected) {
   var rented = selected == 'rented';
   return '<input type="hidden" id="f_room_status" value="'+(rented ? 'rented' : 'idle')+'"><div class="status-switch-row"><button class="status-switch '+(rented ? 'rented' : '')+'" id="room_status_switch" onclick="toggleRoomStatus()" type="button"></button><span class="status-switch-label" id="room_status_label">'+(rented ? '\u5728\u79df' : '\u95f2\u7f6e')+'</span></div>';
@@ -349,7 +488,16 @@ async function showAddRoom() {
   var buildings = await rental('buildings','list') || [];
   if (buildings.length == 0) { alert('\u8bf7\u5148\u6dfb\u52a0\u697c\u680b'); return; }
   var selectedId = currentRoomBuildingId || buildings[0].id;
-  M('<div class="soft-form"><div class="form-group"><label>\u6240\u5c5e\u697c\u680b</label>'+roomBuildingPicker(buildings, selectedId)+'</div><div class="form-group"><label>\u697c\u5c42</label><input class="soft-input" id="f_room_floor" type="number" value="1" min="-9" placeholder="\u5982\uff1a1"></div><div class="form-group"><label>\u623f\u95f4\u53f7</label><input class="soft-input" id="f_room_number" placeholder="\u5982\uff1a101"></div><div class="form-group"><label>\u72b6\u6001</label>'+roomStatusSwitch('idle')+'</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doAddRoom()">\u6dfb\u52a0</button></div></div>');
+  var h = '<div class="soft-form"><div class="form-group"><label>\u6240\u5c5e\u697c\u680b</label><select class="soft-input" id="f_room_building">';
+  buildings.forEach(function(b){
+    h += '<option value="'+Number(b.id)+'"'+(Number(b.id)==Number(selectedId)?' selected':'')+'>'+esc(b.name)+'</option>';
+  });
+  h += '</select></div>';
+  h += '<div class="form-group"><label>\u697c\u5c42</label><input class="soft-input" id="f_room_floor" type="number" value="1" min="-9" placeholder="\u5982\uff1a1"></div>';
+  h += '<div class="form-group"><label>\u623f\u95f4\u53f7</label><input class="soft-input" id="f_room_number" placeholder="\u5982\uff1a101"></div>';
+  h += '<div class="form-group"><label>\u72b6\u6001</label>'+roomStatusSwitch('idle')+'</div>';
+  h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doAddRoom()">\u6dfb\u52a0</button></div></div>';
+  M(h);
 }
 function doAddRoom() {
   var buildingId = document.getElementById('f_room_building').value;
@@ -367,18 +515,25 @@ async function editRoom(id) {
   var room = await rental('rooms','get',{id:id});
   if (!room || room.error) { alert('\u672a\u627e\u5230\u8be5\u623f\u95f4'); return; }
   var buildings = await rental('buildings','list') || [];
-  M('<div class="modal-title">\u7f16\u8f91\u623f\u95f4</div><div class="soft-form"><div class="form-group"><label>\u6240\u5c5e\u697c\u680b</label>'+roomBuildingPicker(buildings, room.building_id)+'</div><div class="form-group"><label>\u697c\u5c42</label><input class="soft-input" id="f_room_floor" type="number" value="'+esc(room.floor || 1)+'" min="-9"></div><div class="form-group"><label>\u623f\u95f4\u53f7</label><input class="soft-input" id="f_room_number" value="'+esc(room.room_number)+'"></div><div class="form-group"><label>\u72b6\u6001</label>'+roomStatusSwitch(room.status || 'idle')+'</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doUpdateRoom('+Number(id)+')">\u4fdd\u5b58</button></div></div>');
+  var bld = buildings.find(function(b){ return Number(b.id)==Number(room.building_id); });
+  var bldName = bld ? bld.name : '\u672a\u77e5\u697c\u680b';
+  var h = '<div class="modal-title">\u7f16\u8f91\u623f\u95f4</div><div class="soft-form">';
+  h += '<div class="form-group"><label>\u6240\u5c5e\u697c\u680b</label><div class="locked-field">'+esc(bldName)+'</div></div>';
+  h += '<div class="form-group"><label>\u697c\u5c42</label><input class="soft-input" id="f_room_floor" type="number" value="'+esc(room.floor || 1)+'" min="-9"></div>';
+  h += '<div class="form-group"><label>\u623f\u95f4\u53f7</label><input class="soft-input" id="f_room_number" value="'+esc(room.room_number)+'"></div>';
+  h += '<div class="form-group"><label>\u72b6\u6001</label>'+roomStatusSwitch(room.status || 'idle')+'</div>';
+  h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doUpdateRoom('+Number(id)+')">\u4fdd\u5b58</button></div></div>';
+  M(h);
 }
 function doUpdateRoom(id) {
-  var buildingId = document.getElementById('f_room_building').value;
   var floor = parseInt(document.getElementById('f_room_floor').value, 10);
   var roomNumber = document.getElementById('f_room_number').value.trim();
   var status = document.getElementById('f_room_status').value;
   if (isNaN(floor)) { alert('\u8bf7\u8f93\u5165\u697c\u5c42'); return; }
   if (!roomNumber) { alert('\u8bf7\u8f93\u5165\u623f\u95f4\u53f7'); return; }
-  rental('rooms','update',{id:id, building_id:buildingId, floor:floor, room_number:roomNumber, status:status}).then(function(res){
+  rental('rooms','update',{id:id, floor:floor, room_number:roomNumber, status:status}).then(function(res){
     if (!res || res.error) { alert((res && res.error) || '\u4fdd\u5b58\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u540e\u7aef\u670d\u52a1'); return; }
-    currentRoomBuildingId = buildingId; CM(); loadRooms();
+    CM(); loadRooms();
   });
 }
 async function loadTenants() {
@@ -516,20 +671,20 @@ async function showAddContract() {
   var tenants = await rental('tenants','list',{active_only:true,building_id:bid}) || [];
   if (tenants.length == 0) { alert('该楼栋没有租客，请先添加租客'); return; }
   if (rooms.length == 0) { alert('该楼栋没有房间，请先添加房间'); return; }
-  var h = '<div class="soft-form">';
+  var h = '<div class="modal-title">新签合同</div><div class="soft-form"><div class="grid2">';
   h += '<div class="form-group"><label>租客</label><select class="soft-input" id="f_contract_tenant">';
   tenants.forEach(function(t){ h += '<option value="'+Number(t.id)+'">'+esc(t.name)+'</option>'; });
   h += '</select></div>';
   h += '<div class="form-group"><label>房间</label><select class="soft-input" id="f_contract_room">';
-  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'">'+esc(r.room_number)+'</option>'; });
+  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'">'+esc(r.room_number||'')+'</option>'; });
   h += '</select></div>';
-  h += '<div class="form-group"><label>合同开始</label><input class="soft-input" type="date" id="f_contract_start"></div>';
-  h += '<div class="form-group"><label>合同结束</label><input class="soft-input" type="date" id="f_contract_end"></div>';
-  h += '<div class="form-group"><label>月租（元）</label><input class="soft-input" type="number" id="f_contract_rent" placeholder="0.00"></div>';
-  h += '<div class="form-group"><label>水价（元/吨）</label><input class="soft-input" type="number" id="f_contract_water" placeholder="0.00"></div>';
-  h += '<div class="form-group"><label>电价（元/度）</label><input class="soft-input" type="number" id="f_contract_electric" placeholder="0.00"></div>';
-  h += '<div class="form-group"><label>保证金（元）</label><input class="soft-input" type="number" id="f_contract_deposit" placeholder="0.00"></div>';
-  h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddContract()">保存</button></div></div>';
+  h += '<div class="form-group"><label>合同开始</label>'+dateField('f_contract_start','')+'</div>';
+  h += '<div class="form-group"><label>合同结束</label>'+dateField('f_contract_end','')+'</div>';
+  h += '<div class="form-group"><label>月租（元）</label><input class="soft-input" type="number" id="f_contract_rent" placeholder="0.00" step="0.01"></div>';
+  h += '<div class="form-group"><label>保证金（元）</label><input class="soft-input" type="number" id="f_contract_deposit" placeholder="0.00" step="0.01"></div>';
+  h += '<div class="form-group"><label>水费单价（元/吨）</label><input class="soft-input" type="number" id="f_contract_water" placeholder="0.00" step="0.01"></div>';
+  h += '<div class="form-group"><label>电费单价（元/度）</label><input class="soft-input" type="number" id="f_contract_electric" placeholder="0.00" step="0.01"></div>';
+  h += '</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddContract()">保存</button></div></div>';
   M(h);
 }
 function doAddContract() {
@@ -557,20 +712,20 @@ async function editContract(id) {
   var tenants = await rental('tenants','list',{active_only:true,building_id:bid}) || [];
   var allTenants = await rental('tenants','list',{active_only:false,building_id:bid}) || [];
   allTenants.forEach(function(t){ if(!tenants.some(function(x){return Number(x.id)==Number(t.id)})) tenants.push(t); });
-  var h = '<div class="soft-form">';
+  var h = '<div class="modal-title">编辑合同</div><div class="soft-form"><div class="grid2">';
   h += '<div class="form-group"><label>租客</label><select class="soft-input" id="f_contract_tenant">';
   tenants.forEach(function(t){ h += '<option value="'+Number(t.id)+'"'+(Number(t.id)==Number(c.tenant_id)?' selected':'')+'>'+esc(t.name)+'</option>'; });
   h += '</select></div>';
   h += '<div class="form-group"><label>房间</label><select class="soft-input" id="f_contract_room">';
-  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'"'+(Number(r.id)==Number(c.room_id)?' selected':'')+'>'+esc(r.room_number)+'</option>'; });
+  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'"'+(Number(r.id)==Number(c.room_id)?' selected':'')+'>'+esc(r.room_number||'')+'</option>'; });
   h += '</select></div>';
-  h += '<div class="form-group"><label>合同开始</label><input class="soft-input" type="date" id="f_contract_start" value="'+esc(c.start_date||'')+'"></div>';
-  h += '<div class="form-group"><label>合同结束</label><input class="soft-input" type="date" id="f_contract_end" value="'+esc(c.end_date||'')+'"></div>';
-  h += '<div class="form-group"><label>月租（元）</label><input class="soft-input" type="number" id="f_contract_rent" value="'+Number(c.monthly_rent||0)+'"></div>';
-  h += '<div class="form-group"><label>水价（元/吨）</label><input class="soft-input" type="number" id="f_contract_water" value="'+Number(c.water_unit_price||0)+'"></div>';
-  h += '<div class="form-group"><label>电价（元/度）</label><input class="soft-input" type="number" id="f_contract_electric" value="'+Number(c.electric_unit_price||0)+'"></div>';
-  h += '<div class="form-group"><label>保证金（元）</label><input class="soft-input" type="number" id="f_contract_deposit" value="'+Number(c.deposit||0)+'"></div>';
-  h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doUpdateContract('+Number(id)+')">保存</button></div></div>';
+  h += '<div class="form-group"><label>合同开始</label>'+dateField('f_contract_start',esc(c.start_date||''))+'</div>';
+  h += '<div class="form-group"><label>合同结束</label>'+dateField('f_contract_end',esc(c.end_date||''))+'</div>';
+  h += '<div class="form-group"><label>月租（元）</label><input class="soft-input" type="number" id="f_contract_rent" value="'+Number(c.monthly_rent||0)+'" step="0.01"></div>';
+  h += '<div class="form-group"><label>保证金（元）</label><input class="soft-input" type="number" id="f_contract_deposit" value="'+Number(c.deposit||0)+'" step="0.01"></div>';
+  h += '<div class="form-group"><label>水费单价（元/吨）</label><input class="soft-input" type="number" id="f_contract_water" value="'+Number(c.water_unit_price||0)+'" step="0.01"></div>';
+  h += '<div class="form-group"><label>电费单价（元/度）</label><input class="soft-input" type="number" id="f_contract_electric" value="'+Number(c.electric_unit_price||0)+'" step="0.01"></div>';
+  h += '</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doUpdateContract('+Number(id)+')">保存</button></div></div>';
   M(h);
 }
 function doUpdateContract(id) {
@@ -591,7 +746,6 @@ function doUpdateContract(id) {
     CM(); loadContracts();
   });
 }
-
 async function loadWaterMeters() {
   var buildings = await rental('buildings','list') || [];
   if (buildings.length == 0) {
@@ -752,6 +906,92 @@ function doUpdateElectricMeter(id) {
   });
 }
 
+// ====== 收租计划 ======
+var planYear = new Date().getFullYear();
+var planMonth = new Date().getMonth() + 1;
+var planBuildingId = null;
+
+async function loadRentPlan() {
+  var buildings = await rental('buildings','list') || [];
+  if (buildings.length == 0) {
+    renderMain('<div class="empty-state"><div class="icon">📊</div><div>请先添加楼栋和合同</div></div>');
+    return;
+  }
+  if (!planBuildingId || !buildings.some(function(b){ return Number(b.id)==Number(planBuildingId); })) planBuildingId = buildings[0] ? buildings[0].id : null;
+
+  var h = '';
+  // 楼栋 tab 栏
+  h += '<div class="tab-action-row"><div class="building-tabs">';
+  buildings.forEach(function(b){
+    var active = Number(b.id)==Number(planBuildingId) ? ' active' : '';
+    h += '<button class="building-tab'+active+'" onclick="planBuildingId='+Number(b.id)+';loadRentPlan()">'+esc(b.name)+'</button>';
+  });
+  h += '</div></div>';
+
+  // 获取合同和账单
+  var contracts = await rental('contracts','list',{active_only:true,building_id:planBuildingId||undefined}) || [];
+  var billingMonth = planYear + '-' + String(planMonth).padStart(2,'0');
+  var bills = await rental('bills','list',{month:billingMonth}) || [];
+
+  // 按楼栋分组
+  var groups = {};
+  contracts.forEach(function(c){
+    var bid = c.building_id || 'other';
+    if (!groups[bid]) groups[bid] = { building: buildings.find(function(b){ return Number(b.id)==Number(bid); }), contracts: [] };
+    groups[bid].contracts.push(c);
+  });
+
+  // 汇总
+  var totalRent = 0, paidCount = 0, unpaidCount = 0;
+  contracts.forEach(function(c){
+    totalRent += Number(c.monthly_rent||0);
+    var bill = bills.find(function(b){ return Number(b.contract_id)==Number(c.id); });
+    if (bill && bill.status=='paid') paidCount++;
+    else unpaidCount++;
+  });
+
+  h += '<div class="summary-row"><div class="stat-card"><div>当月应收</div><div class="stat-val" style="color:var(--blue)">¥'+totalRent.toFixed(2)+'</div></div>';
+  h += '<div class="stat-card"><div>已收</div><div class="stat-val" style="color:var(--green)">'+paidCount+'户</div></div>';
+  h += '<div class="stat-card"><div>未收</div><div class="stat-val" style="color:var(--red)">'+unpaidCount+'户</div></div></div>';
+
+  if (contracts.length == 0) {
+    h += '<div class="empty-state"><div class="icon">📋</div><div>当前筛选条件下没有合同</div></div>';
+  } else {
+    var bldKeys = Object.keys(groups);
+    bldKeys.forEach(function(bid){
+      var g = groups[bid];
+      var bname = g.building ? g.building.name : '';
+      h += '<div class="plan-building-group">';
+      h += '<div class="plan-cards">';
+      g.contracts.forEach(function(c){
+        var bill = bills.find(function(b){ return Number(b.contract_id)==Number(c.id); });
+        var status = bill ? bill.status : 'unpaid';
+        var dotClass = status=='paid'?'paid':status=='partial'?'partial':'unpaid';
+        var statusLabel = status=='paid'?'已收':status=='partial'?'部分':'未收';
+        var statusCls = status=='paid'?'tag-green':status=='partial'?'tag-orange':'tag-red';
+        var waterFee = bill ? Number(bill.water_fee||0) : 0;
+        var electricFee = bill ? Number(bill.electric_fee||0) : 0;
+        var otherFee = bill ? Number(bill.other_fee||0) : 0;
+        var totalAmount = bill ? Number(bill.total_amount||0) : Number(c.monthly_rent||0);
+        var bid = bill ? bill.id : 0;
+        h += '<div class="plan-card" onclick="openPlanDrawer('+Number(c.id)+','+Number(c.tenant_id)+','+Number(c.room_id)+','+bid+')">';
+        h += '<div class="card-dot '+dotClass+'" title="'+statusLabel+'" onclick="event.stopPropagation();markPaid('+Number(c.id)+','+bid+','+Number(c.tenant_id)+','+Number(c.monthly_rent||0)+','+waterFee+','+electricFee+','+otherFee+')"></div>';
+        h += '<div class="card-header"><span class="card-tenant">'+esc(c.tenant_name||'')+'</span><span class="card-room">'+esc(c.room_number||'')+'</span></div>';
+        h += '<div class="card-items">';
+        h += '<div class="card-item">月租 <span>¥'+Number(c.monthly_rent||0).toFixed(2)+'</span></div>';
+        h += '<div class="card-item">水费 <span>¥'+waterFee.toFixed(2)+'</span></div>';
+        h += '<div class="card-item">电费 <span>¥'+electricFee.toFixed(2)+'</span></div>';
+        if (otherFee > 0) h += '<div class="card-item">杂费 <span>¥'+otherFee.toFixed(2)+'</span></div>';
+        h += '</div>';
+        h += '<div class="card-total"><span style="font-size:12px;color:var(--text-sec)">本月应收</span><span class="amount">¥'+totalAmount.toFixed(2)+'</span><span class="tag '+statusCls+' status-tag">'+statusLabel+'</span></div>';
+        h += '</div>';
+      });
+      h += '</div></div>';
+    });
+  }
+  renderMain(h);
+}
+
 async function loadBills() {
   var buildings = await rental('buildings','list') || [];
   if (buildings.length == 0) {
@@ -787,7 +1027,7 @@ async function showAddBill() {
   h += '<div class="form-group"><label>合同</label><select class="soft-input" id="f_bill_contract">';
   contracts.forEach(function(c){ h += '<option value="'+Number(c.id)+'">'+esc(c.tenant_name||'')+' - '+esc(c.room_number||'')+'</option>'; });
   h += '</select></div>';
-  h += '<div class="form-group"><label>账期（月份）</label><input class="soft-input" type="month" id="f_bill_month"></div>';
+  h += '<div class="form-group"><label>账期（月份）</label>'+dateField('f_bill_month','','month')+'</div>';
   h += '<div class="form-group"><label>房租</label><input class="soft-input" type="number" id="f_bill_rent" placeholder="0.00"></div>';
   h += '<div class="form-group"><label>水费</label><input class="soft-input" type="number" id="f_bill_water" placeholder="0.00"></div>';
   h += '<div class="form-group"><label>电费</label><input class="soft-input" type="number" id="f_bill_electric" placeholder="0.00"></div>';
@@ -863,6 +1103,411 @@ function deletePayment(id) {
     else { alert('删除失败'); }
   });
 }
+
+// ====== 抽屉：编辑账单明细 ======
+var drawerUploads = {};
+
+async function openPlanDrawer(contractId, tenantId, roomId, billId) {
+  var contract = await rental('contracts','get',{id:contractId});
+  if (!contract || contract.error) { alert('未找到合同'); return; }
+
+  // 获取上月账单
+  var lastMonth = planMonth == 1 ? 12 : planMonth - 1;
+  var lastYear = planMonth == 1 ? planYear - 1 : planYear;
+  var lastBilling = lastYear + '-' + String(lastMonth).padStart(2,'0');
+  var lastBills = await rental('bills','list',{month:lastBilling}) || [];
+  var lastBill = lastBills.find(function(b){ return Number(b.contract_id)==Number(contractId); });
+
+  // 获取当月账单
+  var billingMonth = planYear + '-' + String(planMonth).padStart(2,'0');
+  var curBills = await rental('bills','list',{month:billingMonth}) || [];
+  var curBill = curBills.find(function(b){ return Number(b.contract_id)==Number(contractId); }) || {};
+
+  drawerUploads = { water: null, electric: null };
+  var curStep = (curBill.id && curBill.status == 'paid') ? 3 : (curBill.id ? 2 : 1);
+
+  var h = '<div class="drawer-header"><span class="drawer-title">'+esc(contract.tenant_name||'')+' · '+esc(contract.room_number||'')+'</span><button class="drawer-close" onclick="closeDrawer()">✕</button></div>';
+  // 步骤条
+  h += '<div class="drawer-steps">';
+  h += '<div class="step '+(curStep>=1?'done':'active')+'"><span class="step-num">1</span>录入</div>';
+  h += '<div class="step-line"></div>';
+  h += '<div class="step '+(curStep>=2?'done':curStep==2?'active':'')+'"><span class="step-num">2</span>生成账单</div>';
+  h += '<div class="step-line"></div>';
+  h += '<div class="step '+(curStep>=3?'done':'')+'"><span class="step-num">3</span>完成收款</div>';
+  h += '</div>';
+  h += '<div class="drawer-body">';
+
+  // 月租（锁定）
+  h += '<div class="drawer-section"><div class="section-label">📋 月租</div>';
+  h += '<div class="locked-field">¥'+Number(contract.monthly_rent||0).toFixed(2)+' / 月</div></div>';
+
+  // 水费对比
+  h += '<div class="drawer-section"><div class="section-label">💧 水费</div>';
+  h += '<div class="compare-row">';
+  h += '<div class="compare-item"><div class="compare-label">上月读数</div><div class="compare-val">'+(lastBill?Number(lastBill.water_fee||0).toFixed(2):'—')+' 元</div></div>';
+  h += '<div class="compare-item"><div class="compare-label">上月电费</div><div class="compare-val">'+(lastBill?Number(lastBill.electric_fee||0).toFixed(2):'—')+' 元</div></div>';
+  h += '</div>';
+  h += '<div class="form-group"><label>本月水费（元）</label><input class="soft-input" type="number" id="draw_water" value="'+Number(curBill.water_fee||0)+'" step="0.01" placeholder="0.00"></div>';
+  h += '<div class="form-group"><label>水表照片</label><div class="upload-area" id="upload_water" onclick="document.getElementById(\'file_water\').click()"><input type="file" id="file_water" accept="image/*" onchange="previewUpload(\'water\',this)"><div class="upload-preview" id="preview_water">📷 点击上传水表照片</div></div></div>';
+
+  // 电费
+  h += '<div class="drawer-section"><div class="section-label">⚡ 电费</div>';
+  h += '<div class="form-group"><label>本月电费（元）</label><input class="soft-input" type="number" id="draw_electric" value="'+Number(curBill.electric_fee||0)+'" step="0.01" placeholder="0.00"></div>';
+  h += '<div class="form-group"><label>电表照片</label><div class="upload-area" id="upload_electric" onclick="document.getElementById(\'file_electric\').click()"><input type="file" id="file_electric" accept="image/*" onchange="previewUpload(\'electric\',this)"><div class="upload-preview" id="preview_electric">📷 点击上传电表照片</div></div></div>';
+
+  // 杂项
+  h += '<div class="drawer-section">';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span class="section-label" style="margin-bottom:0">📝 杂项</span><div style="display:flex;gap:4px"><button class="btn btn-sm btn-outline" onclick="addMiscRow()" style="padding:2px 8px;font-size:16px;line-height:1">+</button><button class="btn btn-sm btn-outline" onclick="removeCheckedMisc()" style="padding:2px 8px;font-size:16px;line-height:1">−</button></div></div>';
+  h += '<div class="table-wrap"><table id="misc_table"><thead><tr><th style="width:24px"></th><th>项目</th><th style="width:110px">金额（元）</th></tr></thead><tbody>';
+  h += '<tr><td><input type="checkbox" class="misc-check"></td><td><input class="soft-input misc-name" placeholder="如：维修费" style="height:32px"></td><td><input class="soft-input misc-amount" type="number" step="0.01" placeholder="0.00" style="height:32px" oninput="calcDrawerTotal()"></td></tr>';
+  h += '<tr><td><input type="checkbox" class="misc-check"></td><td><input class="soft-input misc-name" placeholder="如：卫生费" style="height:32px"></td><td><input class="soft-input misc-amount" type="number" step="0.01" placeholder="0.00" style="height:32px" oninput="calcDrawerTotal()"></td></tr>';
+  h += '</tbody></table></div>';
+  h += '</div>';
+
+  // 合计
+  var total = Number(contract.monthly_rent||0) + Number(curBill.water_fee||0) + Number(curBill.electric_fee||0) + Number(curBill.other_fee||0);
+  h += '<div class="drawer-section"><div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--blue-light);border-radius:8px"><span style="font-weight:500">合计应收</span><span style="font-size:20px;font-weight:700;color:var(--blue)" id="draw_total">¥'+total.toFixed(2)+'</span></div></div>';
+
+  h += '</div>';
+  h += '<div class="drawer-footer">';
+  h += '<button class="btn btn-outline" onclick="closeDrawer()">取消</button>';
+  if (curBill.status == 'paid') {
+    h += '<span class="tag tag-green" style="padding:6px 14px;font-size:13px">✓ 已收款</span>';
+  } else {
+    h += '<button class="btn btn-primary" onclick="saveDrawer('+Number(contractId)+','+Number(curBill.id||0)+')">💾 保存数据</button>';
+    h += '<button class="btn btn-success" onclick="generateBillImage('+Number(contractId)+','+Number(curBill.id||0)+')">📋 生成账单图片</button>';
+  }
+  h += '</div>';
+
+  // 渲染抽屉
+  var overlay = document.getElementById('_drawer_overlay');
+  if (!overlay) {
+    overlay = document.createElement('div'); overlay.id = '_drawer_overlay'; overlay.className = 'drawer-overlay';
+    overlay.onclick = closeDrawer;
+    document.body.appendChild(overlay);
+  }
+  var drawer = document.getElementById('_drawer');
+  if (!drawer) {
+    drawer = document.createElement('div'); drawer.id = '_drawer'; drawer.className = 'drawer';
+    document.body.appendChild(drawer);
+  }
+  drawer.innerHTML = h;
+  drawer.onclick = function(e){ e.stopPropagation(); };
+  setTimeout(function(){ overlay.classList.add('open'); drawer.classList.add('open'); }, 10);
+
+  // 监听金额变化实时计算合计
+  var calcDrawerTotal = function(){
+    var w = parseFloat(document.getElementById('draw_water').value)||0;
+    var e = parseFloat(document.getElementById('draw_electric').value)||0;
+    var o = 0;
+    document.querySelectorAll('.misc-amount').forEach(function(el){ o += parseFloat(el.value)||0; });
+    var t = Number(contract.monthly_rent||0) + w + e + o;
+    document.getElementById('draw_total').textContent = '¥'+t.toFixed(2);
+  };
+  document.getElementById('draw_water').oninput = calcDrawerTotal;
+  document.getElementById('draw_electric').oninput = calcDrawerTotal;
+  window.calcDrawerTotal = calcDrawerTotal;
+}
+
+function addMiscRow() {
+  var tbody = document.querySelector('#misc_table tbody');
+  if (!tbody) return;
+  var tr = document.createElement('tr');
+  tr.innerHTML = '<td><input type="checkbox" class="misc-check"></td><td><input class="soft-input misc-name" placeholder="项目名称" style="height:32px"></td><td><input class="soft-input misc-amount" type="number" step="0.01" placeholder="0.00" style="height:32px" oninput="calcDrawerTotal()"></td>';
+  tbody.appendChild(tr);
+}
+
+function removeCheckedMisc() {
+  document.querySelectorAll('#misc_table tbody .misc-check:checked').forEach(function(cb){
+    var tr = cb.closest('tr');
+    if (tr && document.querySelectorAll('#misc_table tbody tr').length > 1) tr.remove();
+  });
+  calcDrawerTotal();
+}
+
+function previewUpload(type, input) {
+  var file = input.files[0];
+  if (!file) return;
+  drawerUploads[type] = file;
+  var preview = document.getElementById('preview_'+type);
+  var reader = new FileReader();
+  reader.onload = function(e){
+    preview.innerHTML = '<img src="'+e.target.result+'" style="height:70px;border-radius:4px"> <span style="font-size:11px">'+file.name+'</span>';
+  };
+  reader.readAsDataURL(file);
+}
+
+function closeDrawer() {
+  var overlay = document.getElementById('_drawer_overlay');
+  var drawer = document.getElementById('_drawer');
+  if (overlay) overlay.classList.remove('open');
+  if (drawer) drawer.classList.remove('open');
+}
+
+async function saveDrawer(contractId, billId) {
+  var waterFee = parseFloat(document.getElementById('draw_water').value)||0;
+  var electricFee = parseFloat(document.getElementById('draw_electric').value)||0;
+
+  // 从杂项表格收集
+  var miscItems = [];
+  var otherFee = 0;
+  document.querySelectorAll('#misc_table tbody tr').forEach(function(tr){
+    var nameEl = tr.querySelector('.misc-name');
+    var amtEl = tr.querySelector('.misc-amount');
+    var name = nameEl ? nameEl.value.trim() : '';
+    var amt = amtEl ? (parseFloat(amtEl.value)||0) : 0;
+    if (name || amt > 0) { miscItems.push({name:name, amount:amt}); otherFee += amt; }
+  });
+
+  var remark = JSON.stringify(miscItems);
+  var billingMonth = planYear + '-' + String(planMonth).padStart(2,'0');
+
+  var contract = await rental('contracts','get',{id:contractId});
+  var rentAmount = Number(contract.monthly_rent||0);
+
+  var data = {
+    contract_id: contractId,
+    billing_month: billingMonth,
+    rent_amount: rentAmount,
+    water_fee: waterFee,
+    electric_fee: electricFee,
+    other_fee: otherFee,
+    remark: remark
+  };
+
+  var res;
+  if (billId && billId > 0) {
+    data.id = billId;
+    res = await rental('bills','update',data);
+  } else {
+    res = await rental('bills','add',data);
+  }
+
+  if (res && !res.error) {
+    closeDrawer(); loadRentPlan();
+  } else {
+    alert((res && res.error) || '保存失败');
+  }
+}
+
+// 生成账单图片
+async function generateBillImage(contractId, billId) {
+  // 先保存数据
+  if (billId <= 0) {
+    alert('请先保存数据');
+    return;
+  }
+  var bill = await rental('bills','get',{id:billId});
+  var contract = await rental('contracts','get',{id:contractId});
+  if (!bill || bill.error || !contract || contract.error) { alert('获取账单数据失败'); return; }
+
+  var canvas = document.createElement('canvas');
+  canvas.width = 750;
+  canvas.height = 1000;
+  var ctx = canvas.getContext('2d');
+
+  // 背景
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, 750, 1000);
+
+  // 顶部蓝色条
+  ctx.fillStyle = '#3370FF';
+  ctx.fillRect(0, 0, 750, 8);
+
+  // 标题
+  ctx.fillStyle = '#1F2329';
+  ctx.font = 'bold 32px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillText('🏠 租金账单', 40, 60);
+
+  // 月份
+  ctx.font = '16px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillStyle = '#646A73';
+  ctx.fillText(bill.billing_month || '', 40, 95);
+
+  // 分隔线
+  ctx.strokeStyle = '#E8EAED';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(40, 115); ctx.lineTo(710, 115); ctx.stroke();
+
+  // 租客信息
+  ctx.fillStyle = '#8F959E'; ctx.font = '13px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillText('租客', 40, 145);
+  ctx.fillStyle = '#1F2329'; ctx.font = 'bold 16px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillText(contract.tenant_name || '', 40, 168);
+
+  ctx.fillStyle = '#8F959E'; ctx.font = '13px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillText('房间', 200, 145);
+  ctx.fillStyle = '#1F2329'; ctx.font = 'bold 16px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillText(contract.room_number || '', 200, 168);
+
+  // 费用明细表
+  var y = 210;
+  ctx.fillStyle = '#F5F6F7';
+  ctx.fillRect(40, y, 670, 32);
+  ctx.fillStyle = '#646A73'; ctx.font = 'bold 13px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillText('项目', 60, y+22);
+  ctx.fillText('金额（元）', 600, y+22);
+  y += 32;
+
+  var items = [
+    {name:'月租', val:Number(bill.rent_amount||0)},
+    {name:'水费', val:Number(bill.water_fee||0)},
+    {name:'电费', val:Number(bill.electric_fee||0)}
+  ];
+  // 解析杂项
+  try { var misc = JSON.parse(bill.remark||'[]'); misc.forEach(function(m){ items.push({name:m.name||'杂项', val:Number(m.amount||0)}); }); } catch(e){ if(Number(bill.other_fee||0)>0) items.push({name:'杂费', val:Number(bill.other_fee||0)}); }
+
+  items.forEach(function(item, i){
+    if (i%2==0) { ctx.fillStyle = '#FAFBFC'; ctx.fillRect(40, y, 670, 28); }
+    ctx.fillStyle = '#1F2329'; ctx.font = '14px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.fillText(item.name, 60, y+20);
+    ctx.fillText('¥'+Number(item.val).toFixed(2), 600, y+20);
+    y += 28;
+  });
+
+  // 合计
+  ctx.strokeStyle = '#E8EAED'; ctx.beginPath(); ctx.moveTo(40, y+6); ctx.lineTo(710, y+6); ctx.stroke();
+  y += 20;
+  ctx.fillStyle = '#3370FF'; ctx.font = 'bold 20px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillText('合计', 60, y);
+  ctx.font = 'bold 24px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  var tw = ctx.measureText('¥'+Number(bill.total_amount||0).toFixed(2)).width;
+  ctx.fillText('¥'+Number(bill.total_amount||0).toFixed(2), 710-tw, y);
+
+  // 底部
+  y = 880;
+  ctx.fillStyle = '#8F959E'; ctx.font = '12px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('租房管理系统 · 自动生成账单', 375, y);
+  ctx.fillText(new Date().toLocaleDateString('zh-CN')+' 生成', 375, y+20);
+  ctx.textAlign = 'left';
+
+  // 转图片复制
+  canvas.toBlob(async function(blob){
+    try {
+      await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
+      alert('账单图片已复制到剪贴板，可直接粘贴发送！');
+    } catch(e) {
+      // 降级：打开新窗口显示图片
+      var w = window.open('','_blank','width=780,height=1050');
+      w.document.write('<img src="'+canvas.toDataURL()+'" style="width:100%"><p style="text-align:center;color:#666">右键复制图片，或截图发送</p>');
+    }
+  }, 'image/png');
+}
+
+// 点击圆点标记已收
+async function markPaid(contractId, billId, tenantId, rentAmount, waterFee, electricFee, otherFee) {
+  if (billId <= 0) { alert('请先在抽屉中编辑并保存账单明细'); return; }
+  var bill = await rental('bills','get',{id:billId});
+  if (!bill || bill.error) { alert('账单不存在'); return; }
+  if (bill.status == 'paid') {
+    if (!confirm('该账单已标记为已收，确定要重新标记吗？')) return;
+  } else {
+    if (!confirm('确认该租客本月已收款？将自动生成收款记录。')) return;
+  }
+  // 更新账单状态
+  await rental('bills','update_status',{id:billId, status:'paid'});
+  // 生成收款记录
+  var total = Number(bill.total_amount||0);
+  var today = new Date().toISOString().split('T')[0];
+  await rental('payments','add',{bill_id:billId, amount:total, pay_date:today, pay_method:'微信', remark:'收租计划标记已收'});
+  loadRentPlan();
+}
+
+// ====== AI 助手 ======
+function toggleAIChat() {
+  document.getElementById('ai-chat-panel').classList.toggle('open');
+  if (document.getElementById('ai-chat-panel').classList.contains('open')) {
+    document.getElementById('ai-input').focus();
+  }
+}
+
+async function sendAIMsg() {
+  var input = document.getElementById('ai-input');
+  var msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+
+  var body = document.getElementById('ai-chat-body');
+  // 用户消息
+  body.innerHTML += '<div class="ai-msg user">'+esc(msg)+'</div>';
+  body.innerHTML += '<div class="ai-msg bot loading" id="ai-loading">思考中...</div>';
+  body.scrollTop = body.scrollHeight;
+
+  // 收集上下文数据
+  var buildings = await rental('buildings','list') || [];
+  var tenants = await rental('tenants','list',{active_only:false}) || [];
+  var contracts = await rental('contracts','list',{active_only:true}) || [];
+  var bills = await rental('bills','list',{month:''}) || [];
+
+  var context = '当前租房系统数据概览：\n';
+  context += '- 楼栋：'+buildings.length+'栋（'+buildings.map(function(b){return b.name}).join('、')+'）\n';
+  context += '- 租客：'+tenants.length+'人\n';
+  context += '- 有效合同：'+contracts.length+'份\n';
+  context += '- 近期账单：'+bills.length+'单\n';
+  contracts.forEach(function(c){
+    context += '  · '+c.tenant_name+' 租住 '+c.room_number+'，月租¥'+c.monthly_rent+'\n';
+  });
+
+  var prompt = '你是租房管理系统助手。根据以下数据回答用户问题。回答要简洁实用。\n\n'+context+'\n\n用户问题：'+msg;
+
+  try {
+    var res = await api('/api/rental', {method:'POST', body: JSON.stringify({table:'_ai', action:'chat', data:{prompt:prompt}})});
+    var el = document.getElementById('ai-loading');
+    if (el) el.remove();
+    body.innerHTML += '<div class="ai-msg bot">'+(res && res.reply ? esc(res.reply) : '抱歉，AI 服务暂时不可用')+'</div>';
+  } catch(e) {
+    var el = document.getElementById('ai-loading');
+    if (el) el.remove();
+    body.innerHTML += '<div class="ai-msg bot">抱歉，暂时无法连接 AI 服务</div>';
+  }
+  body.scrollTop = body.scrollHeight;
+}
+
+// ====== 系统设置 ======
+async function loadSettings() {
+  // 读取当前配置
+  var cfg = await api('/api/user/config') || {};
+  var h = '<div class="page-title">系统设置</div>';
+  h += '<div style="max-width:560px">';
+
+  // AI 模型设置
+  h += '<div class="drawer-section"><div class="section-label">🤖 AI 模型设置</div>';
+  h += '<div class="form-group"><label>AI 供应商</label><select class="soft-input" id="set_provider">';
+  var providers = {'deepseek':'DeepSeek','openai':'OpenAI','zhipu':'智谱','custom':'自定义'};
+  for (var k in providers) { h += '<option value="'+k+'"'+(cfg.ai_provider==k?' selected':'')+'>'+providers[k]+'</option>'; }
+  h += '</select></div>';
+  h += '<div class="form-group"><label>模型名称</label><input class="soft-input" id="set_model" value="'+esc(cfg.ai_model||'deepseek-v4-flash')+'" placeholder="如 deepseek-v4-flash"></div>';
+  h += '<div class="form-group"><label>DeepSeek API Key</label><input class="soft-input" id="set_apikey" value="'+esc(cfg.api_key||'')+'" placeholder="sk-..."></div>';
+  h += '<div class="form-group"><label>OpenAI API Key</label><input class="soft-input" id="set_openai_key" value="'+esc(cfg.openai_key||'')+'" placeholder="sk-..."></div>';
+  h += '<div class="form-group"><label>智谱 API Key</label><input class="soft-input" id="set_zhipu_key" value="'+esc(cfg.zhipu_key||'')+'" placeholder="..."></div>';
+  h += '<div class="form-group"><label>自定义 API 地址</label><input class="soft-input" id="set_custom_url" value="'+esc(cfg.custom_base_url||'')+'" placeholder="https://..."></div>';
+  h += '<div class="form-group"><label>自定义 API Key</label><input class="soft-input" id="set_custom_key" value="'+esc(cfg.custom_api_key||'')+'" placeholder="..."></div>';
+  h += '<div class="form-group"><label>自定义模型名</label><input class="soft-input" id="set_custom_model" value="'+esc(cfg.custom_model||'')+'" placeholder="gpt-4o"></div>';
+  h += '</div>';
+
+  h += '<div style="margin-top:20px"><button class="btn btn-primary" onclick="saveSettings()">💾 保存设置</button>';
+  h += ' <button class="btn btn-outline" onclick="switchSection(\'basic\')">← 返回</button></div>';
+  h += '</div>';
+  renderMain(h);
+}
+
+async function saveSettings() {
+  var data = {
+    ai_provider: document.getElementById('set_provider').value,
+    ai_model: document.getElementById('set_model').value.trim(),
+    api_key: document.getElementById('set_apikey').value.trim(),
+    openai_key: document.getElementById('set_openai_key').value.trim(),
+    zhipu_key: document.getElementById('set_zhipu_key').value.trim(),
+    custom_base_url: document.getElementById('set_custom_url').value.trim(),
+    custom_api_key: document.getElementById('set_custom_key').value.trim(),
+    custom_model: document.getElementById('set_custom_model').value.trim()
+  };
+  var res = await api('/api/user/config', {method:'POST', body:JSON.stringify(data)});
+  if (res && !res.error) { alert('设置已保存'); switchSection('basic'); }
+  else { alert('保存失败'); }
+}
+
 initLabels();
 loadBuildings();
 </script>
