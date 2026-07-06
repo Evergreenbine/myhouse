@@ -30,44 +30,14 @@ class UserConfig:
     """用户配置"""
     empno: str = ""           # 工号，如 1103141
     empname: str = ""         # 姓名，如 吴钦腾
-    car_plate: str = "粤S0Q780"       # 车牌
-    base_salary: float = 20.5 # 加班工资基数（时薪）
     password_hash: str = ""   # 密码哈希
     mac_address: str = ""     # 绑定 MAC
-    lunch_start: str = "12:05"
-    lunch_end: str = "13:05"
-    dinner_start: str = "17:30"
-    dinner_end: str = "18:00"
     api_key: str = ""
     ai_model: str = "deepseek-v4-flash"
     ai_persona: str = "warm"
     is_registered: bool = False
     is_logged_in: bool = False  # 是否已登录
     avatar_path: str = "cat_icon.png"  # 头像路径
-    water_enabled: bool = True         # 8杯水提醒开关
-    water_count: int = 0               # 今日已喝水杯数
-    water_date: str = ""               # 喝水记录日期
-    water_ml: int = 300                # 每杯水毫升数
-    water_history: str = "{}"          # 喝水历史 JSON: {"2026-06-12": 5, ...}
-    eye_enabled: bool = True           # 护眼提醒开关
-    eye_rest_minutes: int = 0          # 今日已休息分钟数
-    eye_date: str = ""                 # 护眼记录日期
-    overtime_notes: str = "{}"         # 加班记录 JSON: {"2026-06-12": "上线发版", ...}
-    focus_start: str = ""              # 专注开始时间 ISO
-    focus_minutes_today: int = 0       # 今日专注分钟数
-    focus_date: str = ""               # 专注记录日期
-
-    @property
-    def weekday_rate(self) -> float:
-        return self.base_salary * 1.5
-
-    @property
-    def weekend_rate(self) -> float:
-        return self.base_salary * 2.0
-
-    @property
-    def makeup_rate(self) -> float:
-        return self.base_salary * 3.0
 
 
 def load_user_config() -> Optional[UserConfig]:
@@ -88,14 +58,12 @@ def save_user_config(config: UserConfig):
         json.dump(asdict(config), f, ensure_ascii=False, indent=2)
 
 
-def register(empno: str, empname: str, car_plate: str, base_salary: float, password: str) -> UserConfig:
+def register(empno: str, empname: str, password: str) -> UserConfig:
     """注册新用户，绑定当前 MAC"""
     mac = get_mac_address()
     config = UserConfig(
         empno=empno,
         empname=empname,
-        car_plate=car_plate,
-        base_salary=base_salary,
         password_hash=hash_password(password),
         mac_address=mac,
         is_registered=True,

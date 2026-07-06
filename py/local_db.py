@@ -11,62 +11,91 @@ def _conn():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     c = sqlite3.connect(DB_PATH)
     c.row_factory = sqlite3.Row
+    c.execute('PRAGMA foreign_keys=ON')
     return c
 
 def init():
     c = _conn()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS ot_reasons (
-            date TEXT PRIMARY KEY,
-            reason TEXT DEFAULT ''
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS user_config (
-            key TEXT PRIMARY KEY,
-            value TEXT DEFAULT ''
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS app_user (
-            key TEXT PRIMARY KEY,
-            value TEXT DEFAULT ''
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS chat_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT DEFAULT '',
-            messages TEXT DEFAULT '[]',
-            created_at TEXT DEFAULT ''
-        )
-    """)
-    # migrate: add archived column if not exists
+    
+    # 基础设施表
+    c.execute("CREATE TABLE IF NOT EXISTS user_config (key TEXT PRIMARY KEY, value TEXT DEFAULT '')")
+    c.execute("CREATE TABLE IF NOT EXISTS app_user (key TEXT PRIMARY KEY, value TEXT DEFAULT '')")
+    c.execute("""CREATE TABLE IF NOT EXISTS chat_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT DEFAULT '',
+        messages TEXT DEFAULT '[]', created_at TEXT DEFAULT ''
+    )""")
     try:
-        c.execute('ALTER TABLE chat_history ADD COLUMN archived INTEGER DEFAULT 0')
+        c.execute("ALTER TABLE chat_history ADD COLUMN archived INTEGER DEFAULT 0")
     except:
         pass
+
+    # 租房管理表
+    c.execute("""CREATE TABLE IF NOT EXISTS buildings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+        address TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS rooms (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        building_id INTEGER NOT NULL REFERENCES buildings(id),
+        room_number TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS tenants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+        phone TEXT DEFAULT '', id_card TEXT DEFAULT '',
+        status TEXT DEFAULT 'active',
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS contracts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+        room_id INTEGER NOT NULL REFERENCES rooms(id),
+        start_date TEXT NOT NULL, end_date TEXT DEFAULT '',
+        monthly_rent REAL DEFAULT 0,
+        water_unit_price REAL DEFAULT 0,
+        electric_unit_price REAL DEFAULT 0,
+        deposit REAL DEFAULT 0, contract_file TEXT DEFAULT '',
+        status TEXT DEFAULT 'active',
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS meters (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        room_id INTEGER NOT NULL REFERENCES rooms(id),
+        type TEXT NOT NULL CHECK(type IN ('water','electric')),
+        meter_no TEXT DEFAULT '', init_reading REAL DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS meter_readings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        meter_id INTEGER NOT NULL REFERENCES meters(id),
+        reading_date TEXT NOT NULL, reading REAL NOT NULL,
+        photo TEXT DEFAULT '', remark TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS bills (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        contract_id INTEGER NOT NULL REFERENCES contracts(id),
+        billing_month TEXT NOT NULL,
+        rent_amount REAL DEFAULT 0, water_fee REAL DEFAULT 0,
+        electric_fee REAL DEFAULT 0, other_fee REAL DEFAULT 0,
+        total_amount REAL DEFAULT 0, status TEXT DEFAULT 'unpaid',
+        remark TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bill_id INTEGER NOT NULL REFERENCES bills(id),
+        amount REAL NOT NULL,
+        pay_date TEXT DEFAULT (date('now')),
+        pay_method TEXT DEFAULT '', remark TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+
+    c.execute("DROP TABLE IF EXISTS ot_reasons")
     c.commit()
     c.close()
 
-# === 加班理由 ===
-def get_reason(date_str):
-    c = _conn()
-    row = c.execute("SELECT reason FROM ot_reasons WHERE date=?", (date_str,)).fetchone()
-    c.close()
-    return row["reason"] if row else ""
-
-def save_reason(date_str, reason):
-    c = _conn()
-    c.execute("INSERT OR REPLACE INTO ot_reasons (date, reason) VALUES (?,?)", (date_str, reason.strip()))
-    c.commit()
-    c.close()
-
-def get_all_reasons():
-    c = _conn()
-    rows = c.execute("SELECT date, reason FROM ot_reasons").fetchall()
-    c.close()
-    return {r["date"]: r["reason"] for r in rows}
 
 # === 用户配置 ===
 def get_config(key, default=""):
@@ -105,42 +134,7 @@ def load_app_user() -> dict:
     return {r["key"]: r["value"] for r in rows}
 
 
-def get_all_reasons_for_month(month):
-    """获取指定月份(YYYY-MM)的所有加班理由"""
-    c = _conn()
-    try:
-        rows = c.execute("SELECT date, reason FROM ot_reasons WHERE date LIKE ?", (month + '%',)).fetchall()
-        return {row[0]: row[1] for row in rows}
-    finally:
-        c.close()
-def migrate_json_to_sqlite():
-    """将 user_config.json 中的基本配置迁移到 app_user 表（仅首次）"""
-    existing = load_app_user()
-    if existing:
-        return
-    _JSON_PATH = os.path.join(os.path.dirname(__file__), "user_config.json")
-    if not os.path.exists(_JSON_PATH):
-        return
-    try:
-        with open(_JSON_PATH, "r", encoding="utf-8") as f:
-            old = json.load(f)
-        keys = ["empno","empname","car_plate","base_salary","lunch_start","lunch_end",
-                "dinner_start","dinner_end","api_key","ai_model","ai_persona",
-                "water_enabled","eye_enabled","water_ml","avatar_path"]
-        data = {k: old[k] for k in keys if k in old}
-        if data:
-            save_app_user(data)
-            print("Migration: copied user_config.json to app_user table")
-    except Exception as e:
-        print(f"Migration skipped: {e}")
 
-# === 聊天历史 ===
-def save_chat(conv_id, title, messages, archived=0):
-    c = _conn()
-    c.execute("INSERT OR REPLACE INTO chat_history (id, title, messages, created_at, archived) VALUES (?,?,?,?,?)",
-              (conv_id, title, json.dumps(messages, ensure_ascii=False), datetime.now().isoformat(), 1 if archived else 0))
-    c.commit()
-    c.close()
 
 def load_chats():
     c = _conn()
@@ -154,17 +148,265 @@ def delete_chat(conv_id):
     c.commit()
     c.close()
 
-# 启动时初始化 + 迁移旧数据
-init()
-migrate_json_to_sqlite()
-_JSON_FILE = os.path.join(os.path.dirname(__file__), "data", "ot_reasons.json")
-if os.path.exists(_JSON_FILE):
-    try:
-        with open(_JSON_FILE, 'r', encoding='utf-8') as f:
-            old = json.load(f)
-        for dt, reason in old.items():
-            save_reason(dt, reason)
-        os.rename(_JSON_FILE, _JSON_FILE + ".bak")
-        print("Migration: moved ot_reasons.json to SQLite")
-    except:
-        pass
+
+# ============================================================
+# 租房管理 CRUD
+# ============================================================
+
+def add_building(name, address=''):
+    c = _conn()
+    c.execute("INSERT INTO buildings (name, address) VALUES (?,?)", (name, address))
+    c.commit(); pk = c.lastrowid; c.close()
+    return pk
+
+def get_buildings():
+    c = _conn()
+    rows = c.execute("SELECT * FROM buildings ORDER BY id").fetchall()
+    c.close()
+    return [dict(r) for r in rows]
+
+def get_building(bid):
+    c = _conn()
+    r = c.execute("SELECT * FROM buildings WHERE id=?", (bid,)).fetchone()
+    c.close()
+    return dict(r) if r else None
+
+def update_building(bid, name, address):
+    c = _conn()
+    c.execute("UPDATE buildings SET name=?,address=? WHERE id=?", (name, address, bid))
+    c.commit(); c.close()
+
+def delete_building(bid):
+    c = _conn()
+    c.execute("DELETE FROM buildings WHERE id=?", (bid,))
+    c.commit(); c.close()
+
+def add_room(building_id, room_number):
+    c = _conn()
+    c.execute("INSERT INTO rooms (building_id, room_number) VALUES (?,?)", (building_id, room_number))
+    c.commit(); pk = c.lastrowid; c.close()
+    return pk
+
+def get_rooms(building_id=None):
+    c = _conn()
+    if building_id:
+        rows = c.execute("SELECT r.*,b.name AS building_name FROM rooms r JOIN buildings b ON r.building_id=b.id WHERE r.building_id=? ORDER BY r.room_number", (building_id,)).fetchall()
+    else:
+        rows = c.execute("SELECT r.*,b.name AS building_name FROM rooms r JOIN buildings b ON r.building_id=b.id ORDER BY b.id,r.room_number").fetchall()
+    c.close()
+    return [dict(r) for r in rows]
+
+def get_room(rid):
+    c = _conn()
+    r = c.execute("SELECT * FROM rooms WHERE id=?", (rid,)).fetchone()
+    c.close()
+    return dict(r) if r else None
+
+def add_tenant(name, phone='', id_card=''):
+    c = _conn()
+    c.execute("INSERT INTO tenants (name, phone, id_card) VALUES (?,?,?)", (name, phone, id_card))
+    c.commit(); pk = c.lastrowid; c.close()
+    return pk
+
+def get_tenants(active_only=True):
+    c = _conn()
+    if active_only:
+        rows = c.execute("SELECT * FROM tenants WHERE status='active' ORDER BY id").fetchall()
+    else:
+        rows = c.execute("SELECT * FROM tenants ORDER BY id").fetchall()
+    c.close()
+    return [dict(r) for r in rows]
+
+def get_tenant(tid):
+    c = _conn()
+    r = c.execute("SELECT * FROM tenants WHERE id=?", (tid,)).fetchone()
+    c.close()
+    return dict(r) if r else None
+
+def update_tenant(tid, name, phone, id_card):
+    c = _conn()
+    c.execute("UPDATE tenants SET name=?,phone=?,id_card=? WHERE id=?", (name, phone, id_card, tid))
+    c.commit(); c.close()
+
+def set_tenant_status(tid, status):
+    c = _conn()
+    c.execute("UPDATE tenants SET status=? WHERE id=?", (status, tid))
+    c.commit(); c.close()
+
+def add_contract(tenant_id, room_id, start_date, end_date='',
+                 monthly_rent=0, water_price=0, electric_price=0,
+                 deposit=0, contract_file='', status='active'):
+    c = _conn()
+    c.execute("""INSERT INTO contracts
+        (tenant_id,room_id,start_date,end_date,monthly_rent,
+         water_unit_price,electric_unit_price,deposit,contract_file,status)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (tenant_id, room_id, start_date, end_date, monthly_rent,
+         water_price, electric_price, deposit, contract_file, status))
+    c.commit(); pk = c.lastrowid; c.close()
+    return pk
+
+def get_contracts(active_only=True):
+    c = _conn()
+    sql = ("SELECT c.*,t.name AS tenant_name,t.phone AS tenant_phone,"
+           "r.room_number,b.name AS building_name "
+           "FROM contracts c "
+           "JOIN tenants t ON c.tenant_id=t.id "
+           "JOIN rooms r ON c.room_id=r.id "
+           "JOIN buildings b ON r.building_id=b.id")
+    if active_only:
+        sql += " WHERE c.status='active'"
+    sql += " ORDER BY c.id DESC"
+    rows = c.execute(sql).fetchall()
+    c.close()
+    return [dict(r) for r in rows]
+
+def get_contract(cid):
+    c = _conn()
+    r = c.execute("SELECT c.*,t.name AS tenant_name,t.phone AS tenant_phone,"
+                  "r.room_number,b.name AS building_name "
+                  "FROM contracts c "
+                  "JOIN tenants t ON c.tenant_id=t.id "
+                  "JOIN rooms r ON c.room_id=r.id "
+                  "JOIN buildings b ON r.building_id=b.id "
+                  "WHERE c.id=?", (cid,)).fetchone()
+    c.close()
+    return dict(r) if r else None
+
+def end_contract(cid):
+    c = _conn()
+    c.execute("UPDATE contracts SET status='ended' WHERE id=?", (cid,))
+    c.commit(); c.close()
+
+def add_meter(room_id, mtype, meter_no='', init_reading=0.0):
+    c = _conn()
+    c.execute("INSERT INTO meters (room_id,type,meter_no,init_reading) VALUES (?,?,?,?)",
+              (room_id, mtype, meter_no, init_reading))
+    c.commit(); pk = c.lastrowid; c.close()
+    return pk
+
+def get_meters(room_id=None):
+    c = _conn()
+    if room_id:
+        rows = c.execute("SELECT m.*,r.room_number FROM meters m JOIN rooms r ON m.room_id=r.id WHERE m.room_id=? ORDER BY m.type", (room_id,)).fetchall()
+    else:
+        rows = c.execute("SELECT m.*,r.room_number,b.name AS building_name FROM meters m JOIN rooms r ON m.room_id=r.id JOIN buildings b ON r.building_id=b.id ORDER BY r.id,m.type").fetchall()
+    c.close()
+    return [dict(r) for r in rows]
+
+def get_meter(mid):
+    c = _conn()
+    r = c.execute("SELECT * FROM meters WHERE id=?", (mid,)).fetchone()
+    c.close()
+    return dict(r) if r else None
+
+def add_reading(meter_id, reading_date, reading, photo='', remark=''):
+    c = _conn()
+    c.execute("INSERT INTO meter_readings (meter_id,reading_date,reading,photo,remark) VALUES (?,?,?,?,?)",
+              (meter_id, reading_date, reading, photo, remark))
+    c.commit(); pk = c.lastrowid; c.close()
+    return pk
+
+def get_readings(meter_id=None, limit=100):
+    c = _conn()
+    if meter_id:
+        rows = c.execute("SELECT mr.*,m.meter_no,m.type FROM meter_readings mr JOIN meters m ON mr.meter_id=m.id WHERE mr.meter_id=? ORDER BY mr.reading_date DESC LIMIT ?", (meter_id, limit)).fetchall()
+    else:
+        rows = c.execute("SELECT mr.*,m.meter_no,m.type,r.room_number FROM meter_readings mr JOIN meters m ON mr.meter_id=m.id JOIN rooms r ON m.room_id=r.id ORDER BY mr.reading_date DESC LIMIT ?", (limit,)).fetchall()
+    c.close()
+    return [dict(r) for r in rows]
+
+def get_latest_reading(meter_id):
+    c = _conn()
+    r = c.execute("SELECT * FROM meter_readings WHERE meter_id=? ORDER BY reading_date DESC LIMIT 1", (meter_id,)).fetchone()
+    c.close()
+    return dict(r) if r else None
+
+def add_bill(contract_id, billing_month, rent_amount, water_fee=0,
+             electric_fee=0, other_fee=0, remark=''):
+    total = round(rent_amount + water_fee + electric_fee + other_fee, 2)
+    c = _conn()
+    c.execute("""INSERT INTO bills
+        (contract_id,billing_month,rent_amount,water_fee,electric_fee,
+         other_fee,total_amount,remark)
+        VALUES (?,?,?,?,?,?,?,?)""",
+        (contract_id, billing_month, rent_amount, water_fee,
+         electric_fee, other_fee, total, remark))
+    c.commit(); pk = c.lastrowid; c.close()
+    return pk
+
+def get_bills(month=None, contract_id=None):
+    c = _conn()
+    where, params = [], []
+    if month:
+        where.append("b.billing_month=?"); params.append(month)
+    if contract_id:
+        where.append("b.contract_id=?"); params.append(contract_id)
+    wh = (" WHERE " + " AND ".join(where)) if where else ''
+    sql = ("SELECT b.*,t.name AS tenant_name,r.room_number,bld.name AS building_name "
+           "FROM bills b "
+           "JOIN contracts c ON b.contract_id=c.id "
+           "JOIN tenants t ON c.tenant_id=t.id "
+           "JOIN rooms r ON c.room_id=r.id "
+           "JOIN buildings bld ON r.building_id=bld.id") + wh + " ORDER BY b.id DESC"
+    rows = c.execute(sql, params).fetchall()
+    c.close()
+    return [dict(r) for r in rows]
+
+def get_bill(bid):
+    c = _conn()
+    r = c.execute("SELECT b.*,t.name AS tenant_name,r.room_number,bld.name AS building_name "
+                  "FROM bills b "
+                  "JOIN contracts c ON b.contract_id=c.id "
+                  "JOIN tenants t ON c.tenant_id=t.id "
+                  "JOIN rooms r ON c.room_id=r.id "
+                  "JOIN buildings bld ON r.building_id=bld.id "
+                  "WHERE b.id=?", (bid,)).fetchone()
+    c.close()
+    return dict(r) if r else None
+
+def update_bill_status(bid, status):
+    c = _conn()
+    c.execute("UPDATE bills SET status=? WHERE id=?", (status, bid))
+    c.commit(); c.close()
+
+def add_payment(bill_id, amount, pay_date=None, pay_method='', remark=''):
+    if pay_date is None:
+        from datetime import date; pay_date = date.today().isoformat()
+    c = _conn()
+    c.execute("INSERT INTO payments (bill_id,amount,pay_date,pay_method,remark) VALUES (?,?,?,?,?)",
+              (bill_id, amount, pay_date, pay_method, remark))
+    c.commit(); pk = c.lastrowid; c.close()
+    _update_bill_payment_status(bill_id)
+    return pk
+
+def get_payments(bill_id=None):
+    c = _conn()
+    if bill_id:
+        rows = c.execute("SELECT p.*,b.billing_month FROM payments p JOIN bills b ON p.bill_id=b.id WHERE p.bill_id=? ORDER BY p.pay_date", (bill_id,)).fetchall()
+    else:
+        rows = c.execute("SELECT p.*,b.billing_month,b.total_amount FROM payments p JOIN bills b ON p.bill_id=b.id ORDER BY p.pay_date DESC LIMIT 100").fetchall()
+    c.close()
+    return [dict(r) for r in rows]
+
+def delete_payment(pid):
+    c = _conn()
+    r = c.execute("SELECT bill_id FROM payments WHERE id=?", (pid,)).fetchone()
+    bill_id = r["bill_id"] if r else None
+    c.execute("DELETE FROM payments WHERE id=?", (pid,))
+    c.commit(); c.close()
+    if bill_id:
+        _update_bill_payment_status(bill_id)
+
+def _update_bill_payment_status(bill_id):
+    c = _conn()
+    bill = c.execute("SELECT total_amount FROM bills WHERE id=?", (bill_id,)).fetchone()
+    if not bill: c.close(); return
+    paid = c.execute("SELECT COALESCE(SUM(amount),0) FROM payments WHERE bill_id=?", (bill_id,)).fetchone()[0]
+    if paid >= bill["total_amount"]:
+        c.execute("UPDATE bills SET status='paid' WHERE id=?", (bill_id,))
+    elif paid > 0:
+        c.execute("UPDATE bills SET status='partial' WHERE id=?", (bill_id,))
+    else:
+        c.execute("UPDATE bills SET status='unpaid' WHERE id=?", (bill_id,))
+    c.commit(); c.close()

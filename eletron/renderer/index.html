@@ -1,354 +1,351 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>哈基米曼波</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-:root{--blue:#3370FF;--blue-light:#E8F0FE;--red:#F54A45;--green:#34C759;--orange:#FF9500;--text:#1F2329;--text-sec:#646A73;--text-third:#8F959E;--border:#E5E6EB;--bg:#F2F3F5;--white:#FFFFFF}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);overflow:hidden;height:100vh}
-#app{display:flex;flex-direction:column;height:100vh}
-#top-bar{display:flex;align-items:center;padding:10px 20px;background:var(--white);border-bottom:1px solid var(--border);gap:8px;flex-shrink:0}
-#avatar{width:40px;height:40px;border-radius:20px;cursor:pointer;object-fit:cover;background:var(--blue-light)}
-#month-label{font-size:20px;font-weight:bold;cursor:default}
-#quote-text{font-size:11px;color:var(--text-third);font-style:italic;padding:4px 12px;background:var(--bg);border-radius:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#countdown{font-size:16px;font-weight:bold;color:var(--blue)}
-#weather{font-size:13px;color:var(--text-sec)}
-.spacer{flex:1}
-#tabs{display:flex;background:var(--white);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto}
-.tab{padding:12px 14px;cursor:pointer;font-size:13px;color:var(--text-sec);border-bottom:2px solid transparent;white-space:nowrap;transition:all 0.2s}
-.tab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:500}
-.tab:hover{color:var(--blue)}
-#content{flex:1;overflow:hidden;display:flex;flex-direction:column}
-.tab-page{display:none;flex-direction:column;flex:1;overflow-y:auto;padding:16px;box-sizing:border-box}
-.tab-page.active{display:flex}
-#bottom-bar{display:flex;align-items:center;padding:5px 16px;background:var(--white);border-top:1px solid var(--border);font-size:11px;flex-shrink:0;gap:12px}
-#bottom-status{color:var(--text-third)}
-#bottom-ai{color:var(--text-sec);font-style:italic;flex:1}
-.card{background:var(--white);border-radius:12px;border:1px solid var(--border);padding:16px;margin-bottom:12px}
-.card-title{font-size:14px;font-weight:bold;color:var(--text-sec);margin-bottom:8px}
-#attendance-layout{display:flex;gap:12px}
-#attendance-left{flex:1;display:flex;flex-direction:column;gap:12px;min-height:0}
-#attendance-right{width:420px;flex-shrink:0;overflow-y:auto}
-.calendar{width:100%;height:100%;table-layout:fixed;border-collapse:separate;border-spacing:4px;background:transparent;border-radius:16px}
-.calendar td,.calendar th{text-align:center;vertical-align:middle;position:relative;font-weight:400}
-.calendar th{font-size:12px;color:var(--text-third);height:26px}
-.calendar td{border-radius:12px;cursor:pointer;transition:all 0.2s;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06),0 1px 2px rgba(0,0,0,0.04)}
-.calendar td:hover{box-shadow:0 2px 8px rgba(0,0,0,0.1);transform:translateY(-1px)}
-.calendar td.today{box-shadow:inset 0 0 0 1.5px var(--blue),0 1px 3px rgba(51,112,255,0.1)}
-.calendar td.selected{box-shadow:inset 0 0 0 2.5px var(--blue),0 0 0 4px rgba(51,112,255,0.12)}
-.calendar td.empty{background:transparent;box-shadow:none;cursor:default}
-.calendar td.empty:hover{box-shadow:none;transform:none}
-.calendar td .day-num{font-size:15px;display:block;line-height:1.4}
-.calendar td.weekend .day-num{color:var(--blue)}
-.calendar td.holiday .day-num{color:var(--red)}
-.calendar td .day-label{font-size:10px;line-height:1;margin-top:1px}
-.calendar td .day-label.missed{color:var(--red)}
-.calendar td .day-label.ot{color:var(--blue)}
-.calendar td .day-label.holiday-label{color:var(--red);font-size:9px}
-.cal-day:hover{border-color:var(--blue)}
-.cal-day.today{background:var(--blue-light);font-weight:bold}
-.cal-day.selected{border:2px solid var(--blue)!important}
-.cal-day.weekend{color:var(--blue)}
-.cal-day.holiday{background:#FFF1F0;color:var(--red)}
-.cal-day.makeup{background:#FFF7E6}
-.cal-day .label{font-size:11px;margin-top:2px}
-.cal-day .label.missed{color:var(--red)}
-.cal-day .label.ot{color:var(--blue)}
-.cal-day .label.holiday-label{color:var(--red);font-size:10px}
-.info-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:13px;border-bottom:0.5px solid var(--border)}
-.info-row .key{color:var(--text-sec)}
-.info-row .val{font-weight:500}
-.btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:4px;transition:all 0.15s}
-.btn-primary{background:var(--blue);color:white}.btn-primary:hover{opacity:0.9}
-.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}.btn-outline:hover{background:var(--bg)}
-.btn-danger{background:var(--red);color:white}.btn-success{background:var(--green);color:white}
-.btn-sm{padding:4px 10px;font-size:12px}
-input[type="text"],input[type="number"],input[type="password"],select,textarea{height:40px;border:1px solid var(--border);border-radius:10px;padding:0 12px;font-size:14px;outline:none;width:100%;background:var(--white);transition:border-color 0.2s}
-textarea{height:auto;padding:10px 12px;resize:vertical;min-height:60px}
-input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(51,112,255,0.1)}
-input[type="date"],input[type="time"]{height:40px;border:1px solid var(--border);border-radius:10px;padding:0 12px;font-size:14px;outline:none;background:var(--white);cursor:pointer;color:var(--text);font-family:inherit}
-input[type="date"]:focus,input[type="time"]:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(51,112,255,0.1)}
-input[type="date"]::-webkit-calendar-picker-indicator,input[type="time"]::-webkit-calendar-picker-indicator{cursor:pointer;opacity:0.6;transition:opacity 0.2s}
-input[type="date"]:hover::-webkit-calendar-picker-indicator,input[type="time"]:hover::-webkit-calendar-picker-indicator{opacity:1}
-.chat-list{display:flex;flex-direction:column;gap:8px;overflow-y:auto;flex:1;padding-bottom:8px}
-.chat-msg{padding:10px;border-radius:10px;font-size:13px;max-width:85%;word-break:break-word;white-space:pre-wrap}
-.chat-msg.user{align-self:flex-end;background:var(--blue);color:white}
-.chat-msg.ai{align-self:flex-start;background:var(--bg);color:var(--text)}
-.ai-daily-card{background:#FFF8E1;border:1px solid #FFE082;border-radius:10px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--text-third);font-style:italic}
-.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000}
-.modal{background:white;border-radius:12px;padding:24px;min-width:380px;max-width:480px;box-shadow:0 8px 32px rgba(0,0,0,0.2)}
-.modal-title{font-size:16px;font-weight:bold;margin-bottom:12px}
-.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
-.stat-card{background:var(--white);border-radius:10px;border:1px solid var(--border);padding:12px;text-align:center}
-.stat-card .stat-val{font-size:22px;font-weight:bold;margin-top:4px}
-.tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px}
-.tag-green{background:#E8F5E9;color:var(--green)}
-.tag-red{background:#FFEBEE;color:var(--red)}
-.tag-orange{background:#FFF3E0;color:var(--orange)}
-.tag-blue{background:var(--blue-light);color:var(--blue)}
-.water-cup{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:22px;cursor:pointer;font-size:20px;border:2px solid var(--border);transition:all 0.15s;margin:4px}
-.water-cup.filled{background:var(--blue-light);border-color:var(--blue)}
-.water-cup:hover{transform:scale(1.1)}
-.progress-bar{height:8px;background:var(--border);border-radius:4px;overflow:hidden}
-.progress-bar .fill{height:100%;background:var(--blue);border-radius:4px;transition:width 0.3s}
-.chip{cursor:pointer;padding:4px 10px;border-radius:12px;font-size:11px;border:1px solid var(--border);background:var(--white);display:inline-block;margin:2px;transition:all 0.15s}
-.chip:hover{background:var(--blue-light);border-color:var(--blue)}
-.chip.active{background:var(--blue);color:white;border-color:var(--blue)}
-.mood-btn{cursor:pointer;font-size:24px;padding:4px 8px;border-radius:8px;border:2px solid transparent;transition:all 0.15s}
-.mood-btn:hover{border-color:var(--blue)}
-.mood-btn.selected{border-color:var(--blue);background:var(--blue-light)}
-</style>
-</head>
-<body>
-<div id="app">
-  <div id="top-bar">
-    <img id="avatar" src="" alt="" onclick="openSettings()">
-    <button class="btn btn-sm btn-outline" onclick="prevMonth()">◀</button>
-    <span id="month-label">加载中...</span>
-    <button class="btn btn-sm btn-outline" onclick="nextMonth()">▶</button>
-    <button class="btn btn-sm btn-outline" onclick="goToday()">今天</button>
-    <span id="quote-text">加载中...</span>
-    <div class="spacer"></div>
-    <span id="countdown">--:--:--</span>
-    <span id="weather">加载天气...</span>
-  </div>
-  <div id="tabs">
-    <div class="tab active" data-tab="0">📋 考勤管理</div>
-    <div class="tab" data-tab="1">✅ 待办事项</div>
-    <div class="tab" data-tab="2">🚗 车辆出入</div>
-    <div class="tab" data-tab="3">💧 喝水记录</div>
-    <div class="tab" data-tab="4">📝 加班事项</div>
-    <div class="tab" data-tab="5">🎮 摸鱼中心</div>
-    <div class="tab" data-tab="6">📚 知识库</div>
-  </div>
-  <div id="content">
-    <div class="tab-page active" id="page-0"><div id="attendance-layout"><div id="attendance-left"><div class="ai-daily-card" id="ai-daily">🐱 加载中...</div><div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0"><div class="calendar" id="calendar" style="flex:1"></div></div></div><div id="attendance-right"><div class="card"><div class="card-title">月度汇总</div><div id="summary-content"></div></div><div class="card"><div class="card-title">当天详情</div><div id="detail-content"></div></div><div class="card"><div class="card-title">打卡记录</div><div id="records-content"></div></div><div class="card"><div class="card-title">车辆出入</div><div id="car-day-content"></div></div><div class="card" id="punch-card" style="display:none"><div class="card-title">补卡操作</div><div id="ai-punch-tip" style="font-size:11px;color:var(--orange);font-style:italic;margin-bottom:8px"></div><div id="punch-buttons"></div></div></div></div></div>
-    <div class="tab-page" id="page-1"><div id="todo-content"></div></div>
-    <div class="tab-page" id="page-2"><div id="car-content"></div></div>
-    <div class="tab-page" id="page-3"><div id="water-content"></div></div>
-    <div class="tab-page" id="page-4"><div id="ot-notes-content"></div></div>
-    <div class="tab-page" id="page-5"><div id="fun-content"></div></div>
-    <div class="tab-page" id="page-6"><div id="kb-content"></div></div>
-  </div>
-  <div id="bottom-bar">
-    <span id="bottom-status">加载中...</span><span style="color:var(--border)">|</span>
-    <span id="bottom-ai">🐱 喵~ 今天也是元气满满的一天！</span>
-    <div id="pet-container" style="width:56px;height:56px;margin-left:auto;cursor:pointer;border-radius:50%;overflow:hidden;flex-shrink:0" title="戳我~"></div>
-  </div>
-<script type="importmap">
-{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}
-</script>
-<script type="module">
-import * as THREE from 'three';
-setTimeout(function(){
-var pc=document.getElementById('pet-container');if(!pc||pc.children.length)return;
-var s=56,dpr=2;
-var r=new THREE.WebGLRenderer({alpha:true,antialias:true});r.setSize(s*dpr,s*dpr);r.setPixelRatio(dpr);
-r.domElement.style.cssText='width:56px;height:56px;border-radius:50%';
-pc.appendChild(r.domElement);
-var scene=new THREE.Scene();
-var cam=new THREE.PerspectiveCamera(45,1,0.1,10);cam.position.set(0,0.6,3.2);cam.lookAt(0,0,0);
-scene.add(new THREE.AmbientLight('#ffe0c0',3));
-var dl=new THREE.DirectionalLight('#ffffff',2);dl.position.set(2,4,3);scene.add(dl);
-
-var bCol='#FFD1A0',eCol='#E8A870';
-var bodyGeo=new THREE.SphereGeometry(0.7,32,32);bodyGeo.scale(1,1.05,0.65);
-var body=new THREE.Mesh(bodyGeo,new THREE.MeshStandardMaterial({color:bCol,roughness:0.4}));body.position.y=-0.1;scene.add(body);
-var bo=new THREE.Mesh(new THREE.SphereGeometry(0.45,32,32).translate(0,-0.1,0.35),new THREE.MeshStandardMaterial({color:'#FFE8D0'}));bo.scale.set(1,1.1,0.5);scene.add(bo);
-
-function ear(x){var g=new THREE.ConeGeometry(0.22,0.45,16);g.rotateX(-0.15);var e=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:eCol}));e.position.set(x,0.55,-0.1);scene.add(e);var gi=new THREE.ConeGeometry(0.12,0.28,16);gi.rotateX(-0.15);var ei=new THREE.Mesh(gi,new THREE.MeshStandardMaterial({color:'#FFB8C0'}));ei.position.set(x,0.5,-0.05);scene.add(ei)}ear(-0.38);ear(0.38);
-
-function eye(x){var g=new THREE.SphereGeometry(0.12,16,16);g.scale(1,1.2,0.4);var e=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:'#1a1a2e',roughness:0.1}));e.position.set(x,0.12,0.5);scene.add(e);var h=new THREE.Mesh(new THREE.SphereGeometry(0.03,6,6),new THREE.MeshBasicMaterial({color:'#fff'}));h.position.set(x+0.02,0.16,0.57);scene.add(h)}eye(-0.18);eye(0.18);
-
-var nose=new THREE.Mesh(new THREE.SphereGeometry(0.07,8,8),new THREE.MeshStandardMaterial({color:'#FF8A80'}));nose.position.set(0,-0.01,0.52);scene.add(nose);
-var mouth=new THREE.Mesh(new THREE.TorusGeometry(0.05,0.015,8,8,Math.PI),new THREE.MeshBasicMaterial({color:'#666'}));mouth.position.set(0,-0.07,0.52);mouth.rotation.z=Math.PI;scene.add(mouth);
-
-var tailCrv=new THREE.CubicBezierCurve3(new THREE.Vector3(-0.5,-0.2,-0.3),new THREE.Vector3(-0.9,0,-0.4),new THREE.Vector3(-1.1,0.4,-0.2),new THREE.Vector3(-0.7,0.6,0));
-var tail=new THREE.Mesh(new THREE.TubeGeometry(tailCrv,16,0.06,8,false),new THREE.MeshStandardMaterial({color:bCol,roughness:0.4}));scene.add(tail);
-
-function paw(x,z){var g=new THREE.SphereGeometry(0.12,8,8);g.scale(1.2,0.4,0.8);var p=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:bCol}));p.position.set(x,-0.65,z);scene.add(p)}paw(-0.3,0.2);paw(0.3,0.2);paw(-0.25,-0.2);paw(0.25,-0.2);
-
-var t0=0;
-(function anim(t){requestAnimationFrame(anim);if(!t0)t0=t;
-  body.scale.y=1.05+Math.sin(t*0.003)*0.025;
-  tail.rotation.z=Math.sin(t*0.005)*0.35;
-  tail.rotation.x=Math.cos(t*0.005)*0.25;
-  r.render(scene,cam);
-})();
-
-var clicks=0;
-pc.addEventListener('click',function(){
-  clicks++;body.position.y=-0.25;setTimeout(function(){body.position.y=-0.1},180);
-  document.getElementById('bottom-ai').textContent=['喵~ 别点啦！','呼噜呼噜...','(=^･ω･^=)','喵呜！好舒服~','🐱❤️ 最喜欢主人了','再摸就要秃了！'][clicks%6];
-  openAIChat();
-});
-},500);
-</script>
-</div>
-
-<script>
-const API='http://127.0.0.1:18520';
-let S={currentMonth:new Date(),selectedDate:new Date().toISOString().split('T')[0],attendanceData:null,activeTab:0,carDateFrom:'',carDateTo:'',aiPersona:'warm'};
-
-async function api(url,o={}){const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),15000);try{const r=await fetch(API+url,{headers:{'Content-Type':'application/json'},signal:ctrl.signal,...o});clearTimeout(t);if(!r.ok)throw new Error(r.status+' '+r.statusText);return r.json()}catch(e){clearTimeout(t);throw e}}
-function M(html){const o=document.createElement('div');o.className='modal-overlay';o.innerHTML=`<div class="modal">${html}</div>`;o.onclick=e=>{if(e.target===o)CM()};document.body.appendChild(o)}
-function CM(){const o=document.querySelector('.modal-overlay');if(o)o.remove()}
-
-// Tab切换
-document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{const i=parseInt(t.dataset.tab);S.activeTab=i;document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');document.querySelectorAll('.tab-page').forEach(x=>x.classList.remove('active'));document.getElementById('page-'+i).classList.add('active');switch(i){case 0:renderCalendar();break;case 1:loadTodos();break;case 2:loadCar();break;case 3:loadWater();break;case 4:loadOtNotes();break;case 5:loadFun();break;case 6:loadKB();break}})});
-
-// ========== 考勤管理 ==========
-async function loadAttendance(){try{const d=await api('/api/attendance/month');S.attendanceData=d;document.getElementById('month-label').textContent=d.month_label||'';renderCalendar()}catch(e){}}
-function renderCalendar(){if(!S.attendanceData){return;}var days=S.attendanceData.days,dates=Object.keys(days).sort();if(!dates.length)return;var fd=new Date(dates[0]+'T00:00:00'),sd=fd.getDay(),today=new Date().toISOString().split('T')[0];var h='<table class="calendar"><thead><tr>';var ws=['日','一','二','三','四','五','六'];for(var i=0;i<7;i++)h+='<th style="color:'+(i===0?'var(--red)':i===6?'var(--blue)':'')+'">'+ws[i]+'</th>';h+='</tr></thead><tbody>';var cells=[],idx=0;for(var i=0;i<sd;i++)cells.push({num:'',cls:''});dates.forEach(function(ds){var day=days[ds],d=new Date(ds+'T00:00:00'),cls=[];if(ds===today)cls.push('today');if(ds===S.selectedDate)cls.push('selected');if(day.is_rest&&!day.is_makeup)cls.push('weekend');if(day.holiday_name)cls.push('holiday');if(day.is_makeup)cls.push('makeup');var l='',lc='day-label';if(day.holiday_name){l=day.holiday_name;lc+=' holiday-label'}else if(day.missed){l='漏打卡';lc+=' missed'}else if(day.overtime_hours>0){l='+'+day.overtime_hours.toFixed(1)+'h';lc+=' ot'}else if(day.card_count>0)l='✓';cells.push({num:d.getDate(),cls:cls.join(' '),label:l,lc:lc,ds:ds})});while(cells.length<42)cells.push({num:'',cls:''});for(var r=0;r<6;r++){h+='<tr>';for(var c=0;c<7;c++){var cell=cells[r*7+c];var onclick=cell.ds?' onclick="selectDate(\''+cell.ds+'\')"':'';var tdCls=cell.cls+(cell.num?'':' empty');h+='<td class="'+tdCls+'"'+onclick+'>';if(cell.num)h+='<span class="day-num">'+cell.num+'</span>'+(cell.label?'<span class="'+cell.lc+'">'+cell.label+'</span>':'');h+='</td>'}h+='</tr>'}h+='</tbody></table>';document.getElementById('calendar').innerHTML=h;updateDetail()}
-async function selectDate(ds){S.selectedDate=ds;renderCalendar()}
-async function updateDetail(){const ds=S.selectedDate,day=S.attendanceData?.days?.[ds];if(!day)return;const days=Object.values(S.attendanceData.days),tH=days.reduce((s,d)=>s+(d.overtime_hours||0),0),tP=days.reduce((s,d)=>s+(d.overtime_pay||0),0),otD=days.filter(d=>d.overtime_hours>0).length,msD=days.filter(d=>d.missed).length;document.getElementById('summary-content').innerHTML=`<div class="info-row"><span class="key">加班天数</span><span class="val">${otD} 天</span></div><div class="info-row"><span class="key">总小时</span><span class="val">${tH.toFixed(1)}h</span></div><div class="info-row"><span class="key">总工资</span><span class="val" style="color:var(--blue);font-size:18px">¥${tP.toFixed(2)}</span></div>${msD>0?`<div style="color:var(--red);font-size:12px">漏打卡 ${msD} 天</div>`:''}`;const wn=['日','一','二','三','四','五','六'][new Date(ds+'T00:00:00').getDay()];document.getElementById('detail-content').innerHTML=`<div class="info-row"><span class="key">日期</span><span class="val">${ds} 周${wn}</span></div><div class="info-row"><span class="key">类型</span><span class="val">${day.type}${day.holiday_name?' · '+day.holiday_name:''}</span></div><div class="info-row"><span class="key">打卡</span><span class="val">${day.card_count}/${day.required_cards} 次 ${day.missed?'<span style="color:var(--red)">漏打卡!</span>':'✓'}</span></div><div class="info-row"><span class="key">加班</span><span class="val">${day.overtime_hours.toFixed(1)}h</span></div><div class="info-row"><span class="key">加班费</span><span class="val" style="color:var(--blue)">¥${day.overtime_pay.toFixed(2)}</span></div><div class="info-row"><span class="key">加班理由</span><span class="val" id="ot-reason-txt" style="font-size:12px;flex:1">加载中...</span><button class="btn btn-sm btn-outline" onclick="editOtReason('${ds}')" style="padding:1px 6px;font-size:10px">✏</button></div>`;setTimeout(async function(){try{var r=await api('/api/ot-reason?date='+ds);var el=document.getElementById('ot-reason-txt');if(el)el.textContent=r.reason||'无';}catch(e){var el2=document.getElementById('ot-reason-txt');if(el2)el2.textContent='无'}},100);const recs=await api('/api/attendance/records?date='+ds);document.getElementById('records-content').innerHTML=recs.length?recs.map((r,i)=>`<div class="info-row"><span>#${i+1}</span><span>${r.time}</span>${r.remark?`<span style="font-size:11px;color:var(--text-sec);font-style:italic">${r.remark}</span>`:''}</div>`).join(''):'当天无打卡记录';try{const cr=await api('/api/car/records?from='+ds+'&to='+ds);document.getElementById('car-day-content').innerHTML=cr.length?cr.map(r=>`<div class="info-row"><span style="color:${r.direction==='出'?'var(--blue)':'var(--green)'}">${r.direction}</span><span>${r.time}</span><button class="btn btn-sm btn-outline" style="padding:1px 4px;font-size:10px" onclick="editCar('${r.ch_id}','${r.time}','${r.direction}','${r.date}')">✏</button></div>`).join(''):'当天无车辆出入'}catch(e){document.getElementById('car-day-content').innerHTML='加载失败'}if(day.card_count>0){document.getElementById('punch-card').style.display='block';const isR=day.is_rest||day.type==='补班日';const cards=isR?[{label:'卡1 早上',idx:0},{label:'卡2 中午',idx:1},{label:'卡3 中午',idx:2},{label:'卡4 下午',idx:3},{label:'卡5 晚上',idx:5}]:[{label:'卡1 早上',idx:0},{label:'卡4 下午',idx:3},{label:'卡5 晚上',idx:5}];document.getElementById('punch-buttons').innerHTML=cards.map(c=>`<button class="btn btn-outline btn-sm" style="width:100%;margin-bottom:4px" onclick="punchCard(${c.idx},'${c.label}')">${c.label}</button>`).join('');const missing=day.required_cards-day.card_count;document.getElementById('ai-punch-tip').textContent=day.missed?`🐱 缺${missing}次打卡，建议补卡`:'🐱 打卡已齐全 ✓'}else document.getElementById('punch-card').style.display='none';let aiP=[];if(day.overtime_hours>0)aiP.push('加班'+day.overtime_hours.toFixed(1)+'h');if(day.missed)aiP.push('⚠漏打卡');if(!day.overtime_hours&&!day.missed)aiP.push(day.is_rest?'休息日🎉':'准时下班👍');let tip=day.overtime_hours>=3?'辛苦了！':(day.missed?'快去补卡！':(day.is_rest?'好好休息~':'效率很棒！'));document.getElementById('ai-daily').innerHTML=`🐱 ${day.type} | ${aiP.join('，')} | ${tip}`}
-async function editOtReason(ds){var r='';try{var d=await api('/api/ot-reason?date='+ds);r=d.reason||''}catch(e){}M(`<div class="modal-title">编辑加班理由</div><div style="font-size:12px;color:var(--text-sec);margin-bottom:8px">日期: ${ds}</div><textarea id="ot-reason-editor" style="width:100%;height:80px;resize:vertical">${r.replace(/</g,'&lt;')}</textarea><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="saveOtReason('${ds}')">保存</button></div>`)}
-async function saveOtReason(ds){var v=document.getElementById('ot-reason-editor').value;await api('/api/ot-reason',{method:'POST',body:JSON.stringify({date:ds,reason:v})});CM();var el=document.getElementById('ot-reason-txt');if(el)el.textContent=v||'无'}
-
-async function punchCard(idx,label){const ds=S.selectedDate;const[recs,remarks]=await Promise.all([api('/api/attendance/records?date='+ds),api('/api/punch/remarks')]);const et=recs.map(r=>r.remark?`${r.time}(${r.remark.slice(-10)})`:r.time).join(', ')||'无';var cfg=S.userConfig||{};var ls=cfg.lunch_start||'12:05',le=cfg.lunch_end||'13:05',ds2=cfg.dinner_start||'17:30',de=cfg.dinner_end||'18:00';var lsp=ls.split(':'),lep=le.split(':'),dsp=ds2.split(':'),dep=de.split(':');var tr={0:'08:00-08:30',1:ls+'-'+le,2:ls+'-'+le,3:ds2+'-'+de,5:'20:30-22:00'};var ranges={0:[8,0,8,30],1:[parseInt(lsp[0]),parseInt(lsp[1]),parseInt(lep[0]),parseInt(lep[1])],2:[parseInt(lsp[0]),parseInt(lsp[1]),parseInt(lep[0]),parseInt(lep[1])],3:[parseInt(dsp[0]),parseInt(dsp[1]),parseInt(dep[0]),parseInt(dep[1])],5:[20,30,22,0]};const ri={0:0,1:1,2:2,3:3,5:4}[idx]||0;const[sh,sm,eh,em]=ranges[Object.keys(ranges)[ri].split(',').map(Number)]||[8,0,8,30];const ts=Math.floor(Math.random()*(eh*3600+em*60-sh*3600-sm*60))+sh*3600+sm*60;const hh=Math.floor(ts/3600),mm=Math.floor((ts%3600)/60),ss=ts%60;const dt=`${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;M(`<div class="modal-title">补卡 - ${label}</div><div style="font-size:13px;color:var(--text-sec)">日期: ${ds}</div><div style="margin:8px 0;font-size:12px;color:var(--text-sec);font-style:italic" id="punch-ai-tip">🐱 分析中...</div><div style="margin:8px 0"><label style="font-size:12px">补卡时间 (HH:MM:SS):</label><br><input type="text" id="punch-time" value="${dt}" style="width:100%;margin-top:4px"></div><div style="margin:8px 0"><label style="font-size:12px">打卡位置:</label><br><select id="punch-remark" style="width:100%;margin-top:4px">${remarks.map(r=>`<option>${r}</option>`).join('')}</select></div><div style="font-size:11px;color:var(--text-third)">已打卡: ${et}</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doPunch('${ds}')">确认补卡</button></div>`);setTimeout(async()=>{try{const ai=await api('/api/ai/chat',{method:'POST',body:JSON.stringify({prompt:'补'+label+',范围'+tr[idx]+',已有打卡['+et+']',max_tokens:40})});if(ai&&ai.reply){const el=document.getElementById('punch-ai-tip');if(el)el.textContent='🐱 '+ai.reply}}catch(e){}},10)}
-async function doPunch(ds){const t=document.getElementById('punch-time').value,r=document.getElementById('punch-remark').value;const res=await api('/api/punch',{method:'POST',body:JSON.stringify({date:ds,time:t,remark:r})});CM();alert(res.success?`✅ 补卡成功 ${t}`:`❌ ${res.msg}`);loadAttendance()}
-async function prevMonth(){const d=new Date(S.currentMonth);d.setMonth(d.getMonth()-1);S.currentMonth=d;const data=await api('/api/attendance/month?date='+d.toISOString().split('T')[0]);S.attendanceData=data;document.getElementById('month-label').textContent=data.month_label||'';const newDates=Object.keys(data.days||{}).sort();if(newDates.length&&!data.days[S.selectedDate])S.selectedDate=newDates[0];renderCalendar()}
-async function nextMonth(){const d=new Date(S.currentMonth);d.setMonth(d.getMonth()+1);S.currentMonth=d;const data=await api('/api/attendance/month?date='+d.toISOString().split('T')[0]);S.attendanceData=data;document.getElementById('month-label').textContent=data.month_label||'';const newDates=Object.keys(data.days||{}).sort();if(newDates.length&&!data.days[S.selectedDate])S.selectedDate=newDates[0];renderCalendar()}
-function goToday(){S.selectedDate=new Date().toISOString().split('T')[0];S.currentMonth=new Date();loadAttendance()}
-async function closeSettingsAndSave(){saveSettings();loadAttendance();var el=document.getElementById('settings-overlay');if(el)el.remove()}
-function setTab(id){S.settingsTab=id;openSettings()}
-async function openSettings(){var u=await api('/api/user/config');var o=document.createElement('div');o.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;background:var(--bg);display:flex';o.id='settings-overlay';S.settingsTab=S.settingsTab||'basic';S._saved=false;var tabs=[{id:'basic',icon:'👤',label:'基本信息'},{id:'remind',icon:'🔔',label:'提醒设置'},{id:'ai',icon:'🤖',label:'AI助手'},{id:'safe',icon:'🔒',label:'安全'}];var nav='';tabs.forEach(function(t){var sel=S.settingsTab===t.id;nav+='<div onclick="setTab(\x27'+t.id+'\x27)" style="padding:10px 16px;margin:2px 8px;border-radius:8px;cursor:pointer;font-size:13px;'+(sel?'background:var(--blue-light);color:var(--blue);font-weight:bold':'color:var(--text-sec)')+'">'+t.icon+' '+t.label+'</div>'});o.innerHTML='<div style="width:200px;background:var(--white);border-right:1px solid var(--border);padding:24px 0;display:flex;flex-direction:column;flex-shrink:0"><div style="padding:0 16px 20px;display:flex;align-items:center;gap:12px"><img id="set-avatar" src="'+(u.avatar||'cat_icon.png')+'" style="width:40px;height:40px;border-radius:20px;object-fit:cover"><div><div style="font-size:13px;font-weight:bold">'+(u.empname||'未设置')+'</div><div style="font-size:10px;color:var(--text-third)">工号 1103141</div></div></div><div style="flex:1">'+nav+'</div><button class="btn btn-outline" id="settings-back-btn" onclick="saveSettings();loadAttendance();var e=document.getElementById(\x27settings-overlay\x27);if(e)e.remove()" style="margin:8px;justify-content:center">← 返回</button></div><div style="flex:1;overflow-y:auto;padding:32px 40px" id="settings-right">'+buildSettingsPanel(u,S.settingsTab)+'</div>';document.body.appendChild(o)}
-function buildSettingsPanel(u,tab){
-  var m=(u.ai_model||S.aiModel||'deepseek-v4-flash');
-  var p=(u.ai_persona||S.aiPersona||'warm');
-  if(tab==='basic')return '<div style="font-size:20px;font-weight:bold;margin-bottom:24px">基本信息</div><div style="background:var(--white);border-radius:12px;border:1px solid var(--border);padding:24px"><div style="margin-bottom:16px"><label style="font-size:12px;color:var(--text-sec);display:block;margin-bottom:6px">工号</label><input type="text" value="1103141" disabled style="background:var(--bg);color:var(--text-third)"></div><div style="margin-bottom:16px"><label style="font-size:12px;color:var(--text-sec);display:block;margin-bottom:6px">姓名</label><input type="text" id="set-name" value="'+(u.empname||'')+'" placeholder="输入姓名"></div><div style="margin-bottom:16px"><label style="font-size:12px;color:var(--text-sec);display:block;margin-bottom:6px">车牌号</label><input type="text" id="set-plate" value="'+(u.car_plate||'')+'" placeholder="输入车牌号"></div><div style="margin-bottom:16px"><label style="font-size:12px;color:var(--text-sec);display:block;margin-bottom:6px">加班时薪基数 (元/小时)</label><input type="number" id="set-salary" value="'+(u.base_salary||30)+'" step="0.1" placeholder="30"></div><div style="display:flex;gap:12px;margin-bottom:16px"><div style="flex:1"><label style="font-size:12px;color:var(--text-sec);display:block;margin-bottom:6px">午休开始</label><input type="time" id="set-lunch-start" value="'+(u.lunch_start||'12:05')+'"></div><div style="flex:1"><label style="font-size:12px;color:var(--text-sec);display:block;margin-bottom:6px">午休结束</label><input type="time" id="set-lunch-end" value="'+(u.lunch_end||'13:05')+'"></div></div><div style="display:flex;gap:12px"><div style="flex:1"><label style="font-size:12px;color:var(--text-sec);display:block;margin-bottom:6px">晚饭开始</label><input type="time" id="set-dinner-start" value="'+(u.dinner_start||'17:30')+'"></div><div style="flex:1"><label style="font-size:12px;color:var(--text-sec);display:block;margin-bottom:6px">晚饭结束</label><input type="time" id="set-dinner-end" value="'+(u.dinner_end||'18:00')+'"></div></div></div>';
-  if(tab==='remind')return '<div style="font-size:20px;font-weight:bold;margin-bottom:24px">提醒设置</div><div style="background:var(--white);border-radius:12px;border:1px solid var(--border);padding:24px"><div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0"><div><div style="font-size:14px">💧 喝水提醒</div><div style="font-size:11px;color:var(--text-third)">每小时提醒喝水</div></div><label style="display:inline-block;width:44px;height:24px;position:relative"><input type="checkbox" id="set-water" '+(u.water_enabled?'checked':'')+' style="opacity:0;width:0;height:0"><span style="position:absolute;top:0;left:0;right:0;bottom:0;background:'+(u.water_enabled?'var(--blue)':'#ccc')+';border-radius:24px;transition:.3s;pointer-events:none"></span></label></div><div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0"><div><div style="font-size:14px">👁 护眼提醒</div><div style="font-size:11px;color:var(--text-third)">每2小时提醒休息3分钟</div></div><label style="display:inline-block;width:44px;height:24px;position:relative"><input type="checkbox" id="set-eye" '+(u.eye_enabled?'checked':'')+' style="opacity:0;width:0;height:0"><span style="position:absolute;top:0;left:0;right:0;bottom:0;background:'+(u.eye_enabled?'var(--blue)':'#ccc')+';border-radius:24px;transition:.3s;pointer-events:none"></span></label></div><div style="margin-top:12px"><label style="font-size:12px;color:var(--text-sec);display:block;margin-bottom:6px">每杯水毫升</label><input type="number" id="set-waterml" value="'+(u.water_ml||'300')+'" placeholder="300"></div></div>';
-  if(tab==='ai')return '<div style="font-size:20px;font-weight:bold;margin-bottom:24px">AI助手</div><div style="background:var(--white);border-radius:12px;border:1px solid var(--border);padding:24px"><div style="margin-bottom:16px"><label style="font-size:12px;color:var(--text-sec);display:block;margin-bottom:6px">🔑 API Key</label><input type="password" id="set-apikey" value="'+(u.api_key||'')+'" placeholder="sk-..."></div><div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0"><div><div style="font-size:14px">🤖 默认模型</div><div style="font-size:11px;color:var(--text-third)">对话使用的AI模型</div></div><select id="set-model" style="width:140px">'+['deepseek-v4-flash','deepseek-v4-pro','deepseek-chat','deepseek-reasoner'].map(function(v){var n=v==='deepseek-v4-flash'?'V4 Flash':v==='deepseek-v4-pro'?'V4 Pro':v==='deepseek-chat'?'V3':'R1';return '<option value="'+v+'"'+(m===v?' selected':'')+'>'+n+'</option>'}).join('')+'</select></div><div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0"><div><div style="font-size:14px">🐱 哈基米性格</div><div style="font-size:11px;color:var(--text-third)">暖心/毒舌</div></div><select id="set-personality" style="width:120px"><option value="warm"'+(p==='warm'?' selected':'')+'>😼 暖心</option><option value="tsundere"'+(p==='tsundere'?' selected':'')+'>😼 毒舌</option></select></div></div>';
-  if(tab==='safe')return '<div style="font-size:20px;font-weight:bold;margin-bottom:24px">安全</div><div style="background:var(--white);border-radius:12px;border:1px solid var(--border);padding:24px"><div><label style="font-size:12px;color:var(--text-sec);display:block;margin-bottom:6px">新密码 (留空不修改)</label><input type="password" id="set-pw" placeholder="输入新密码"></div></div>';
-  return '';
-}
-async function saveSettings(){try{var g=function(id){var e=document.getElementById(id);return e?e.value:null};var gc=function(id){var e=document.getElementById(id);return e?e.checked:false};var d={};var nm=g('set-name');if(nm!==null)d.empname=nm;var cp=g('set-plate');if(cp!==null)d.car_plate=cp;var bs=g('set-salary');if(bs!==null&&bs!==''){var pf=parseFloat(bs);if(!isNaN(pf))d.base_salary=pf}var wm=g('set-waterml');if(wm!==null)d.water_ml=parseInt(wm)||300;d.water_enabled=gc('set-water');d.eye_enabled=gc('set-eye');var md=g('set-model');if(md!==null){d.ai_model=md;S.aiModel=md}var ps=g('set-personality');if(ps!==null){d.ai_persona=ps;S.aiPersona=ps}var ak=g('set-apikey');if(ak!==null)d.api_key=ak;var ls=g('set-lunch-start');if(ls!==null)d.lunch_start=ls;var le=g('set-lunch-end');if(le!==null)d.lunch_end=le;var ds=g('set-dinner-start');if(ds!==null)d.dinner_start=ds;var de=g('set-dinner-end');if(de!==null)d.dinner_end=de;S.userConfig=Object.assign(S.userConfig||{},d);var pw=g('set-pw');if(pw)d.password=pw;await api('/api/user/update',{method:'POST',body:JSON.stringify(d)})}catch(e){}}
-async function saveSettings(){const d={empname:document.getElementById('set-name').value,car_plate:document.getElementById('set-plate').value,base_salary:parseFloat(document.getElementById('set-salary').value)||30,water_ml:parseInt(document.getElementById('set-waterml').value)||300,water_enabled:document.getElementById('set-water').checked,eye_enabled:document.getElementById('set-eye').checked};const pw=document.getElementById('set-pw').value;if(pw)d.password=pw;await api('/api/user/update',{method:'POST',body:JSON.stringify(d)});alert('✅ 已保存');loadSettings()}
-async function editCar(chId,time,direction,dateStr){const ym=dateStr.replace(/-/g,'').substring(0,6);const fullTime=time.split(' ')[1]||time;const d=dateStr;M(`<div class="modal-title">修改车辆记录</div><div style="font-size:13px;color:var(--text-sec)">${dateStr} ${fullTime} ${direction}</div><div style="margin:8px 0"><label style="font-size:12px">时间 (HH:MM:SS.FFF)</label><input type="text" id="car-edit-time" value="${fullTime}"></div><div style="margin:8px 0"><label style="font-size:12px">进出</label><select id="car-edit-dir"><option value="0" ${direction==='进'?'selected':''}>进</option><option value="1" ${direction==='出'?'selected':''}>出</option></select></div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="saveCarEdit('${chId}','${ym}','${d}')">保存</button></div>`)}
-async function saveCarEdit(chId,ym,d){const t=document.getElementById('car-edit-time').value;const dir=parseInt(document.getElementById('car-edit-dir').value);const newTime=`${d} ${t}`;const res=await api('/api/car/update',{method:'POST',body:JSON.stringify({ch_id:chId,ym,new_time:newTime,new_out:dir})});CM();alert(res.success?'✅ 已修改':'❌ 失败');loadCar();updateDetail()}
-
-// ========== 待办事项 ==========
-async function loadTodos(){const d=await api('/api/todos');const today=new Date().toISOString().split('T')[0];const items=d.filter(x=>!x.done);document.getElementById('todo-content').innerHTML=`<div class="card"><div class="card-title">待办事项</div><div style="margin-bottom:8px;display:flex;gap:8px"><input type="text" id="todo-input" placeholder="输入待办内容..." style="flex:1"><input type="date" id="todo-date" value="${today}" style="width:130px"><input type="time" id="todo-time" value="09:00" style="width:100px"><button class="btn btn-primary btn-sm" onclick="addTodo()">添加</button></div><div id="todo-list">${items.length?items.map(it=>`<div class="info-row"><span style="color:${it.date===today?'var(--blue)':''}">${it.date} ${it.time}</span><span style="flex:1;margin:0 8px">${it.content}</span><button class="btn btn-success btn-sm" onclick="toggleTodo('${it.date}','${it.id}')">✓</button><button class="btn btn-danger btn-sm" onclick="delTodo('${it.date}','${it.id}')">✕</button></div>`).join(''):'<div style="color:var(--text-third);font-size:13px">暂无待办，添加一个吧~</div>'}</div></div>`}
-async function addTodo(){const c=document.getElementById('todo-input').value.trim();if(!c)return alert('请输入内容');const d=document.getElementById('todo-date').value,t=document.getElementById('todo-time').value;await api('/api/todos/add',{method:'POST',body:JSON.stringify({date:d,time:t,content:c})});loadTodos()}
-async function toggleTodo(date,id){await api('/api/todos/toggle',{method:'POST',body:JSON.stringify({date,id})});loadTodos()}
-async function delTodo(date,id){await api('/api/todos/delete',{method:'POST',body:JSON.stringify({date,id})});loadTodos()}
-
-// ========== 车辆出入 ==========
-
-// ========== 喝水记录 ==========
-async function loadWater(){var d=await api('/api/water/status');var cups=d.cups,ml=d.total_ml,pct=Math.min(cups/8*100,100);var target=parseInt(d.ml_per_cup)||300;var times=['08:00','09:00','11:00','13:00','15:00','17:00','19:00','21:00'];
-var h='';
-h+='<div class="card" style="text-align:center;padding:32px"><div style="font-size:64px;margin-bottom:8px">';
-if(cups>=8)h+='🏆';else if(cups>=5)h+='💧';else if(cups>=2)h+='🥛';else h+='🍼';
-h+='</div>';
-h+='<div style="font-size:36px;font-weight:bold;color:var(--blue)">'+ml+'<span style="font-size:16px;color:var(--text-sec)"> / '+target*8+'ml</span></div>';
-h+='<div style="font-size:14px;color:var(--text-sec);margin:4px 0 16px">'+cups+' / 8 杯 · 目标每日 '+target*8+'ml</div>';
-h+='<div style="height:12px;background:#E5E6EB;border-radius:6px;overflow:hidden;max-width:360px;margin:0 auto 24px"><div style="height:100%;width:'+pct+'%;background:linear-gradient(90deg,#3370FF,#5B9BFF);border-radius:6px;transition:width 0.5s"></div></div>';
-h+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;max-width:400px;margin:0 auto">';
-times.forEach(function(t,i){
-  var done=i<cups;var icon=done?'💙':'🤍';
-  h+='<div onclick="punchWater('+i+')" style="padding:12px 8px;border-radius:12px;cursor:pointer;transition:all 0.2s;background:'+(done?'var(--blue-light)':'var(--bg)')+';border:2px solid '+(done?'var(--blue)':'var(--border)')+'">';
-  h+='<div style="font-size:24px">'+icon+'</div>';
-  h+='<div style="font-size:11px;color:var(--text-sec);margin-top:4px">'+t+'</div>';
-  h+='<div style="font-size:10px;color:var(--text-third)">第'+(i+1)+'杯</div>';
-  h+='</div>';
-});
-h+='</div>';
-if(cups>=8)h+='<div style="margin-top:16px;color:var(--green);font-size:14px">🎉 今天的喝水目标已完成！太棒了！</div>';
-else h+='<div style="margin-top:16px;color:var(--text-third);font-size:13px">点击水杯打卡喝水 ~</div>';
-h+='</div>';
-document.getElementById('water-content').innerHTML=h;
-}
-async function punchWater(idx){await api('/api/water/punch',{method:'POST',body:JSON.stringify({index:idx})});loadWater()}
-
-// ========== 加班事项 ==========
-async function loadOtNotes(){const days=S.attendanceData?Object.values(S.attendanceData.days).filter(d=>d.overtime_hours>0).reverse():[];var reasons={};try{var r=await api('/api/ot-reasons-bulk');reasons=r||{}}catch(e){}var h='<div class="card" style="padding:0;overflow:hidden"><div class="card-title" style="padding:16px 16px 12px">📝 本月加班</div>';if(!days.length){h+='<div style="color:var(--text-third);text-align:center;padding:32px">本月暂无加班</div></div>'}else{h+='<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="color:var(--text-sec);font-size:11px;border-bottom:2px solid var(--border)"><th style="padding:10px 16px;text-align:left;width:70px">日期</th><th style="padding:10px 8px;text-align:left;width:80px">类型</th><th style="padding:10px 8px;text-align:right;width:70px">小时</th><th style="padding:10px 8px;text-align:right;width:80px">加班费</th><th style="padding:10px 16px;text-align:left">加班理由</th></tr></thead><tbody>';days.forEach(function(d,i){var ds=Object.keys(S.attendanceData.days).find(function(k){return S.attendanceData.days[k]===d})||'';var reason=reasons[ds]||'';var bg=i%2===0?'transparent':'rgba(0,0,0,0.02)';h+='<tr style="background:'+bg+';border-bottom:0.5px solid var(--border)"><td style="padding:10px 16px;font-weight:bold;white-space:nowrap">'+ds.slice(-5)+'</td><td style="padding:10px 8px"><span class="tag '+(d.type.indexOf('休息日')>=0?'tag-orange':d.type.indexOf('补班')>=0?'tag-blue':'tag-green')+'">'+d.type+'</span></td><td style="padding:10px 8px;text-align:right;font-family:monospace">'+d.overtime_hours.toFixed(1)+'h</td><td style="padding:10px 8px;text-align:right;font-weight:bold;color:var(--blue);white-space:nowrap">¥'+d.overtime_pay.toFixed(2)+'</td><td style="padding:10px 16px;font-size:12px;color:var(--text-sec);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+reason+'">'+reason+'</td></tr>'});h+='</tbody></table></div>'}document.getElementById('ot-notes-content').innerHTML=h}
-
-// ========== 摸鱼中心 ==========
-async function loadFun(){const moods=await api('/api/fun/moods');const ach=await api('/api/fun/achievements');const today=new Date().toISOString().split('T')[0];const moodEmojis=['😊','😎','🥱','😫','😤','🤬','😭','🤩','🥳','😐','🤯','❤'];const next5=new Date();next5.setMonth(next5.getMonth()+1);next5.setDate(5);if(next5<=new Date())next5.setMonth(next5.getMonth()+1);const daysToPay=Math.ceil((next5-new Date())/86400000);document.getElementById('fun-content').innerHTML=`<div class="grid2"><div class="card" style="text-align:center"><div class="card-title">💰 发薪倒计时</div><div style="font-size:28px;color:var(--orange);font-weight:bold">${daysToPay}天</div><div style="font-size:12px;color:var(--text-third)">距离${next5.getFullYear()}-${String(next5.getMonth()+1).padStart(2,'0')}-05</div></div><div class="card" style="text-align:center"><div class="card-title">⏲ 番茄钟</div><div style="font-size:36px;color:var(--blue);font-weight:bold" id="pomodoro">25:00</div><div style="font-size:12px;color:var(--text-third);margin-bottom:8px" id="pomo-status">准备开始</div><div style="display:flex;gap:4px;justify-content:center"><button class="btn btn-sm btn-primary" onclick="startPomo()">▶</button><button class="btn btn-sm btn-outline" onclick="pausePomo()">⏸</button><button class="btn btn-sm btn-outline" onclick="resetPomo()">⏹</button></div></div></div><div class="card"><div class="card-title">😊 心情日历</div><div style="margin-bottom:8px">${moodEmojis.map(m=>`<span class="mood-btn${moods.current===m?' selected':''}" onclick="setMood('${m}')">${m}</span>`).join('')}</div><div style="font-size:12px;color:var(--text-sec)">近7天: ${Object.entries(moods.recent||{}).map(([k,v])=>`${k.slice(-5)} ${v||'❓'}`).join(' ')}</div></div><div class="card"><div class="card-title">🏆 成就徽章</div>${(ach.achievements||[]).map(a=>`<div style="display:inline-block;padding:4px 8px;margin:4px;border-radius:8px;background:${(ach.unlocked||[]).includes(a.key)?'var(--blue-light)':'var(--bg)'};font-size:12px">${a.icon} ${a.name}</div>`).join('')}</div>`}
-async function setMood(m){await api('/api/fun/mood',{method:'POST',body:JSON.stringify({mood:m})});loadFun()}
-let pomo={running:false,paused:false,seconds:25*60,total:25*60,timer:null};
-function startPomo(){if(pomo.running)return;pomo.running=true;pomo.paused=false;document.getElementById('pomo-status').textContent='专注中...';pomo.timer=setInterval(()=>{if(pomo.paused)return;pomo.seconds--;const m=Math.floor(pomo.seconds/60),s=pomo.seconds%60;document.getElementById('pomodoro').textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;if(pomo.seconds<=0){clearInterval(pomo.timer);pomo.running=false;document.getElementById('pomodoro').textContent='00:00';document.getElementById('pomo-status').textContent='⏰ 时间到!';}},1000)}
-function pausePomo(){pomo.paused=!pomo.paused;document.getElementById('pomo-status').textContent=pomo.paused?'已暂停':'继续中...'}
-function resetPomo(){clearInterval(pomo.timer);pomo.running=false;pomo.seconds=25*60;document.getElementById('pomodoro').textContent='25:00';document.getElementById('pomo-status').textContent='准备开始'}
-
-// ========== 知识库 ==========
-function loadKB(){document.getElementById('kb-content').innerHTML=`<div class="card"><div class="card-title">📚 公司知识库</div><div style="color:var(--text-third);font-size:13px">知识库功能开发中，请使用原 Flet 版本上传文档。<br>上传后在哈基米 AI 中自动检索回答。</div></div>`}
-
-// ========== 哈基米 AI 浮窗 ==========
-var aiOpen=false;
-async function openAIChat(){
-  if(aiOpen){closeAIChat();return}
-  var p=S.aiPersona||'warm';
-  var models=[{v:'deepseek-v4-flash',l:'V4 Flash'},{v:'deepseek-v4-pro',l:'V4 Pro'},{v:'deepseek-chat',l:'V3'},{v:'deepseek-reasoner',l:'R1'}];
-  var quicks=['📝周报','📔日记','🔮算命','📊分析','⚠漏打卡','💡摸鱼'];
-  var o=document.createElement('div');o.id='ai-chat-panel';
-  o.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:560px;height:620px;z-index:9998;background:rgba(255,255,255,0.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-radius:16px;box-shadow:0 12px 60px rgba(0,0,0,0.15);display:flex;flex-direction:column;overflow:hidden;border:1px solid rgba(255,255,255,0.3)'
-  o.innerHTML='<div style="padding:14px 18px;border-bottom:1px solid rgba(0,0,0,0.06);display:flex;align-items:center;gap:10px;flex-shrink:0;background:rgba(255,255,255,0.5)"><span style="font-weight:bold;font-size:16px">🐱 哈基米</span><span style="font-size:11px;color:var(--text-third)">'+(p==='warm'?'😼暖心':'😼毒舌')+' · '+(S.aiModel||'V4 Flash')+'</span><div style="flex:1"></div><button class="btn btn-sm btn-outline" onclick="closeAIChat();openSettings()" style="font-size:13px">⚙</button><button class="btn btn-sm btn-outline" onclick="closeAIChat()" style="font-size:18px;padding:2px 10px;border-radius:8px">✕</button></div><div style="display:flex;flex-wrap:wrap;gap:4px;padding:10px 14px;border-bottom:1px solid rgba(0,0,0,0.06);flex-shrink:0;background:rgba(255,255,255,0.3)">'+quicks.map(function(q){return '<span class="chip" onclick="quickAIChat(\''+q+'\')">'+q+'</span>'}).join('')+'</div><div id="ai-chat-list" style="flex:1;overflow-y:auto;padding:14px"></div><div style="padding:10px 14px;border-top:1px solid rgba(0,0,0,0.06);display:flex;gap:8px;flex-shrink:0;background:rgba(255,255,255,0.5)"><input type="text" id="ai-chat-input" placeholder="问哈基米..." style="flex:1" onkeydown="if(event.key===\'Enter\')sendAIChat()"><button class="btn btn-primary btn-sm" onclick="sendAIChat()">发送</button></div>';
-  document.body.appendChild(o);
-  aiOpen=true;
-}
-function closeAIChat(){var p=document.getElementById('ai-chat-panel');if(p)p.remove();aiOpen=false}
-async function sendAIChat(){
-  var inp=document.getElementById('ai-chat-input');var q=inp.value.trim();if(!q)return;inp.value='';
-  var cl=document.getElementById('ai-chat-list');
-  cl.innerHTML+='<div class="chat-msg user">'+q.replace(/</g,'&lt;')+'</div>';
-  var thinkId='ai-think-'+Date.now();
-  cl.innerHTML+='<div class="chat-msg ai" id="'+thinkId+'" style="font-size:11px;color:var(--text-third);font-style:italic">🐱 哈基米思考中...</div>';
-  cl.scrollTop=cl.scrollHeight;
-  // 模拟思考更新
-  var dots=0;
-  var thinkTimer=setInterval(function(){dots=(dots+1)%4;var td=document.getElementById(thinkId);if(td)td.textContent='🐱 哈基米思考中'+'.'.repeat(dots)},500);
-  try{
-    var model=S.aiModel||'deepseek-v4-flash';
-    var r=await api('/api/ai/chat',{method:'POST',body:JSON.stringify({prompt:q,model:model,use_tools:true,personality:S.aiPersona||'warm'})});
-    clearInterval(thinkTimer);
-    var td=document.getElementById(thinkId);if(td)td.remove();
-    var steps='';
-    if(r.thinking&&r.thinking.length)steps='<div style="font-size:11px;color:var(--text-third);margin-bottom:6px;font-style:italic">'+r.thinking.map(function(s){return '🔧 '+s}).join('<br>')+'</div>';
-    cl.innerHTML+=steps+'<div class="chat-msg ai">'+(r.reply||'🐱 哈基米卡住了...').replace(/\n/g,'<br>')+'</div>';
-    cl.scrollTop=cl.scrollHeight;
-  }catch(e){
-    clearInterval(thinkTimer);
-    var td=document.getElementById(thinkId);if(td)td.textContent='🐱 出错了: '+e.message;
-  }
-}
-function quickAIChat(tag){
-  var prompts={'📝周报':'帮我写一份本周工作总结，包含加班情况','📔日记':'用猫咪第一人称视角，根据考勤数据写一篇打工日记，100字','🔮算命':'根据加班模式，算算今天加班概率？幽默玄学','📊分析':'分析本月考勤数据，给优化建议','⚠漏打卡':'列出本月所有漏打卡日期','💡摸鱼':'推荐最佳摸鱼时间段'};
-  var inp=document.getElementById('ai-chat-input');inp.value=prompts[tag]||'';sendAIChat()
-}
-
-// ========== 全局 ==========
-async function init(){try{const q=await api('/api/quote');document.getElementById('quote-text').textContent=q.quote}catch(e){}try{const u=await api('/api/user/config');document.getElementById('avatar').src=u.avatar||'cat_icon.png';S.userConfig=u}catch(e){}try{var r=await api('/api/weather');document.getElementById('weather').textContent=r.weather||'🌤 26°C'}catch(e){document.getElementById('weather').textContent='🌤 26°C'}loadAttendance();var quotes=['喵~ 今天也是元气满满的一天！','代码写累了就喝口水吧~','劳逸结合，摸鱼也是生产力！','你已经很棒了，别忘了休息哦~','滴，摸鱼卡！喵~','主人，你的颈椎需要活动一下了~','距离下班还有一小会儿，坚持住！','打工人的浪漫，就是准时下班~','今天的水喝够了吗？💧','做不完的明天再做，别太累~'];document.getElementById('bottom-ai').textContent='🐱 '+quotes[Math.floor(Math.random()*quotes.length)];setInterval(function(){document.getElementById('bottom-ai').textContent='🐱 '+quotes[Math.floor(Math.random()*quotes.length)]},300000);setInterval(()=>{const now=new Date();if(now.getDay()>=6){document.getElementById('countdown').textContent='🎉 周末快乐!';return}const off=new Date(now);off.setHours(18,0,0,0);if(now>=off){document.getElementById('countdown').textContent='已下班! 🏃';return}const diff=off-now,h=Math.floor(diff/3600000),m=Math.floor((diff%3600000)/60000),s=Math.floor((diff%60000)/1000);document.getElementById('countdown').textContent=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`},1000);document.getElementById('bottom-status').textContent='已就绪'}
-init();
-</script>
-<script src="car.js">
-function renderMarkdown(t){
-  t=t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-  t=t.replace(/```([\s\S]*?)```/g,"<pre><code>$1</code></pre>");
-  t=t.replace(/`([^`]+)`/g,"<code>$1</code>");
-  t=t.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>");
-  t=t.replace(/\*([^*]+)\*/g,"<em>$1</em>");
-  t=t.replace(/^- (.+)$/gm,"<li>$1</li>");
-  t=t.replace(/((?:<li>[\s\S]*?<\/li>\n?)+)/g,"<ul>$1</ul>");
-  t=t.replace(/^(\d+)\. (.+)$/gm,"<li>$2</li>");
-  t=t.replace(/\n/g,"<br>");
-  return t;
-}
-function archiveConv(id){
-  M('<div style=\"text-align:center\"><div style=\"font-size:18px;font-weight:bold;margin-bottom:12px\">\u5f52\u6863\u5bf9\u8bdd</div><div style=\"font-size:14px;color:var(--text-sec);margin-bottom:20px\">\u786e\u5b9a\u8981\u5f52\u6863\u6b64\u5bf9\u8bdd\u5417\uff1f\u5f52\u6863\u540e\u53ef\u5728\u8bbe\u7f6e\u4e2d\u6062\u590d\u3002</div><div style=\"display:flex;gap:12px;justify-content:center\"><button class=\"btn btn-outline\" onclick=\"CM()\">\u53d6\u6d88</button><button class=\"btn btn-primary\" onclick=\"CM();doArchive('+id+')\">\u786e\u5b9a\u5f52\u6863</button></div></div>');
-}
-function doArchive(id){
-  api('/api/chat/archive',{method:'POST',body:JSON.stringify({id:id,archived:true})});
-  var p=document.getElementById('ai-chat-panel');
-  if(p)p.querySelectorAll("[onclick*='switchAIConv("+id+")']").forEach(function(x){x.style.display='none'});
-}
-function unarchiveConv(id){
-  api('/api/chat/archive',{method:'POST',body:JSON.stringify({id:id,archived:false})});
-}</script>
-</body>
-</html>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>哈基米曼波</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--blue:#3370FF;--blue-light:#E8F0FE;--red:#F54A45;--green:#34C759;--orange:#FF9500;--text:#1F2329;--text-sec:#646A73;--text-third:#8F959E;--border:#E5E6EB;--bg:#F2F3F5;--white:#FFFFFF}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);overflow:hidden;height:100vh}
+#app{display:flex;flex-direction:column;height:100vh}
+#top-bar{display:flex;align-items:center;padding:10px 20px;background:var(--white);border-bottom:1px solid var(--border);gap:8px;flex-shrink:0}
+#avatar{width:40px;height:40px;border-radius:20px;cursor:pointer;object-fit:cover;background:var(--blue-light)}
+#month-label{font-size:20px;font-weight:bold;cursor:default}
+#quote-text{font-size:11px;color:var(--text-third);font-style:italic;padding:4px 12px;background:var(--bg);border-radius:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#countdown{font-size:16px;font-weight:bold;color:var(--blue)}
+#weather{font-size:13px;color:var(--text-sec)}
+.spacer{flex:1}
+#tabs{display:flex;background:var(--white);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto}
+.tab{padding:12px 14px;cursor:pointer;font-size:13px;color:var(--text-sec);border-bottom:2px solid transparent;white-space:nowrap;transition:all 0.2s}
+.tab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:500}
+.tab:hover{color:var(--blue)}
+#content{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.tab-page{display:none;flex-direction:column;flex:1;overflow-y:auto;padding:16px;box-sizing:border-box}
+.tab-page.active{display:flex}
+#bottom-bar{display:flex;align-items:center;padding:5px 16px;background:var(--white);border-top:1px solid var(--border);font-size:11px;flex-shrink:0;gap:12px}
+#bottom-status{color:var(--text-third)}
+#bottom-ai{color:var(--text-sec);font-style:italic;flex:1}
+.card{background:var(--white);border-radius:12px;border:1px solid var(--border);padding:16px;margin-bottom:12px}
+.card-title{font-size:14px;font-weight:bold;color:var(--text-sec);margin-bottom:8px}
+#attendance-layout{display:flex;gap:12px}
+#attendance-left{flex:1;display:flex;flex-direction:column;gap:12px;min-height:0}
+#attendance-right{width:420px;flex-shrink:0;overflow-y:auto}
+.calendar{width:100%;height:100%;table-layout:fixed;border-collapse:separate;border-spacing:4px;background:transparent;border-radius:16px}
+.calendar td,.calendar th{text-align:center;vertical-align:middle;position:relative;font-weight:400}
+.calendar th{font-size:12px;color:var(--text-third);height:26px}
+.calendar td{border-radius:12px;cursor:pointer;transition:all 0.2s;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06),0 1px 2px rgba(0,0,0,0.04)}
+.calendar td:hover{box-shadow:0 2px 8px rgba(0,0,0,0.1);transform:translateY(-1px)}
+.calendar td.today{box-shadow:inset 0 0 0 1.5px var(--blue),0 1px 3px rgba(51,112,255,0.1)}
+.calendar td.selected{box-shadow:inset 0 0 0 2.5px var(--blue),0 0 0 4px rgba(51,112,255,0.12)}
+.calendar td.empty{background:transparent;box-shadow:none;cursor:default}
+.calendar td.empty:hover{box-shadow:none;transform:none}
+.calendar td .day-num{font-size:15px;display:block;line-height:1.4}
+.calendar td.weekend .day-num{color:var(--blue)}
+.calendar td.holiday .day-num{color:var(--red)}
+.calendar td .day-label{font-size:10px;line-height:1;margin-top:1px}
+.calendar td .day-label.missed{color:var(--red)}
+.calendar td .day-label.ot{color:var(--blue)}
+.calendar td .day-label.holiday-label{color:var(--red);font-size:9px}
+.cal-day:hover{border-color:var(--blue)}
+.cal-day.today{background:var(--blue-light);font-weight:bold}
+.cal-day.selected{border:2px solid var(--blue)!important}
+.cal-day.weekend{color:var(--blue)}
+.cal-day.holiday{background:#FFF1F0;color:var(--red)}
+.cal-day.makeup{background:#FFF7E6}
+.cal-day .label{font-size:11px;margin-top:2px}
+.cal-day .label.missed{color:var(--red)}
+.cal-day .label.ot{color:var(--blue)}
+.cal-day .label.holiday-label{color:var(--red);font-size:10px}
+.info-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:13px;border-bottom:0.5px solid var(--border)}
+.info-row .key{color:var(--text-sec)}
+.info-row .val{font-weight:500}
+.btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:4px;transition:all 0.15s}
+.btn-primary{background:var(--blue);color:white}.btn-primary:hover{opacity:0.9}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}.btn-outline:hover{background:var(--bg)}
+.btn-danger{background:var(--red);color:white}.btn-success{background:var(--green);color:white}
+.btn-sm{padding:4px 10px;font-size:12px}
+input[type="text"],input[type="number"],input[type="password"],select,textarea{height:40px;border:1px solid var(--border);border-radius:10px;padding:0 12px;font-size:14px;outline:none;width:100%;background:var(--white);transition:border-color 0.2s}
+textarea{height:auto;padding:10px 12px;resize:vertical;min-height:60px}
+input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(51,112,255,0.1)}
+input[type="date"],input[type="time"]{height:40px;border:1px solid var(--border);border-radius:10px;padding:0 12px;font-size:14px;outline:none;background:var(--white);cursor:pointer;color:var(--text);font-family:inherit}
+input[type="date"]:focus,input[type="time"]:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(51,112,255,0.1)}
+input[type="date"]::-webkit-calendar-picker-indicator,input[type="time"]::-webkit-calendar-picker-indicator{cursor:pointer;opacity:0.6;transition:opacity 0.2s}
+input[type="date"]:hover::-webkit-calendar-picker-indicator,input[type="time"]:hover::-webkit-calendar-picker-indicator{opacity:1}
+.chat-list{display:flex;flex-direction:column;gap:8px;overflow-y:auto;flex:1;padding-bottom:8px}
+.chat-msg{padding:10px;border-radius:10px;font-size:13px;max-width:85%;word-break:break-word;white-space:pre-wrap}
+.chat-msg.user{align-self:flex-end;background:var(--blue);color:white}
+.chat-msg.ai{align-self:flex-start;background:var(--bg);color:var(--text)}
+.ai-daily-card{background:#FFF8E1;border:1px solid #FFE082;border-radius:10px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--text-third);font-style:italic}
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000}
+.modal{background:white;border-radius:12px;padding:24px;min-width:380px;max-width:480px;box-shadow:0 8px 32px rgba(0,0,0,0.2)}
+.modal-title{font-size:16px;font-weight:bold;margin-bottom:12px}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.stat-card{background:var(--white);border-radius:10px;border:1px solid var(--border);padding:12px;text-align:center}
+.stat-card .stat-val{font-size:22px;font-weight:bold;margin-top:4px}
+.tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px}
+.tag-green{background:#E8F5E9;color:var(--green)}
+.tag-red{background:#FFEBEE;color:var(--red)}
+.tag-orange{background:#FFF3E0;color:var(--orange)}
+.tag-blue{background:var(--blue-light);color:var(--blue)}
+.water-cup{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:22px;cursor:pointer;font-size:20px;border:2px solid var(--border);transition:all 0.15s;margin:4px}
+.water-cup.filled{background:var(--blue-light);border-color:var(--blue)}
+.water-cup:hover{transform:scale(1.1)}
+.progress-bar{height:8px;background:var(--border);border-radius:4px;overflow:hidden}
+.progress-bar .fill{height:100%;background:var(--blue);border-radius:4px;transition:width 0.3s}
+.chip{cursor:pointer;padding:4px 10px;border-radius:12px;font-size:11px;border:1px solid var(--border);background:var(--white);display:inline-block;margin:2px;transition:all 0.15s}
+.chip:hover{background:var(--blue-light);border-color:var(--blue)}
+.chip.active{background:var(--blue);color:white;border-color:var(--blue)}
+.mood-btn{cursor:pointer;font-size:24px;padding:4px 8px;border-radius:8px;border:2px solid transparent;transition:all 0.15s}
+.mood-btn:hover{border-color:var(--blue)}
+.mood-btn.selected{border-color:var(--blue);background:var(--blue-light)}
+</style>
+</head>
+<body>\n  <div id="app">
+    <div id="top-bar">
+      <span id="app-title">🏠 租房管理</span>
+      <div class="spacer"></div>
+      <span id="bottom-ai" style="font-size:12px;color:var(--text-third);font-style:italic">🐱 哈基米</span>
+    </div>
+    <div id="tabs">
+      <div class="tab active" onclick="switchTab('rooms')">🏠 房间管理</div>
+      <div class="tab" onclick="switchTab('tenants')">👤 租客管理</div>
+      <div class="tab" onclick="switchTab('contracts')">📄 合同管理</div>
+      <div class="tab" onclick="switchTab('meters')">🔌 水电表</div>
+      <div class="tab" onclick="switchTab('bills')">💰 收租计划</div>
+    </div>
+    <div id="content">
+      <div class="tab-page active" id="page-rooms"><div id="rooms-content"></div></div>
+      <div class="tab-page" id="page-tenants"><div id="tenants-content"></div></div>
+      <div class="tab-page" id="page-contracts"><div id="contracts-content"></div></div>
+      <div class="tab-page" id="page-meters"><div id="meters-content"></div></div>
+      <div class="tab-page" id="page-bills"><div id="bills-content"></div></div>
+    </div>
+    <div id="bottom-bar">
+      <span id="bottom-status">已就绪</span>
+      <span class="spacer"></span>
+      <span id="bottom-tip" style="color:var(--text-third);font-size:11px">已连接后端</span>
+    </div>
+  </div>
+
+<script>
+var API = 'http://127.0.0.1:18520';
+async function api(path, opts) {
+  if (!opts) opts = {};
+  try {
+    var r = await fetch(API+path, {
+      method: opts.method||'GET',
+      headers: opts.body ? {'Content-Type':'application/json'} : {},
+      body: opts.body
+    });
+    return await r.json();
+  } catch(e) { return null; }
+}
+async function rental(table, action, data) {
+  return await api('/api/rental', {
+    method:'POST',
+    body: JSON.stringify({table:table, action:action, data:data||{}})
+  });
+}
+
+var currentTab = 'rooms';
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active')});
+  document.querySelectorAll('.tab-page').forEach(function(t){t.classList.remove('active')});
+  document.querySelector('.tab[onclick*="'+name+'"]').classList.add('active');
+  document.getElementById('page-'+name).classList.add('active');
+  currentTab = name;
+  loadTab(name);
+}
+function loadTab(name) {
+  if (name=='rooms') loadRooms();
+  else if (name=='tenants') loadTenants();
+  else if (name=='contracts') loadContracts();
+  else if (name=='meters') loadMeters();
+  else if (name=='bills') loadBills();
+}
+
+function showModal(html) {
+  closeModal();
+  var o = document.createElement('div');
+  o.className = 'modal-overlay'; o.id = '_modal';
+  o.innerHTML = '<div class="modal" onclick="event.stopPropagation()">'+html+'</div>';
+  o.onclick = closeModal;
+  document.body.appendChild(o);
+}
+function closeModal() { var m = document.getElementById('_modal'); if(m) m.remove(); }
+function M(h){showModal(h)}
+function CM(){closeModal()}
+
+/* 1. 房间管理 */
+async function loadRooms() {
+  var blds = await rental("buildings","list") || [];
+  var rooms = await rental("rooms","list") || [];
+  var h = '<div class=\"toolbar\"><button class=\"btn btn-primary btn-sm\" onclick=\"showAddRoom()\">+ 房间</button>';\n  h += '<span style=\"font-size:12px;color:var(--text-sec);margin-left:12px\">'+rooms.length+' / '+blds.length+'</span></div>';\n  document.getElementById("rooms-content").innerHTML = h;\n}\n\nfunction showAddRoom() {\n  rental("buildings","list").then(function(blds){\n    var h='<div class=\"modal-title\">添加房间</div><div class=\"form-group\"><label>楼房</label><select id=\"f_bid\">';\n    (blds||[]).forEach(function(b){h+='<option value=\"'+b.id+'\">'+b.name+'</option>'});\n    h+='</select></div><div class=\"form-group\"><label>房间号</label><input type=\"text\" id=\"f_room\"></div><div class=\"modal-actions\"><button class=\"btn btn-outline\" onclick=\"CM()\">取消</button><button class=\"btn btn-primary\" onclick=\"addRoom()\">添加</button></div>';\n    M(h);\n  });\n}\n\nasync function loadTenants() {
+  var ts = await rental('tenants','list',{active_only:false}) || [];
+  var h = '<div class="toolbar"><button class="btn btn-primary btn-sm" onclick="showAddTenant()">+ 添加租客</button>';
+  h += '<span style="font-size:12px;color:var(--text-sec);margin-left:12px">'+ts.length+' 人</span></div>';
+  h += '<div class="table-wrap"><table><thead><tr><th>姓名</th><th>手机号</th><th>状态</th><th></th></tr></thead><tbody>';
+  ts.forEach(function(t){
+    h += '<tr><td>'+t.name+'</td><td>'+t.phone+'</td><td>'+(t.status=='active'?'<span class="tag tag-green">在租</span>':'<span class="tag tag-orange">已退租</span>')+'</td>';
+    h += '<td><button class="btn btn-sm btn-outline" onclick="editTenant('+t.id+',''+t.name+'',''+t.phone+'')">编辑</button></td></tr>';
+  });
+  h += '</tbody></table></div>';
+  document.getElementById('tenants-content').innerHTML = h;
+}
+function showAddTenant() {
+  M('<div class="modal-title">添加租客</div><div class="form-group"><label>姓名</label><input id="f_tn"></div><div class="form-group"><label>手机号</label><input id="f_tp"></div><div class="form-group"><label>身份证</label><input id="f_ti"></div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddTenant()">添加</button></div>');
+}
+function doAddTenant() {
+  var n=document.getElementById('f_tn').value; if(!n)return;
+  rental('tenants','add',{name:n,phone:document.getElementById('f_tp').value,id_card:document.getElementById('f_ti').value}).then(function(){CM();loadTenants()});
+}
+
+/* 3. 合同管理 */
+async function loadContracts() {
+  var cs = await rental('contracts','list',{active_only:true}) || [];
+  var h = '<div class="toolbar"><button class="btn btn-primary btn-sm" onclick="showAddContract()">+ 新签合同</button>';
+  h += '<span style="font-size:12px;color:var(--text-sec);margin-left:12px">'+cs.length+' 份有效</span></div>';
+  h += '<div class="table-wrap"><table><thead><tr><th>租客</th><th>房间</th><th>月租金</th><th>水/电单价</th><th>起租日</th><th></th></tr></thead><tbody>';
+  cs.forEach(function(c){
+    h += '<tr><td>'+c.tenant_name+'</td><td>'+(c.room_number||'')+'</td><td style="font-weight:bold">¥'+c.monthly_rent+'</td>';
+    h += '<td>水'+c.water_unit_price+'/电'+c.electric_unit_price+'</td><td>'+c.start_date+'</td>';
+    h += '<td><button class="btn btn-sm btn-danger" onclick="endContract('+c.id+')">终止</button></td></tr>';
+  });
+  h += '</tbody></table></div>';
+  document.getElementById('contracts-content').innerHTML = h;
+}
+function showAddContract() {
+  Promise.all([rental('tenants','list'), rental('rooms','list')]).then(function(rr){
+    var ts=rr[0]||[], rs=rr[1]||[];
+    var h='<div class="modal-title">新签合同</div><div class="form-group"><label>租客</label><select id="f_ct">';
+    ts.forEach(function(t){h+='<option value="'+t.id+'">'+t.name+'</option>'});
+    h+='</select></div><div class="form-group"><label>房间</label><select id="f_cr">';
+    rs.forEach(function(r){h+='<option value="'+r.id+'">'+(r.room_number||'')+'</option>'});
+    h+='</select></div><div class="grid2"><div class="form-group"><label>起租日</label><input type="date" id="f_cs"></div>';
+    h+='<div class="form-group"><label>结束日</label><input type="date" id="f_ce"></div>';
+    h+='<div class="form-group"><label>月租金</label><input type="number" id="f_cr2" step="0.01"></div>';
+    h+='<div class="form-group"><label>押金</label><input type="number" id="f_cd" step="0.01"></div>';
+    h+='<div class="form-group"><label>水单价</label><input type="number" id="f_cw" step="0.01"></div>';
+    h+='<div class="form-group"><label>电单价</label><input type="number" id="f_ce2" step="0.01"></div></div>';
+    h+='<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddContract()">创建</button></div>';
+    M(h);
+  });
+}
+function doAddContract() {
+  var d={
+    tenant_id:parseInt(document.getElementById('f_ct').value),
+    room_id:parseInt(document.getElementById('f_cr').value),
+    start_date:document.getElementById('f_cs').value||'',
+    end_date:document.getElementById('f_ce').value||'',
+    monthly_rent:parseFloat(document.getElementById('f_cr2').value)||0,
+    deposit:parseFloat(document.getElementById('f_cd').value)||0,
+    water_price:parseFloat(document.getElementById('f_cw').value)||0,
+    electric_price:parseFloat(document.getElementById('f_ce2').value)||0
+  };
+  if(!d.start_date||!d.tenant_id)return;
+  rental('contracts','add',d).then(function(){CM();loadContracts()});
+}
+function endContract(id){if(confirm('终止合同？'))rental('contracts','end',{id:id}).then(function(){loadContracts()})}
+
+/* 4. 水电表 */
+async function loadMeters() {
+  var ms = await rental('meters','list') || [];
+  var h = '<div class="toolbar"><button class="btn btn-primary btn-sm" onclick="showAddMeter()">+ 添加表具</button>';
+  h += '<span style="font-size:12px;color:var(--text-sec);margin-left:12px">'+ms.length+' 个表具</span></div>';
+  h += '<div class="table-wrap"><table><thead><tr><th>房间</th><th>类型</th><th>编号</th><th>初始读数</th><th>最近抄表</th></tr></thead><tbody>';
+  for (var i=0;i<ms.length;i++) {
+    var m=ms[i];
+    var lr = await rental('readings','latest',{meter_id:m.id});
+    var latest = lr ? lr.reading+' ('+lr.reading_date+')' : '未抄表';
+    var tt = m.type=='water'?'水表':'电表';
+    h += '<tr><td>'+(m.room_number||'')+'</td><td>'+tt+'</td><td>'+m.meter_no+'</td><td>'+m.init_reading+'</td><td><a href="#" onclick="showAddReading('+m.id+');return false">'+latest+'</a></td></tr>';
+  }
+  h += '</tbody></table></div>';
+  document.getElementById('meters-content').innerHTML = h;
+}
+function showAddMeter() {
+  rental('rooms','list').then(function(rs){
+    var h='<div class="modal-title">添加表具</div><div class="form-group"><label>房间</label><select id="f_mr">';
+    (rs||[]).forEach(function(r){h+='<option value="'+r.id+'">'+(r.room_number||'')+'</option>'});
+    h+='</select></div><div class="grid2"><div class="form-group"><label>类型</label><select id="f_mt"><option value="water">水表</option><option value="electric">电表</option></select></div>';
+    h+='<div class="form-group"><label>编号</label><input id="f_mn"></div>';
+    h+='<div class="form-group"><label>初始读数</label><input type="number" id="f_mi" step="0.01"></div></div>';
+    h+='<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddMeter()">添加</button></div>';
+    M(h);
+  });
+}
+function doAddMeter() {
+  var d={room_id:parseInt(document.getElementById('f_mr').value),type:document.getElementById('f_mt').value,meter_no:document.getElementById('f_mn').value,init_reading:parseFloat(document.getElementById('f_mi').value)||0};
+  rental('meters','add',d).then(function(){CM();loadMeters()});
+}
+function showAddReading(mid) {
+  var t=new Date().toISOString().split('T')[0];
+  M('<div class="modal-title">📝 抄表</div><div class="form-group"><label>日期</label><input type="date" id="f_rd" value="'+t+'"></div><div class="form-group"><label>读数</label><input type="number" id="f_rr" step="0.01"></div><div class="form-group"><label>备注</label><input id="f_rrk"></div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddReading('+mid+')">保存</button></div>');
+}
+function doAddReading(mid) {
+  var d={meter_id:mid,reading_date:document.getElementById('f_rd').value||'',reading:parseFloat(document.getElementById('f_rr').value)||0,remark:document.getElementById('f_rrk').value||''};
+  if(!d.reading_date||!d.reading)return;
+  rental('readings','add',d).then(function(){CM();loadMeters()});
+}
+
+/* 5. 收租计划 */
+async function loadBills() {
+  var n=new Date(), m=n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0');
+  var bs = await rental('bills','list',{month:m}) || [];
+  var total = bs.reduce(function(s,b){return s+(b.total_amount||0)},0);
+  var paidN = bs.filter(function(b){return b.status=='paid'}).length;
+  var unpaidN = bs.filter(function(b){return b.status=='unpaid'}).length;
+  var h = '<div class="summary-row"><div class="stat-card"><div>应收</div><div class="stat-val" style="color:var(--blue)">¥'+total.toFixed(2)+'</div></div>';
+  h += '<div class="stat-card"><div>本月账单</div><div class="stat-val">'+bs.length+'</div></div>';
+  h += '<div class="stat-card"><div>已缴</div><div class="stat-val" style="color:var(--green)">'+paidN+'</div></div>';
+  h += '<div class="stat-card"><div>未缴</div><div class="stat-val" style="color:var(--red)">'+unpaidN+'</div></div></div>';
+  h += '<div class="toolbar"><button class="btn btn-primary btn-sm" onclick="showAddBill()">+ 生成账单</button>';
+  h += '<input type="month" id="f_bm" value="'+m+'" style="width:160px" onchange="loadBills()">';
+  h += '</div><div class="table-wrap"><table><thead><tr><th>租客</th><th>房间</th><th>月份</th><th>租金</th><th>水</th><th>电</th><th>总额</th><th>状态</th><th></th></tr></thead><tbody>';
+  bs.forEach(function(b){
+    var st = b.status=='paid'?'<span class="tag tag-green">已缴</span>':b.status=='partial'?'<span class="tag tag-orange">部分</span>':'<span class="tag tag-red">未缴</span>';
+    h += '<tr><td>'+b.tenant_name+'</td><td>'+b.room_number+'</td><td>'+b.billing_month+'</td>';
+    h += '<td>¥'+b.rent_amount+'</td><td>¥'+(b.water_fee||0)+'</td><td>¥'+(b.electric_fee||0)+'</td>';
+    h += '<td style="font-weight:bold;color:var(--blue)">¥'+b.total_amount+'</td><td>'+st+'</td>';
+    h += '<td><button class="btn btn-sm btn-success" onclick="payBill('+b.id+','+b.total_amount+')">收款</button></td></tr>';
+  });
+  h += '</tbody></table></div>';
+  document.getElementById('bills-content').innerHTML = h;
+}
+function showAddBill() {
+  rental('contracts','list').then(function(cs){
+    var n=new Date(),m=n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0');
+    var h='<div class="modal-title">生成账单</div><div class="form-group"><label>合同</label><select id="f_bc">';
+    (cs||[]).forEach(function(c){h+='<option value="'+c.id+'">'+c.tenant_name+' ¥'+c.monthly_rent+'</option>'});
+    h+='</select></div><div class="form-group"><label>月份</label><input type="month" id="f_bm2" value="'+m+'"></div>';
+    h+='<div class="grid2"><div class="form-group"><label>水费</label><input type="number" id="f_bw" step="0.01"></div>';
+    h+='<div class="form-group"><label>电费</label><input type="number" id="f_be" step="0.01"></div>';
+    h+='<div class="form-group"><label>杂费</label><input type="number" id="f_bo" step="0.01"></div></div>';
+    h+='<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddBill()">生成</button></div>';
+    M(h);
+  });
+}
+function doAddBill() {
+  var cid=parseInt(document.getElementById('f_bc').value);
+  rental('contracts','get',{id:cid}).then(function(c){
+    var d={contract_id:cid,billing_month:document.getElementById('f_bm2').value,rent_amount:c.monthly_rent||0,water_fee:parseFloat(document.getElementById('f_bw').value)||0,electric_fee:parseFloat(document.getElementById('f_be').value)||0,other_fee:parseFloat(document.getElementById('f_bo').value)||0};
+    rental('bills','add',d).then(function(){CM();loadBills()});
+  });
+}
+function payBill(bid, total) {
+  M('<div class="modal-title">💰 收款</div><div class="form-group"><label>金额</label><input type="number" id="f_pa" step="0.01" value="'+total+'"></div><div class="form-group"><label>方式</label><select id="f_pp"><option>微信</option><option>支付宝</option><option>现金</option></select></div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-success" onclick="doPay('+bid+')">确认收款</button></div>');
+}
+function doPay(bid) {
+  var d={bill_id:bid,amount:parseFloat(document.getElementById('f_pa').value)||0,pay_method:document.getElementById('f_pp').value};
+  if(!d.amount||d.amount<=0)return;
+  rental('payments','add',d).then(function(){CM();loadBills()});
+}
+
+document.getElementById('bottom-status').textContent = '就绪';
+loadRooms();
+</script>
+\n</body>
+</html>
