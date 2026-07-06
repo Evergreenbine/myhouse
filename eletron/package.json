@@ -1,0 +1,14 @@
+{
+  "name": "manbo",
+  "version": "1.0.0",
+  "description": "哈基米曼波",
+  "main": "main.js",
+  "author": "哈基米",
+  "scripts": {
+    "start": "electron .",
+    "build": "node pack.js"
+  },
+  "devDependencies": {
+    "electron": "^42.4.0"
+  }
+}

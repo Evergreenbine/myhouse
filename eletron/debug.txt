@@ -1,0 +1,59 @@
+=== sendAIChat ===
+async function sendAIChat(){
+  var inp=document.getElementById('ai-chat-input');var q=inp.value.trim();if(!q)return;inp.value='';
+  var cl=document.getElementById('ai-chat-list');
+  cl.innerHTML+=buildChatBubble('user',q);
+  var thinkId='ai-think-'+Date.now();
+  cl.innerHTML+='<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:12px"><div style="flex-shrink:0;width:32px;height:32px;border-radius:16px;overflow:hidden"><img src="'+getAIAvatar()+'" style="width:32px;height:32px;border-radius:16px;object-fit:cover"></div><div class="chat-bubble-ai" id="'+thinkId+'" style="font-size:11px;color:var(--text-third);font-style:italic">🐱 思考中...</div></div>';
+  cl.scrollTop=cl.scrollHeight;
+  var dots=0;
+  var thinkTimer=setInterval(function(){dots=(dots+1)%4;var td=document.getElementById(thinkId);if(td)td.textContent='🐱 思考中'+'.'.repeat(dots)},500);
+  try{
+    var model=S.aiModel||'deepseek-v4-flash';
+    S.chatHistory.push({role:'user',content:q});
+    var recentHistory=S.chatHistory.slice(-20);
+    var reply='';
+      // Try streaming
+      try{
+        var sr=await fetch(API+'/api/ai/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:q,model:model,personality:S.aiPersona||'warm',history:recentHistory.slice(0,-1)})});
+        var rdr=sr.body.getReader();var dcd=new TextDecoder();var buf='';
+        var td=document.getElementById(thinkId);
+        while(true){
+          var rt=await rdr.read();if(rt.done)break;
+          buf+=dcd.decode(rt.value,{stream:true});
+          var ls=buf.split('
+');buf=ls.pop();
+          for(var li=0;li<ls.length;li++){
+            var ln=ls[li];
+            if(ln.startsWith('data: ')){
+              var dt=ln.slice(6);
+              if(dt==='[DONE]')break;
+              try{var pp=JSON.parse(dt);if(pp.token){reply+=pp.token;if(td)td.innerHTML=renderMarkdown(reply);}}catch(e){}
+            }
+          }
+        }
+      }catch(e){
+        // Fallback to non-streaming
+        var rr=await api('/api/ai/chat',{method:'POST',body:JSON.stringify({prompt:q,model:model,use_tools:true,personality:S.aiPersona||'warm',history:recentHistory.slice(0,-1)})});
+        reply=rr.reply||'';
+      }
+      clearInterval(thinkTimer);
+      var td2=document.getElementById(thinkId);if(td2){var p=td2.parentNode;if(p)p.remove();}cl.innerHTML+=buildChatBubble('ai',reply+(steps?'<div style="margin-top:4px">'+steps+'</div>':''));
+    S.chatHistory.push({role:'assistant',content:reply});
+    cl.scrollTop=cl.scrollHeight;
+  }catch(e){
+    clearInterval(thinkTimer);
+    var td=document.getElementById(thinkId);if(td)td.textContent='🐱 出错了: '+e.message;
+  }
+}
+
+=== renderMarkdown ===
+
+=== deleteConv ===
+function deleteConv(id){
+  if(!confirm("确定删除此对话？"))return;
+  api("/api/chat/delete",{method:"POST",body:JSON.stringify({id:id})}).then(function(){
+    var p=document.getElementById("ai-chat-panel");
+    if(p)p.querySelectorAll("[onclick*=switchAIConv("+id+")]").forEach(function(x){x.remove()});
+  });
+}
