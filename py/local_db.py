@@ -39,14 +39,29 @@ def init():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         building_id INTEGER NOT NULL REFERENCES buildings(id),
         room_number TEXT NOT NULL,
+        floor INTEGER DEFAULT 1,
+        status TEXT DEFAULT 'idle',
         created_at TEXT DEFAULT (datetime('now','localtime'))
     )""")
+    try:
+        c.execute("ALTER TABLE rooms ADD COLUMN floor INTEGER DEFAULT 1")
+    except:
+        pass
+    try:
+        c.execute("ALTER TABLE rooms ADD COLUMN status TEXT DEFAULT 'idle'")
+    except:
+        pass
     c.execute("""CREATE TABLE IF NOT EXISTS tenants (
         id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+        building_id INTEGER REFERENCES buildings(id),
         phone TEXT DEFAULT '', id_card TEXT DEFAULT '',
         status TEXT DEFAULT 'active',
         created_at TEXT DEFAULT (datetime('now','localtime'))
     )""")
+    try:
+        c.execute("ALTER TABLE tenants ADD COLUMN building_id INTEGER REFERENCES buildings(id)")
+    except:
+        pass
     c.execute("""CREATE TABLE IF NOT EXISTS contracts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id),
@@ -155,8 +170,8 @@ def delete_chat(conv_id):
 
 def add_building(name, address=''):
     c = _conn()
-    c.execute("INSERT INTO buildings (name, address) VALUES (?,?)", (name, address))
-    c.commit(); pk = c.lastrowid; c.close()
+    cur = c.execute("INSERT INTO buildings (name, address) VALUES (?,?)", (name, address))
+    c.commit(); pk = cur.lastrowid; c.close()
     return pk
 
 def get_buildings():
@@ -181,18 +196,18 @@ def delete_building(bid):
     c.execute("DELETE FROM buildings WHERE id=?", (bid,))
     c.commit(); c.close()
 
-def add_room(building_id, room_number):
+def add_room(building_id, room_number, floor=1, status='idle'):
     c = _conn()
-    c.execute("INSERT INTO rooms (building_id, room_number) VALUES (?,?)", (building_id, room_number))
-    c.commit(); pk = c.lastrowid; c.close()
+    cur = c.execute("INSERT INTO rooms (building_id, room_number, floor, status) VALUES (?,?,?,?)", (building_id, room_number, floor, status))
+    c.commit(); pk = cur.lastrowid; c.close()
     return pk
 
 def get_rooms(building_id=None):
     c = _conn()
     if building_id:
-        rows = c.execute("SELECT r.*,b.name AS building_name FROM rooms r JOIN buildings b ON r.building_id=b.id WHERE r.building_id=? ORDER BY r.room_number", (building_id,)).fetchall()
+        rows = c.execute("SELECT r.*,b.name AS building_name FROM rooms r JOIN buildings b ON r.building_id=b.id WHERE r.building_id=? ORDER BY COALESCE(r.floor,1), CAST(r.room_number AS INTEGER), r.room_number", (building_id,)).fetchall()
     else:
-        rows = c.execute("SELECT r.*,b.name AS building_name FROM rooms r JOIN buildings b ON r.building_id=b.id ORDER BY b.id,r.room_number").fetchall()
+        rows = c.execute("SELECT r.*,b.name AS building_name FROM rooms r JOIN buildings b ON r.building_id=b.id ORDER BY b.id,COALESCE(r.floor,1),CAST(r.room_number AS INTEGER),r.room_number").fetchall()
     c.close()
     return [dict(r) for r in rows]
 
@@ -202,30 +217,43 @@ def get_room(rid):
     c.close()
     return dict(r) if r else None
 
-def add_tenant(name, phone='', id_card=''):
+def update_room(rid, building_id, room_number, floor=1, status='idle'):
     c = _conn()
-    c.execute("INSERT INTO tenants (name, phone, id_card) VALUES (?,?,?)", (name, phone, id_card))
-    c.commit(); pk = c.lastrowid; c.close()
+    c.execute("UPDATE rooms SET building_id=?,room_number=?,floor=?,status=? WHERE id=?", (building_id, room_number, floor, status, rid))
+    c.commit(); c.close()
+
+def add_tenant(name, phone='', id_card='', status='active', building_id=None):
+    c = _conn()
+    cur = c.execute("INSERT INTO tenants (name, phone, id_card, status, building_id) VALUES (?,?,?,?,?)", (name, phone, id_card, status, building_id))
+    c.commit(); pk = cur.lastrowid; c.close()
     return pk
 
-def get_tenants(active_only=True):
+def get_tenants(active_only=True, building_id=None):
     c = _conn()
+    wh = []
+    params = []
     if active_only:
-        rows = c.execute("SELECT * FROM tenants WHERE status='active' ORDER BY id").fetchall()
-    else:
-        rows = c.execute("SELECT * FROM tenants ORDER BY id").fetchall()
+        wh.append("t.status='active'")
+    if building_id:
+        wh.append("t.building_id=?")
+        params.append(building_id)
+    sql = "SELECT t.*,b.name AS building_name FROM tenants t LEFT JOIN buildings b ON t.building_id=b.id"
+    if wh:
+        sql += " WHERE " + " AND ".join(wh)
+    sql += " ORDER BY t.id"
+    rows = c.execute(sql, params).fetchall()
     c.close()
     return [dict(r) for r in rows]
 
 def get_tenant(tid):
     c = _conn()
-    r = c.execute("SELECT * FROM tenants WHERE id=?", (tid,)).fetchone()
+    r = c.execute("SELECT t.*,b.name AS building_name FROM tenants t LEFT JOIN buildings b ON t.building_id=b.id WHERE t.id=?", (tid,)).fetchone()
     c.close()
     return dict(r) if r else None
 
-def update_tenant(tid, name, phone, id_card):
+def update_tenant(tid, name, phone, id_card, status='active', building_id=None):
     c = _conn()
-    c.execute("UPDATE tenants SET name=?,phone=?,id_card=? WHERE id=?", (name, phone, id_card, tid))
+    c.execute("UPDATE tenants SET name=?,phone=?,id_card=?,status=?,building_id=? WHERE id=?", (name, phone, id_card, status, building_id, tid))
     c.commit(); c.close()
 
 def set_tenant_status(tid, status):

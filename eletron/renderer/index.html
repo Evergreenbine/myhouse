@@ -75,7 +75,35 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator,input[type="month"]:
 /* Toolbar */
 .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
 .toolbar-divider{height:1px;background:#E4EBF5;margin:-4px 0 16px}
-.list-meta{font-size:12px;color:var(--text-third);padding:10px 2px 0}
+.list-meta{font-size:12px;color:var(--text-third);padding:10px 2px 0;text-align:right}
+.name-link{color:var(--blue);font-weight:600;cursor:pointer}
+.name-link:hover{text-decoration:underline}
+.tab-action-row{display:flex;align-items:flex-start;gap:18px;border-bottom:1px solid var(--border-light);margin-bottom:16px}
+.entity-action-row{display:flex;align-items:center;justify-content:flex-end;border-bottom:1px solid var(--border-light);padding-bottom:12px;margin-bottom:16px}
+.building-tabs{display:flex;gap:26px;overflow-x:auto;flex:1;min-width:0}
+.building-tab{appearance:none;-webkit-appearance:none;border:none;background:transparent;color:var(--text-sec);padding:0 0 10px;font-size:14px;line-height:20px;cursor:pointer;white-space:nowrap;transition:all 0.15s ease;border-bottom:2px solid transparent;font-family:inherit}
+.building-tab:hover{color:var(--blue)}
+.building-tab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;vertical-align:middle}
+.status-dot.rented{background:var(--green)}
+.status-dot.idle{background:#C9CDD4}
+.status-cell{text-align:center;width:72px}
+.custom-select{position:relative}
+.select-trigger{height:38px;border:1px solid #DDE6F2;border-radius:8px;padding:0 34px 0 12px;background:#F8FAFD;color:var(--text);display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:14px;box-shadow:inset 0 1px 2px rgba(31,35,41,0.02);transition:all 0.2s}
+.select-trigger:hover{background:var(--white);border-color:#C9D8FF}
+.select-trigger::after{content:"";position:absolute;right:14px;top:15px;width:7px;height:7px;border-right:1.5px solid var(--text-third);border-bottom:1.5px solid var(--text-third);transform:rotate(45deg)}
+.select-menu{display:none;position:absolute;left:0;right:0;top:42px;background:var(--white);border:1px solid var(--border-light);border-radius:8px;box-shadow:var(--shadow-md);padding:6px;z-index:1001;max-height:180px;overflow-y:auto}
+.custom-select.open .select-menu{display:block}
+.select-option{padding:8px 10px;border-radius:6px;font-size:14px;cursor:pointer;color:var(--text)}
+.select-option:hover{background:#F7FAFF;color:var(--blue)}
+.select-option.active{background:var(--blue-light);color:var(--blue);font-weight:600}
+.locked-field{height:38px;border:1px solid #E2E8F2;border-radius:8px;padding:0 12px;background:#F8FAFD;color:var(--text-sec);display:flex;align-items:center;font-size:14px}
+.status-switch-row{display:flex;align-items:center;gap:12px}
+.status-switch{width:46px;height:26px;border:none;border-radius:999px;background:#C9CDD4;position:relative;cursor:pointer;transition:all 0.2s}
+.status-switch::after{content:"";position:absolute;width:22px;height:22px;left:2px;top:2px;background:var(--white);border-radius:50%;box-shadow:0 1px 3px rgba(31,35,41,0.22);transition:all 0.2s}
+.status-switch.rented{background:var(--green)}
+.status-switch.rented::after{left:22px}
+.status-switch-label{font-size:13px;color:var(--text-sec)}
 
 /* Tables */
 .table-wrap{overflow-x:auto;border:1px solid var(--border-light);border-radius:var(--radius);background:var(--white);box-shadow:0 1px 2px rgba(31,35,41,0.03)}
@@ -215,30 +243,240 @@ function switchSideRent(name) {
 }
 function renderMain(html) { if (currentSection == 'basic') document.getElementById('main-content').innerHTML = html; else document.getElementById('main-content-rent').innerHTML = html; }
 function esc(v) { return String(v == null ? '' : v).replace(/[&<>'"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]; }); }
-function jsq(v) { return esc(v).replace(/\\/g, '\\\\'); }
+var buildingQuery = '';
+var currentRoomBuildingId = null;
+var currentTenantBuildingId = null;
 async function loadBuildings() {
   var blds = await rental('buildings','list') || [];
   var rooms = await rental('rooms','list') || [];
   var roomCount = {};
   rooms.forEach(function(r){ roomCount[r.building_id] = (roomCount[r.building_id] || 0) + 1; });
-  var h = '<div class="toolbar"><button class="btn btn-primary btn-sm" onclick="showAddBuilding()">+ \u6dfb\u52a0\u697c\u680b</button></div><div class="toolbar-divider"></div>';
+  var q = buildingQuery.trim().toLowerCase();
+  var shown = q ? blds.filter(function(b){
+    return String(b.name || '').toLowerCase().indexOf(q) >= 0 || String(b.address || '').toLowerCase().indexOf(q) >= 0;
+  }) : blds;
+  var h = '<div class="toolbar"><button class="btn btn-primary btn-sm" onclick="showAddBuilding()">+ \u6dfb\u52a0\u697c\u680b</button><input class="soft-input" id="building_query" value="'+esc(buildingQuery)+'" placeholder="\u8f93\u5165\u540d\u79f0\u6216\u5730\u5740\u67e5\u8be2" style="width:220px;height:32px"><button class="btn btn-outline btn-sm" onclick="queryBuildings()">\u67e5\u8be2</button></div><div class="toolbar-divider"></div>';
   if (blds.length == 0) h += '<div class="empty-state"><div class="icon">&#x1F3E2;</div><div>\u6682\u65e0\u697c\u680b\uff0c\u70b9\u51fb\u4e0a\u65b9\u6309\u94ae\u6dfb\u52a0</div></div>';
+  else if (shown.length == 0) h += '<div class="empty-state"><div class="icon">&#x1F50D;</div><div>\u6ca1\u6709\u627e\u5230\u5339\u914d\u7684\u697c\u680b</div></div>';
   else {
-    h += '<div class="table-wrap"><table><thead><tr><th>\u540d\u79f0</th><th>\u5730\u5740</th><th>\u623f\u95f4\u6570</th><th></th></tr></thead><tbody>';
-    blds.forEach(function(b){ h += '<tr><td><strong>'+esc(b.name)+'</strong></td><td>'+esc(b.address||'')+'</td><td>'+(roomCount[b.id]||0)+' \u95f4</td><td><button class="btn btn-sm btn-outline" onclick="editBuilding('+b.id+',\''+jsq(b.name)+'\',\''+jsq(b.address||'')+'\')">\u7f16\u8f91</button> <button class="btn btn-sm btn-danger" onclick="deleteBuilding('+b.id+')">\u5220\u9664</button></td></tr>'; });
+    h += '<div class="table-wrap"><table><thead><tr><th>\u540d\u79f0</th><th>\u5730\u5740</th><th>\u623f\u95f4\u6570</th></tr></thead><tbody>';
+    shown.forEach(function(b){ h += '<tr><td><span class="name-link" onclick="editBuilding('+Number(b.id)+')">'+esc(b.name)+'</span></td><td>'+esc(b.address||'')+'</td><td>'+(roomCount[b.id]||0)+' \u95f4</td></tr>'; });
     h += '</tbody></table></div>';
   }
-  h += '<div class="list-meta">\u5171 '+blds.length+' \u680b\u697c</div>';
+  h += '<div class="list-meta">\u5171 '+shown.length+' / '+blds.length+' \u680b\u697c</div>';
   renderMain(h);
 }
+function queryBuildings() { var el = document.getElementById('building_query'); buildingQuery = el ? el.value : ''; loadBuildings(); }
 function showAddBuilding() { M('<div class="soft-form"><div class="form-group"><label>\u540d\u79f0</label><input class="soft-input" id="f_bname" placeholder="\u5982\uff1aA\u680b"></div><div class="form-group"><label>\u5730\u5740</label><input class="soft-input" id="f_baddr" placeholder="\u5982\uff1aXX\u8defXX\u53f7"></div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doAddBuilding()">\u6dfb\u52a0</button></div></div>'); }
-function doAddBuilding() { var n = document.getElementById('f_bname').value; if (!n) return; rental('buildings','add',{name:n, address:document.getElementById('f_baddr').value}).then(function(){ CM(); loadBuildings(); }); }
-function editBuilding(id, name, addr) { M('<div class="modal-title">\u7f16\u8f91\u697c\u680b</div><div class="form-group"><label>\u540d\u79f0</label><input id="f_bname" value="'+esc(name)+'"></div><div class="form-group"><label>\u5730\u5740</label><input id="f_baddr" value="'+esc(addr)+'"></div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doUpdateBuilding('+id+')">\u4fdd\u5b58</button></div>'); }
-function doUpdateBuilding(id) { rental('buildings','update',{id:id, name:document.getElementById('f_bname').value, address:document.getElementById('f_baddr').value}).then(function(){ CM(); loadBuildings(); }); }
-function deleteBuilding(id) { if (confirm('\u786e\u5b9a\u5220\u9664\u8be5\u697c\u680b\uff1f\u5173\u8054\u7684\u623f\u95f4\u4e5f\u4f1a\u53d7\u5230\u5f71\u54cd\u3002')) rental('buildings','delete',{id:id}).then(function(){ loadBuildings(); }); }
-async function loadRooms() { var rooms = await rental('rooms','list') || []; renderMain('<div class="page-title">\u623f\u95f4\u4fe1\u606f</div><div class="toolbar"><button class="btn btn-primary btn-sm" onclick="showAddRoom()">+ \u6dfb\u52a0\u623f\u95f4</button><span style="font-size:12px;color:var(--text-sec);margin-left:12px">\u5171 '+rooms.length+' \u4e2a\u623f\u95f4</span></div><div class="empty-state"><div class="icon">&#x1F3E0;</div><div>\u623f\u95f4\u5217\u8868\u5df2\u52a0\u8f7d</div></div>'); }
-function showAddRoom(){ alert('\u623f\u95f4\u6dfb\u52a0\u7a97\u53e3\u5f85\u63a5\u5165'); }
-async function loadTenants() { var ts = await rental('tenants','list',{active_only:false}) || []; renderMain('<div class="page-title">\u79df\u5ba2\u4fe1\u606f</div><div class="toolbar"><button class="btn btn-primary btn-sm">+ \u6dfb\u52a0\u79df\u5ba2</button><span style="font-size:12px;color:var(--text-sec);margin-left:12px">\u5171 '+ts.length+' \u4eba</span></div><div class="empty-state"><div class="icon">&#x1F464;</div><div>\u79df\u5ba2\u5217\u8868\u5df2\u52a0\u8f7d</div></div>'); }
+function doAddBuilding() { var n = document.getElementById('f_bname').value.trim(); if (!n) { alert('\u8bf7\u8f93\u5165\u697c\u680b\u540d\u79f0'); return; } rental('buildings','add',{name:n, address:document.getElementById('f_baddr').value.trim()}).then(function(res){ if (!res || res.error) { alert((res && res.error) || '\u65b0\u589e\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u540e\u7aef\u670d\u52a1'); return; } CM(); loadBuildings(); }); }
+async function editBuilding(id) {
+  var b = await rental('buildings','get',{id:id});
+  if (!b || b.error) { alert('\u672a\u627e\u5230\u8be5\u697c\u680b'); return; }
+  M('<div class="modal-title">\u7f16\u8f91\u697c\u680b</div><div class="soft-form"><div class="form-group"><label>\u540d\u79f0</label><input class="soft-input" id="f_bname" value="'+esc(b.name)+'"></div><div class="form-group"><label>\u5730\u5740</label><input class="soft-input" id="f_baddr" value="'+esc(b.address||'')+'"></div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doUpdateBuilding('+Number(id)+')">\u4fdd\u5b58</button></div></div>');
+}
+function doUpdateBuilding(id) { var n = document.getElementById('f_bname').value.trim(); if (!n) { alert('\u8bf7\u8f93\u5165\u697c\u680b\u540d\u79f0'); return; } rental('buildings','update',{id:id, name:n, address:document.getElementById('f_baddr').value.trim()}).then(function(res){ if (!res || res.error) { alert((res && res.error) || '\u4fdd\u5b58\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u540e\u7aef\u670d\u52a1'); return; } CM(); loadBuildings(); }); }
+async function loadRooms() {
+  var buildings = await rental('buildings','list') || [];
+  if (buildings.length == 0) {
+    currentRoomBuildingId = null;
+    renderMain('<div class="toolbar"><button class="btn btn-primary btn-sm" onclick="switchSide(&quot;buildings&quot;)">+ \u5148\u6dfb\u52a0\u697c\u680b</button></div><div class="toolbar-divider"></div><div class="empty-state"><div class="icon">&#x1F3E0;</div><div>\u8bf7\u5148\u6dfb\u52a0\u697c\u680b\uff0c\u518d\u5f55\u5165\u623f\u95f4</div></div>');
+    return;
+  }
+  if (!currentRoomBuildingId || !buildings.some(function(b){ return Number(b.id) == Number(currentRoomBuildingId); })) currentRoomBuildingId = buildings[0].id;
+  var rooms = await rental('rooms','list',{building_id:currentRoomBuildingId}) || [];
+  var h = '<div class="tab-action-row"><div class="building-tabs">';
+  buildings.forEach(function(b){
+    var active = Number(b.id) == Number(currentRoomBuildingId) ? ' active' : '';
+    h += '<button class="building-tab'+active+'" onclick="switchRoomBuilding('+Number(b.id)+')">'+esc(b.name)+'</button>';
+  });
+  h += '</div><button class="btn btn-primary btn-sm" onclick="showAddRoom()">+ \u6dfb\u52a0\u623f\u95f4</button></div>';
+  if (rooms.length == 0) h += '<div class="empty-state"><div class="icon">&#x1F3E0;</div><div>\u5f53\u524d\u697c\u680b\u6682\u65e0\u623f\u95f4\uff0c\u70b9\u51fb\u4e0a\u65b9\u6309\u94ae\u6dfb\u52a0</div></div>';
+  else {
+    h += '<div class="table-wrap"><table><thead><tr><th>\u623f\u95f4\u53f7</th><th class="status-cell">\u72b6\u6001</th></tr></thead><tbody>';
+    rooms.forEach(function(r){
+      var rented = r.status == 'rented';
+      h += '<tr><td><span class="name-link" onclick="editRoom('+Number(r.id)+')">'+esc(r.room_number)+'</span></td><td class="status-cell"><span class="status-dot '+(rented ? 'rented' : 'idle')+'" title="'+(rented ? '\u5728\u79df' : '\u95f2\u7f6e')+'"></span></td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '<div class="list-meta">\u5171 '+rooms.length+' \u4e2a\u623f\u95f4</div>';
+  renderMain(h);
+}
+function switchRoomBuilding(id) { currentRoomBuildingId = id; loadRooms(); }
+function roomBuildingPicker(buildings, selectedId) {
+  var selected = buildings.find(function(b){ return Number(b.id) == Number(selectedId); }) || buildings[0];
+  var h = '<input type="hidden" id="f_room_building" value="'+Number(selected.id)+'"><div class="custom-select" id="room_building_picker"><div class="select-trigger" onclick="toggleRoomBuildingMenu()"><span id="room_building_label">'+esc(selected.name)+'</span></div><div class="select-menu">';
+  buildings.forEach(function(b){
+    var active = Number(b.id) == Number(selected.id) ? ' active' : '';
+    h += '<div class="select-option'+active+'" onclick="selectRoomBuildingFromPicker('+Number(b.id)+', this)">'+esc(b.name)+'</div>';
+  });
+  return h + '</div></div>';
+}
+function toggleRoomBuildingMenu() {
+  var el = document.getElementById('room_building_picker');
+  if (el) el.classList.toggle('open');
+}
+function selectRoomBuildingFromPicker(id, optionEl) {
+  var name = optionEl.textContent;
+  document.getElementById('f_room_building').value = id;
+  document.getElementById('room_building_label').textContent = name;
+  var picker = document.getElementById('room_building_picker');
+  if (picker) {
+    picker.classList.remove('open');
+    picker.querySelectorAll('.select-option').forEach(function(o){ o.classList.remove('active'); });
+    optionEl.classList.add('active');
+  }
+}
+function roomStatusSwitch(selected) {
+  var rented = selected == 'rented';
+  return '<input type="hidden" id="f_room_status" value="'+(rented ? 'rented' : 'idle')+'"><div class="status-switch-row"><button class="status-switch '+(rented ? 'rented' : '')+'" id="room_status_switch" onclick="toggleRoomStatus()" type="button"></button><span class="status-switch-label" id="room_status_label">'+(rented ? '\u5728\u79df' : '\u95f2\u7f6e')+'</span></div>';
+}
+function toggleRoomStatus() {
+  var input = document.getElementById('f_room_status');
+  var sw = document.getElementById('room_status_switch');
+  var label = document.getElementById('room_status_label');
+  var rented = input.value != 'rented';
+  input.value = rented ? 'rented' : 'idle';
+  sw.classList.toggle('rented', rented);
+  label.textContent = rented ? '\u5728\u79df' : '\u95f2\u7f6e';
+}
+async function showAddRoom() {
+  var buildings = await rental('buildings','list') || [];
+  if (buildings.length == 0) { alert('\u8bf7\u5148\u6dfb\u52a0\u697c\u680b'); return; }
+  var selectedId = currentRoomBuildingId || buildings[0].id;
+  M('<div class="soft-form"><div class="form-group"><label>\u6240\u5c5e\u697c\u680b</label>'+roomBuildingPicker(buildings, selectedId)+'</div><div class="form-group"><label>\u697c\u5c42</label><input class="soft-input" id="f_room_floor" type="number" value="1" min="-9" placeholder="\u5982\uff1a1"></div><div class="form-group"><label>\u623f\u95f4\u53f7</label><input class="soft-input" id="f_room_number" placeholder="\u5982\uff1a101"></div><div class="form-group"><label>\u72b6\u6001</label>'+roomStatusSwitch('idle')+'</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doAddRoom()">\u6dfb\u52a0</button></div></div>');
+}
+function doAddRoom() {
+  var buildingId = document.getElementById('f_room_building').value;
+  var floor = parseInt(document.getElementById('f_room_floor').value, 10);
+  var roomNumber = document.getElementById('f_room_number').value.trim();
+  var status = document.getElementById('f_room_status').value;
+  if (isNaN(floor)) { alert('\u8bf7\u8f93\u5165\u697c\u5c42'); return; }
+  if (!roomNumber) { alert('\u8bf7\u8f93\u5165\u623f\u95f4\u53f7'); return; }
+  rental('rooms','add',{building_id:buildingId, floor:floor, room_number:roomNumber, status:status}).then(function(res){
+    if (!res || res.error) { alert((res && res.error) || '\u65b0\u589e\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u540e\u7aef\u670d\u52a1'); return; }
+    currentRoomBuildingId = buildingId; CM(); loadRooms();
+  });
+}
+async function editRoom(id) {
+  var room = await rental('rooms','get',{id:id});
+  if (!room || room.error) { alert('\u672a\u627e\u5230\u8be5\u623f\u95f4'); return; }
+  var buildings = await rental('buildings','list') || [];
+  M('<div class="modal-title">\u7f16\u8f91\u623f\u95f4</div><div class="soft-form"><div class="form-group"><label>\u6240\u5c5e\u697c\u680b</label>'+roomBuildingPicker(buildings, room.building_id)+'</div><div class="form-group"><label>\u697c\u5c42</label><input class="soft-input" id="f_room_floor" type="number" value="'+esc(room.floor || 1)+'" min="-9"></div><div class="form-group"><label>\u623f\u95f4\u53f7</label><input class="soft-input" id="f_room_number" value="'+esc(room.room_number)+'"></div><div class="form-group"><label>\u72b6\u6001</label>'+roomStatusSwitch(room.status || 'idle')+'</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doUpdateRoom('+Number(id)+')">\u4fdd\u5b58</button></div></div>');
+}
+function doUpdateRoom(id) {
+  var buildingId = document.getElementById('f_room_building').value;
+  var floor = parseInt(document.getElementById('f_room_floor').value, 10);
+  var roomNumber = document.getElementById('f_room_number').value.trim();
+  var status = document.getElementById('f_room_status').value;
+  if (isNaN(floor)) { alert('\u8bf7\u8f93\u5165\u697c\u5c42'); return; }
+  if (!roomNumber) { alert('\u8bf7\u8f93\u5165\u623f\u95f4\u53f7'); return; }
+  rental('rooms','update',{id:id, building_id:buildingId, floor:floor, room_number:roomNumber, status:status}).then(function(res){
+    if (!res || res.error) { alert((res && res.error) || '\u4fdd\u5b58\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u540e\u7aef\u670d\u52a1'); return; }
+    currentRoomBuildingId = buildingId; CM(); loadRooms();
+  });
+}
+async function loadTenants() {
+  var buildings = await rental('buildings','list') || [];
+  if (buildings.length == 0) {
+    currentTenantBuildingId = null;
+    renderMain('<div class="toolbar"><button class="btn btn-primary btn-sm" onclick="switchSide(&quot;buildings&quot;)">+ \u5148\u6dfb\u52a0\u697c\u680b</button></div><div class="toolbar-divider"></div><div class="empty-state"><div class="icon">&#x1F464;</div><div>\u8bf7\u5148\u6dfb\u52a0\u697c\u680b\uff0c\u518d\u5f55\u5165\u79df\u5ba2</div></div>');
+    return;
+  }
+  if (!currentTenantBuildingId || !buildings.some(function(b){ return Number(b.id) == Number(currentTenantBuildingId); })) currentTenantBuildingId = buildings[0].id;
+  var tenants = await rental('tenants','list',{active_only:false, building_id:currentTenantBuildingId}) || [];
+  var h = '<div class="tab-action-row"><div class="building-tabs">';
+  buildings.forEach(function(b){
+    var active = Number(b.id) == Number(currentTenantBuildingId) ? ' active' : '';
+    h += '<button class="building-tab'+active+'" onclick="switchTenantBuilding('+Number(b.id)+')">'+esc(b.name)+'</button>';
+  });
+  h += '</div><button class="btn btn-primary btn-sm" onclick="showAddTenant()">+ \u6dfb\u52a0\u79df\u5ba2</button></div>';
+  if (tenants.length == 0) h += '<div class="empty-state"><div class="icon">&#x1F464;</div><div>\u6682\u65e0\u79df\u5ba2\uff0c\u70b9\u51fb\u53f3\u4e0a\u65b9\u6309\u94ae\u6dfb\u52a0</div></div>';
+  else {
+    h += '<div class="table-wrap"><table><thead><tr><th>\u59d3\u540d</th><th>\u624b\u673a\u53f7</th><th>\u8bc1\u4ef6\u53f7</th><th class="status-cell">\u72b6\u6001</th></tr></thead><tbody>';
+    tenants.forEach(function(t){
+      var active = t.status != 'inactive';
+      h += '<tr><td><span class="name-link" onclick="editTenant('+Number(t.id)+')">'+esc(t.name)+'</span></td><td>'+esc(t.phone||'')+'</td><td>'+esc(t.id_card||'')+'</td><td class="status-cell"><span class="status-dot '+(active ? 'rented' : 'idle')+'" title="'+(active ? '\u6b63\u5e38' : '\u505c\u7528')+'"></span></td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '<div class="list-meta">\u5171 '+tenants.length+' \u4f4d\u79df\u5ba2</div>';
+  renderMain(h);
+}
+function switchTenantBuilding(id) { currentTenantBuildingId = id; loadTenants(); }
+function tenantBuildingPicker(buildings, selectedId) {
+  var selected = buildings.find(function(b){ return Number(b.id) == Number(selectedId); }) || buildings[0];
+  if (!selected) return '';
+  var h = '<input type="hidden" id="f_tenant_building" value="'+Number(selected.id)+'"><div class="custom-select" id="tenant_building_picker"><div class="select-trigger" onclick="toggleTenantBuildingMenu()"><span id="tenant_building_label">'+esc(selected.name)+'</span></div><div class="select-menu">';
+  buildings.forEach(function(b){
+    var active = Number(b.id) == Number(selected.id) ? ' active' : '';
+    h += '<div class="select-option'+active+'" onclick="selectTenantBuildingFromPicker('+Number(b.id)+', this)">'+esc(b.name)+'</div>';
+  });
+  return h + '</div></div>';
+}
+function toggleTenantBuildingMenu() {
+  var el = document.getElementById('tenant_building_picker');
+  if (el) el.classList.toggle('open');
+}
+function selectTenantBuildingFromPicker(id, optionEl) {
+  document.getElementById('f_tenant_building').value = id;
+  document.getElementById('tenant_building_label').textContent = optionEl.textContent;
+  var picker = document.getElementById('tenant_building_picker');
+  if (picker) {
+    picker.classList.remove('open');
+    picker.querySelectorAll('.select-option').forEach(function(o){ o.classList.remove('active'); });
+    optionEl.classList.add('active');
+  }
+}
+function lockedTenantBuilding(buildings, selectedId) {
+  var selected = buildings.find(function(b){ return Number(b.id) == Number(selectedId); }) || buildings[0];
+  if (!selected) return '';
+  return '<input type="hidden" id="f_tenant_building" value="'+Number(selected.id)+'"><div class="locked-field">'+esc(selected.name)+'</div>';
+}
+function tenantStatusSwitch(selected) {
+  var active = selected != 'inactive';
+  return '<input type="hidden" id="f_tenant_status" value="'+(active ? 'active' : 'inactive')+'"><div class="status-switch-row"><button class="status-switch '+(active ? 'rented' : '')+'" id="tenant_status_switch" onclick="toggleTenantStatus()" type="button"></button><span class="status-switch-label" id="tenant_status_label">'+(active ? '\u6b63\u5e38' : '\u505c\u7528')+'</span></div>';
+}
+function toggleTenantStatus() {
+  var input = document.getElementById('f_tenant_status');
+  var sw = document.getElementById('tenant_status_switch');
+  var label = document.getElementById('tenant_status_label');
+  var active = input.value == 'inactive';
+  input.value = active ? 'active' : 'inactive';
+  sw.classList.toggle('rented', active);
+  label.textContent = active ? '\u6b63\u5e38' : '\u505c\u7528';
+}
+async function showAddTenant() {
+  var buildings = await rental('buildings','list') || [];
+  if (buildings.length == 0) { alert('\u8bf7\u5148\u6dfb\u52a0\u697c\u680b'); return; }
+  var selectedId = currentTenantBuildingId || buildings[0].id;
+  M('<div class="soft-form"><div class="form-group"><label>\u6240\u5c5e\u697c\u680b</label>'+tenantBuildingPicker(buildings, selectedId)+'</div><div class="form-group"><label>\u59d3\u540d</label><input class="soft-input" id="f_tenant_name" placeholder="\u5982\uff1a\u5f20\u4e09"></div><div class="form-group"><label>\u624b\u673a\u53f7</label><input class="soft-input" id="f_tenant_phone" placeholder="\u5982\uff1a13800000000"></div><div class="form-group"><label>\u8bc1\u4ef6\u53f7</label><input class="soft-input" id="f_tenant_id_card" placeholder="\u8eab\u4efd\u8bc1\u6216\u5176\u4ed6\u8bc1\u4ef6"></div><div class="form-group"><label>\u72b6\u6001</label>'+tenantStatusSwitch('active')+'</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doAddTenant()">\u6dfb\u52a0</button></div></div>');
+}
+function doAddTenant() {
+  var name = document.getElementById('f_tenant_name').value.trim();
+  if (!name) { alert('\u8bf7\u8f93\u5165\u79df\u5ba2\u59d3\u540d'); return; }
+  var buildingId = document.getElementById('f_tenant_building').value;
+  rental('tenants','add',{building_id:buildingId, name:name, phone:document.getElementById('f_tenant_phone').value.trim(), id_card:document.getElementById('f_tenant_id_card').value.trim(), status:document.getElementById('f_tenant_status').value}).then(function(res){
+    if (!res || res.error) { alert((res && res.error) || '\u65b0\u589e\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u540e\u7aef\u670d\u52a1'); return; }
+    currentTenantBuildingId = buildingId; CM(); loadTenants();
+  });
+}
+async function editTenant(id) {
+  var t = await rental('tenants','get',{id:id});
+  if (!t || t.error) { alert('\u672a\u627e\u5230\u8be5\u79df\u5ba2'); return; }
+  var buildings = await rental('buildings','list') || [];
+  var selectedId = currentTenantBuildingId || t.building_id || (buildings[0] && buildings[0].id);
+  M('<div class="modal-title">\u7f16\u8f91\u79df\u5ba2</div><div class="soft-form"><div class="form-group"><label>\u6240\u5c5e\u697c\u680b</label>'+lockedTenantBuilding(buildings, selectedId)+'</div><div class="form-group"><label>\u59d3\u540d</label><input class="soft-input" id="f_tenant_name" value="'+esc(t.name)+'"></div><div class="form-group"><label>\u624b\u673a\u53f7</label><input class="soft-input" id="f_tenant_phone" value="'+esc(t.phone||'')+'"></div><div class="form-group"><label>\u8bc1\u4ef6\u53f7</label><input class="soft-input" id="f_tenant_id_card" value="'+esc(t.id_card||'')+'"></div><div class="form-group"><label>\u72b6\u6001</label>'+tenantStatusSwitch(t.status || 'active')+'</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doUpdateTenant('+Number(id)+')">\u4fdd\u5b58</button></div></div>');
+}
+function doUpdateTenant(id) {
+  var name = document.getElementById('f_tenant_name').value.trim();
+  if (!name) { alert('\u8bf7\u8f93\u5165\u79df\u5ba2\u59d3\u540d'); return; }
+  var buildingId = document.getElementById('f_tenant_building').value;
+  rental('tenants','update',{id:id, building_id:buildingId, name:name, phone:document.getElementById('f_tenant_phone').value.trim(), id_card:document.getElementById('f_tenant_id_card').value.trim(), status:document.getElementById('f_tenant_status').value}).then(function(res){
+    if (!res || res.error) { alert((res && res.error) || '\u4fdd\u5b58\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u540e\u7aef\u670d\u52a1'); return; }
+    currentTenantBuildingId = buildingId; CM(); loadTenants();
+  });
+}
 async function loadContracts() { var cs = await rental('contracts','list',{active_only:true}) || []; renderMain('<div class="page-title">\u5408\u540c\u4fe1\u606f</div><div class="toolbar"><button class="btn btn-primary btn-sm">+ \u65b0\u7b7e\u5408\u540c</button><span style="font-size:12px;color:var(--text-sec);margin-left:12px">\u5171 '+cs.length+' \u4efd\u6709\u6548\u5408\u540c</span></div><div class="empty-state"><div class="icon">&#x1F4C4;</div><div>\u5408\u540c\u5217\u8868\u5df2\u52a0\u8f7d</div></div>'); }
 async function loadWaterMeters() { var ms = await rental('meters','list') || []; ms = ms.filter(function(m){return m.type=='water'}); renderMain('<div class="page-title">\u6c34\u8868\u4fe1\u606f</div><div class="toolbar"><button class="btn btn-primary btn-sm">+ \u6dfb\u52a0\u6c34\u8868</button><span style="font-size:12px;color:var(--text-sec);margin-left:12px">\u5171 '+ms.length+' \u4e2a\u6c34\u8868</span></div><div class="empty-state"><div class="icon">&#x1F4A7;</div><div>\u6c34\u8868\u5217\u8868\u5df2\u52a0\u8f7d</div></div>'); }
 async function loadElectricMeters() { var ms = await rental('meters','list') || []; ms = ms.filter(function(m){return m.type=='electric'}); renderMain('<div class="page-title">\u7535\u8868\u4fe1\u606f</div><div class="toolbar"><button class="btn btn-primary btn-sm">+ \u6dfb\u52a0\u7535\u8868</button><span style="font-size:12px;color:var(--text-sec);margin-left:12px">\u5171 '+ms.length+' \u4e2a\u7535\u8868</span></div><div class="empty-state"><div class="icon">&#x26A1;</div><div>\u7535\u8868\u5217\u8868\u5df2\u52a0\u8f7d</div></div>'); }
