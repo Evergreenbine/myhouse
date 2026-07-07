@@ -182,6 +182,7 @@ table a:hover{text-decoration:underline}
 .drawer-header .drawer-close{cursor:pointer;width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;font-size:20px;color:var(--text-sec);transition:all 0.15s}
 .drawer-header .drawer-close:hover{background:var(--bg);color:var(--text)}
 .drawer-body{flex:1;overflow-y:auto;padding:20px 24px}
+.drawer-step-panel{width:100%}
 .drawer-footer{padding:16px 24px;border-top:1px solid var(--border-light);flex-shrink:0;display:flex;justify-content:flex-end;gap:10px}
 .drawer-section{margin-bottom:20px}
 .drawer-section .section-label{font-size:12px;color:var(--text-sec);font-weight:500;margin-bottom:10px;display:flex;align-items:center;gap:6px}
@@ -201,7 +202,7 @@ table a:hover{text-decoration:underline}
 
 /* Steps */
 .drawer-steps{display:flex;align-items:center;padding:12px 24px;background:#F8FAFD;border-bottom:1px solid var(--border-light);flex-shrink:0;gap:0}
-.drawer-steps .step{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-third);flex:1;text-align:center;justify-content:center;position:relative}
+.drawer-steps .step{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-third);flex:1;text-align:center;justify-content:center;position:relative;border:none;background:transparent;cursor:pointer;padding:4px 0;font-family:inherit;line-height:1.4}
 .drawer-steps .step .step-num{width:22px;height:22px;border-radius:50%;background:#DEE0E3;color:white;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0}
 .drawer-steps .step.active .step-num{background:var(--blue)}
 .drawer-steps .step.done .step-num{background:var(--green)}
@@ -209,6 +210,10 @@ table a:hover{text-decoration:underline}
 .drawer-steps .step.done{color:var(--green)}
 .drawer-steps .step-line{width:24px;height:1px;background:#DEE0E3;flex-shrink:0}
 .drawer-steps .step.done+.step-line{background:var(--green)}
+
+/* Toast */
+.toast{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);background:#1F2329;color:#fff;padding:10px 24px;border-radius:8px;font-size:13px;z-index:9999;opacity:0;transition:opacity 0.3s;pointer-events:none}
+.toast.show{opacity:1}
 
 /* AI Float Button */
 #ai-float-btn{position:fixed;right:24px;bottom:50px;width:52px;height:52px;border-radius:50%;background:var(--white);box-shadow:0 4px 16px rgba(51,112,255,0.2),0 2px 6px rgba(0,0,0,0.08);cursor:pointer;z-index:900;display:flex;align-items:center;justify-content:center;transition:all 0.2s;border:none;overflow:hidden}
@@ -1231,60 +1236,32 @@ async function openPlanDrawer(contractId, tenantId, roomId, billId) {
   drawerUploads = { water: null, electric: null };
   var curStep = (curBill.id && curBill.status == 'paid') ? 3 : (curBill.id ? 2 : 1);
 
+  // 存储抽屉数据到全局
+  window._drawerData = {
+    contractId: contractId,
+    billId: curBill.id || 0,
+    contract: contract,
+    curBill: curBill,
+    lastBill: lastBill,
+    billingMonth: billingMonth,
+    curStep: curStep
+  };
+
+  // 构建抽屉壳子
   var h = '<div class="drawer-header"><span class="drawer-title">'+esc(contract.tenant_name||'')+' · '+esc(contract.room_number||'')+'</span><button class="drawer-close" onclick="closeDrawer()">✕</button></div>';
-  // 步骤条
-  h += '<div class="drawer-steps">';
-  h += '<div class="step '+(curStep>=1?'done':'active')+'"><span class="step-num">1</span>录入</div>';
+  h += '<div class="drawer-steps" id="drawer-steps-bar">';
+  h += '<button type="button" class="step '+(curStep>1?'done':curStep==1?'active':'')+'" onclick="switchDrawerStep(1)"><span class="step-num">1</span>录入</button>';
   h += '<div class="step-line"></div>';
-  h += '<div class="step '+(curStep>=2?'done':curStep==2?'active':'')+'"><span class="step-num">2</span>生成账单</div>';
+  h += '<button type="button" class="step '+(curStep>2?'done':curStep==2?'active':'')+'" onclick="switchDrawerStep(2)"><span class="step-num">2</span>生成账单</button>';
   h += '<div class="step-line"></div>';
-  h += '<div class="step '+(curStep>=3?'done':'')+'"><span class="step-num">3</span>完成收款</div>';
+  h += '<button type="button" class="step '+(curStep==3?'active':'')+'" onclick="switchDrawerStep(3)"><span class="step-num">3</span>完成收款</button>';
   h += '</div>';
-  h += '<div class="drawer-body">';
-
-  // 月租（锁定）
-  h += '<div class="drawer-section"><div class="section-label">📋 月租</div>';
-  h += '<div class="locked-field">¥'+Number(contract.monthly_rent||0).toFixed(2)+' / 月</div></div>';
-
-  // 水费对比
-  h += '<div class="drawer-section"><div class="section-label">💧 水费</div>';
-  h += '<div class="compare-row">';
-  h += '<div class="compare-item"><div class="compare-label">上月读数</div><div class="compare-val">'+(lastBill?Number(lastBill.water_fee||0).toFixed(2):'—')+' 元</div></div>';
-  h += '<div class="compare-item"><div class="compare-label">上月电费</div><div class="compare-val">'+(lastBill?Number(lastBill.electric_fee||0).toFixed(2):'—')+' 元</div></div>';
-  h += '</div>';
-  h += '<div class="form-group"><label>本月水费（元）</label><input class="soft-input" type="number" id="draw_water" value="'+Number(curBill.water_fee||0)+'" step="0.01" placeholder="0.00"></div>';
-  h += '<div class="form-group"><label>水表照片</label><div class="upload-area" id="upload_water" onclick="document.getElementById(\'file_water\').click()"><input type="file" id="file_water" accept="image/*" onchange="previewUpload(\'water\',this)"><div class="upload-preview" id="preview_water">📷 点击上传水表照片</div></div></div>';
-
-  // 电费
-  h += '<div class="drawer-section"><div class="section-label">⚡ 电费</div>';
-  h += '<div class="form-group"><label>本月电费（元）</label><input class="soft-input" type="number" id="draw_electric" value="'+Number(curBill.electric_fee||0)+'" step="0.01" placeholder="0.00"></div>';
-  h += '<div class="form-group"><label>电表照片</label><div class="upload-area" id="upload_electric" onclick="document.getElementById(\'file_electric\').click()"><input type="file" id="file_electric" accept="image/*" onchange="previewUpload(\'electric\',this)"><div class="upload-preview" id="preview_electric">📷 点击上传电表照片</div></div></div>';
-
-  // 杂项
-  h += '<div class="drawer-section">';
-  h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span class="section-label" style="margin-bottom:0">📝 杂项</span><div style="display:flex;gap:4px"><button class="btn btn-sm btn-outline" onclick="addMiscRow()" style="padding:2px 8px;font-size:16px;line-height:1">+</button><button class="btn btn-sm btn-outline" onclick="removeCheckedMisc()" style="padding:2px 8px;font-size:16px;line-height:1">−</button></div></div>';
-  h += '<div class="table-wrap"><table id="misc_table"><thead><tr><th style="width:24px"></th><th>项目</th><th style="width:110px">金额（元）</th></tr></thead><tbody>';
-  h += '<tr><td><input type="checkbox" class="misc-check"></td><td><input class="soft-input misc-name" placeholder="如：维修费" style="height:32px"></td><td><input class="soft-input misc-amount" type="number" step="0.01" placeholder="0.00" style="height:32px" oninput="calcDrawerTotal()"></td></tr>';
-  h += '<tr><td><input type="checkbox" class="misc-check"></td><td><input class="soft-input misc-name" placeholder="如：卫生费" style="height:32px"></td><td><input class="soft-input misc-amount" type="number" step="0.01" placeholder="0.00" style="height:32px" oninput="calcDrawerTotal()"></td></tr>';
-  h += '</tbody></table></div>';
-  h += '</div>';
-
-  // 合计
-  var total = Number(contract.monthly_rent||0) + Number(curBill.water_fee||0) + Number(curBill.electric_fee||0) + Number(curBill.other_fee||0);
-  h += '<div class="drawer-section"><div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--blue-light);border-radius:8px"><span style="font-weight:500">合计应收</span><span style="font-size:20px;font-weight:700;color:var(--blue)" id="draw_total">¥'+total.toFixed(2)+'</span></div></div>';
-
-  h += '</div>';
+  h += '<div class="drawer-body" id="drawer-body-content"></div>';
   h += '<div class="drawer-footer">';
-  h += '<button class="btn btn-outline" onclick="closeDrawer()">取消</button>';
-  if (curBill.status == 'paid') {
-    h += '<span class="tag tag-green" style="padding:6px 14px;font-size:13px">✓ 已收款</span>';
-  } else {
-    h += '<button class="btn btn-primary" onclick="saveDrawer('+Number(contractId)+','+Number(curBill.id||0)+')">💾 保存数据</button>';
-    h += '<button class="btn btn-success" onclick="generateBillImage('+Number(contractId)+','+Number(curBill.id||0)+')">📋 生成账单图片</button>';
-  }
+  h += '<button class="btn btn-primary" id="drawer_save_btn" onclick="saveDrawer('+Number(contractId)+','+Number(curBill.id||0)+')" style="'+(curStep==1?'':'display:none')+'">保存数据</button>';
   h += '</div>';
 
-  // 渲染抽屉
+  // 渲染抽屉壳子
   var overlay = document.getElementById('_drawer_overlay');
   if (!overlay) {
     overlay = document.createElement('div'); overlay.id = '_drawer_overlay'; overlay.className = 'drawer-overlay';
@@ -1298,20 +1275,186 @@ async function openPlanDrawer(contractId, tenantId, roomId, billId) {
   }
   drawer.innerHTML = h;
   drawer.onclick = function(e){ e.stopPropagation(); };
+  switchDrawerStep(curStep);
   setTimeout(function(){ overlay.classList.add('open'); drawer.classList.add('open'); }, 10);
+}
 
-  // 监听金额变化实时计算合计
-  var calcDrawerTotal = function(){
-    var w = parseFloat(document.getElementById('draw_water').value)||0;
-    var e = parseFloat(document.getElementById('draw_electric').value)||0;
-    var o = 0;
-    document.querySelectorAll('.misc-amount').forEach(function(el){ o += parseFloat(el.value)||0; });
-    var t = Number(contract.monthly_rent||0) + w + e + o;
-    document.getElementById('draw_total').textContent = '¥'+t.toFixed(2);
-  };
-  document.getElementById('draw_water').oninput = calcDrawerTotal;
-  document.getElementById('draw_electric').oninput = calcDrawerTotal;
-  window.calcDrawerTotal = calcDrawerTotal;
+// ====== 生成步骤1 HTML：录入数据 ======
+function renderDrawerStep1() {
+  var d = window._drawerData || {};
+  var contract = d.contract || {};
+  var curBill = d.curBill || {};
+  var lastBill = d.lastBill;
+  var total = Number(contract.monthly_rent||0) + Number(curBill.water_fee||0) + Number(curBill.electric_fee||0) + Number(curBill.other_fee||0);
+  var h = '';
+  h += '<div class="drawer-section"><div class="section-label">📋 月租</div>';
+  h += '<div class="locked-field">¥'+Number(contract.monthly_rent||0).toFixed(2)+' / 月</div></div>';
+  h += '<div class="drawer-section"><div class="section-label">💧 水费</div>';
+  h += '<div class="compare-row">';
+  h += '<div class="compare-item"><div class="compare-label">上月读数</div><div class="compare-val">'+(lastBill?Number(lastBill.water_fee||0).toFixed(2):'—')+' 元</div></div>';
+  h += '<div class="compare-item"><div class="compare-label">上月电费</div><div class="compare-val">'+(lastBill?Number(lastBill.electric_fee||0).toFixed(2):'—')+' 元</div></div>';
+  h += '</div>';
+  h += '<div class="form-group"><label>本月水费（元）</label><input class="soft-input" type="number" id="draw_water" value="'+Number(curBill.water_fee||0)+'" step="0.01" placeholder="0.00" oninput="calcDrawerTotal()"></div>';
+  h += '<div class="form-group"><label>水表照片</label><div class="upload-area" id="upload_water"><input type="file" id="file_water" accept="image/*" onchange="previewUpload(\'water\',this)"><div class="upload-preview" id="preview_water">📷 点击上传水表照片</div></div></div>';
+  h += '<div class="drawer-section"><div class="section-label">⚡ 电费</div>';
+  h += '<div class="form-group"><label>本月电费（元）</label><input class="soft-input" type="number" id="draw_electric" value="'+Number(curBill.electric_fee||0)+'" step="0.01" placeholder="0.00" oninput="calcDrawerTotal()"></div>';
+  h += '<div class="form-group"><label>电表照片</label><div class="upload-area" id="upload_electric"><input type="file" id="file_electric" accept="image/*" onchange="previewUpload(\'electric\',this)"><div class="upload-preview" id="preview_electric">📷 点击上传电表照片</div></div></div>';
+  h += '<div class="drawer-section">';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span class="section-label" style="margin-bottom:0">📝 杂项</span><div style="display:flex;gap:4px"><button class="btn btn-sm btn-outline" onclick="addMiscRow()" style="padding:2px 8px;font-size:16px;line-height:1">+</button><button class="btn btn-sm btn-outline" onclick="removeCheckedMisc()" style="padding:2px 8px;font-size:16px;line-height:1">−</button></div></div>';
+  h += '<div class="table-wrap"><table id="misc_table"><thead><tr><th style="width:24px"></th><th>项目</th><th style="width:110px">金额（元）</th></tr></thead><tbody>';
+  h += '<tr><td><input type="checkbox" class="misc-check"></td><td><input class="soft-input misc-name" placeholder="如：维修费" style="height:32px"></td><td><input class="soft-input misc-amount" type="number" step="0.01" placeholder="0.00" style="height:32px" oninput="calcDrawerTotal()"></td></tr>';
+  h += '<tr><td><input type="checkbox" class="misc-check"></td><td><input class="soft-input misc-name" placeholder="如：卫生费" style="height:32px"></td><td><input class="soft-input misc-amount" type="number" step="0.01" placeholder="0.00" style="height:32px" oninput="calcDrawerTotal()"></td></tr>';
+  h += '</tbody></table></div>';
+  h += '</div>';
+  h += '<div class="drawer-section"><div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--blue-light);border-radius:8px"><span style="font-weight:500">合计应收</span><span style="font-size:20px;font-weight:700;color:var(--blue)" id="draw_total">¥'+total.toFixed(2)+'</span></div></div>';
+  return h;
+}
+
+// ====== 生成步骤2 HTML：账单预览 ======
+function renderDrawerStep2() {
+  var d = window._drawerData || {};
+  var contract = d.contract || {};
+  var curBill = d.curBill || {};
+  var billingMonth = d.billingMonth || '';
+
+  // 从步骤1输入读取当前值
+  var waterFee = 0, electricFee = 0, otherFee = 0;
+  var waterEl = document.getElementById('draw_water');
+  var elecEl = document.getElementById('draw_electric');
+  if (waterEl) waterFee = parseFloat(waterEl.value) || 0;
+  if (elecEl) electricFee = parseFloat(elecEl.value) || 0;
+  var miscEls = document.querySelectorAll('.misc-amount');
+  miscEls.forEach(function(el){ otherFee += parseFloat(el.value) || 0; });
+
+  // 获取水表/电表照片并存入全局数据（供生成图片使用）
+  var waterImg = '', elecImg = '';
+  var pw = document.getElementById('preview_water');
+  var pe = document.getElementById('preview_electric');
+  if (pw) { var wImg = pw.querySelector('img'); if (wImg) waterImg = wImg.src; }
+  if (pe) { var eImg = pe.querySelector('img'); if (eImg) elecImg = eImg.src; }
+  d.waterImg = waterImg; d.elecImg = elecImg;
+
+  var rentAmount = Number(contract.monthly_rent||0);
+  var total = rentAmount + waterFee + electricFee + otherFee;
+  var waterUnit = Number(contract.water_unit_price||0);
+  var elecUnit = Number(contract.electric_unit_price||0);
+  var tenantName = contract.tenant_name || '';
+  var roomNumber = contract.room_number || '';
+  var billNo = (billingMonth.replace('-','')) + roomNumber;
+  var today = new Date().toISOString().split('T')[0];
+
+  var h = '';
+  h += '<div class="drawer-section">';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">';
+  h += '<span class="section-label" style="margin-bottom:0">📋 账单预览</span>';
+  h += '<div style="display:flex;gap:4px">';
+  h += '<button class="btn btn-sm" onclick="generateBillImage('+Number(d.contractId)+',0,\'copy\')" style="padding:3px 10px;font-size:12px;color:var(--text-sec);background:var(--bg);border:1px solid var(--border);justify-content:center;border-radius:6px;gap:4px">📋 复制</button>';
+  h += '<button class="btn btn-sm" onclick="generateBillImage('+Number(d.contractId)+',0,\'save\')" style="padding:3px 10px;font-size:12px;color:var(--text-sec);background:var(--bg);border:1px solid var(--border);justify-content:center;border-radius:6px;gap:4px">💾 保存</button>';
+  h += '<button class="btn btn-sm btn-success" onclick="doPayNow('+Number(d.contractId)+','+Number(d.billId)+')" style="padding:3px 12px;font-size:12px;justify-content:center;border-radius:6px;gap:4px">✅ 完成收款</button>';
+  h += '</div></div>';
+  h += '<div style="border:1px solid var(--border-light);border-radius:8px;padding:16px;background:#FFFEF9;font-size:13px;line-height:1.8">';
+  h += '<div style="text-align:center;font-weight:600;font-size:15px;margin-bottom:2px">房租、水、电费（专用）收据</div>';
+  h += '<div style="font-size:11px;color:var(--text-third);margin-bottom:8px">No.'+esc(billNo)+'</div>';
+  h += '<div style="margin-bottom:6px"><span>房间：<b>'+esc(roomNumber)+'</b></span></div>';
+  h += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin:8px 0"><thead><tr style="background:#F5F5F5"><th style="padding:6px;border:1px solid #ddd">项目</th><th style="padding:6px;border:1px solid #ddd">本月读数</th><th style="padding:6px;border:1px solid #ddd">上月读数</th><th style="padding:6px;border:1px solid #ddd">实用量</th><th style="padding:6px;border:1px solid #ddd">单价</th><th style="padding:6px;border:1px solid #ddd">金额</th></tr></thead><tbody>';
+  h += '<tr><td style="padding:6px;border:1px solid #ddd">水费（吨）</td><td style="padding:6px;border:1px solid #ddd">—</td><td style="padding:6px;border:1px solid #ddd">—</td><td style="padding:6px;border:1px solid #ddd">'+(waterUnit>0?(waterFee/waterUnit).toFixed(1)+'吨':'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+waterUnit.toFixed(2)+'</td><td style="padding:6px;border:1px solid #ddd;font-weight:bold">¥'+waterFee.toFixed(2)+'</td></tr>';
+  h += '<tr><td style="padding:6px;border:1px solid #ddd">电费（度）</td><td style="padding:6px;border:1px solid #ddd">—</td><td style="padding:6px;border:1px solid #ddd">—</td><td style="padding:6px;border:1px solid #ddd">'+(elecUnit>0?(electricFee/elecUnit).toFixed(0)+'度':'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+elecUnit.toFixed(2)+'</td><td style="padding:6px;border:1px solid #ddd;font-weight:bold">¥'+electricFee.toFixed(2)+'</td></tr>';
+  h += '<tr><td style="padding:6px;border:1px solid #ddd">房租</td><td style="padding:6px;border:1px solid #ddd" colspan="4"></td><td style="padding:6px;border:1px solid #ddd;font-weight:bold">¥'+rentAmount.toFixed(2)+'</td></tr>';
+  miscEls.forEach(function(el, i){
+    var nameEl = document.querySelectorAll('.misc-name')[i];
+    var name = nameEl ? nameEl.value.trim() : '杂项';
+    var amt = parseFloat(el.value) || 0;
+    if (name || amt > 0) {
+      h += '<tr><td style="padding:6px;border:1px solid #ddd">'+esc(name||'杂项')+'</td><td style="padding:6px;border:1px solid #ddd" colspan="4"></td><td style="padding:6px;border:1px solid #ddd;font-weight:bold">¥'+amt.toFixed(2)+'</td></tr>';
+    }
+  });
+  h += '</tbody></table>';
+  h += '<div style="text-align:right;font-weight:700;font-size:15px;margin:8px 0">合计：<span style="color:var(--red);font-size:18px">¥'+total.toFixed(2)+'</span></div>';
+  // 底部信息，右对齐，多行
+  h += '<div style="text-align:right;font-size:12px;color:var(--text-sec);margin-top:4px;line-height:1.8">';
+  h += '<div>交款人：'+esc(tenantName)+'</div>';
+  h += '<div>收款人：吴钦腾</div>';
+  h += '<div>发单日期：'+today+'</div>';
+  h += '</div>';
+  // 分隔线 + 正方形水电表照片
+  if (waterImg || elecImg) {
+    h += '<hr style="margin:10px 0;border:none;border-top:1px dashed #ddd">';
+    if (waterImg && elecImg) {
+      h += '<div style="display:flex;gap:12px">';
+      h += '<img src="'+waterImg+'" style="width:300px;height:300px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
+      h += '<img src="'+elecImg+'" style="width:300px;height:300px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
+      h += '</div>';
+    } else if (waterImg) {
+      h += '<img src="'+waterImg+'" style="width:260px;height:260px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
+    } else if (elecImg) {
+      h += '<img src="'+elecImg+'" style="width:260px;height:260px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
+    }
+  }
+  h += '</div>'; // 收据框结束
+  // 收款录入区
+  h += '<div style="margin-top:14px;display:flex;gap:12px;align-items:flex-end">';
+  h += '<div class="form-group" style="margin-bottom:0;flex:1"><label style="font-size:12px">实收金额（元）</label><input class="soft-input" type="number" id="pay_amount" value="'+total.toFixed(2)+'" step="0.01" style="height:36px"></div>';
+  h += '<div class="form-group" style="margin-bottom:0;flex:1"><label style="font-size:12px">收款日期</label><input class="soft-input" type="date" id="pay_date" value="'+today+'" style="height:36px"></div>';
+  h += '<button class="btn btn-success btn-sm" onclick="confirmPayment('+Number(d.contractId)+','+Number(d.billId)+')" style="height:36px;padding:0 16px;white-space:nowrap">确认收款</button>';
+  h += '</div>';
+  h += '</div>';
+  return h;
+}
+
+// ====== 生成步骤3 HTML：完成收款 ======
+function renderDrawerStep3() {
+  var d = window._drawerData || {};
+  var contract = d.contract || {};
+  var curBill = d.curBill || {};
+  var h = '';
+  h += '<div class="drawer-section" style="text-align:center;padding:40px 20px">';
+  if (curBill.status == 'paid') {
+    h += '<div style="font-size:48px;margin-bottom:12px">✅</div>';
+    h += '<div style="font-size:16px;font-weight:600;color:var(--green);margin-bottom:8px">收款完成</div>';
+    h += '<div style="color:var(--text-sec);font-size:13px">该账单已于收款记录中确认</div>';
+  } else {
+    h += '<div style="font-size:48px;margin-bottom:12px">💳</div>';
+    h += '<div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px">确认收款</div>';
+    h += '<div style="color:var(--text-sec);font-size:13px;margin-bottom:16px">确认该租客已支付本月全部费用？</div>';
+    h += '<button class="btn btn-success" onclick="markPaid('+Number(d.contractId)+','+Number(d.billId)+','+Number(contract.tenant_id)+','+Number(contract.monthly_rent||0)+','+Number(curBill.water_fee||0)+','+Number(curBill.electric_fee||0)+','+Number(curBill.other_fee||0)+')">✅ 确认已收款</button>';
+  }
+  h += '</div>';
+  return h;
+}
+
+// ====== 步骤切换（用 innerHTML 替换 drawer-body） ======
+function switchDrawerStep(step) {
+  var drawerBody = document.querySelector('.drawer-body');
+  if (!drawerBody) return;
+  if (step == 1) {
+    drawerBody.innerHTML = renderDrawerStep1();
+  } else if (step == 2) {
+    drawerBody.innerHTML = renderDrawerStep2();
+  } else {
+    drawerBody.innerHTML = renderDrawerStep3();
+  }
+  // 更新步骤条样式
+  document.querySelectorAll('.drawer-steps .step').forEach(function(s, i){
+    s.classList.remove('active','done');
+    if (i+1 < step) s.classList.add('done');
+    else if (i+1 == step) s.classList.add('active');
+  });
+  // 保存按钮只在步骤1显示
+  var saveBtn = document.getElementById('drawer_save_btn');
+  if (saveBtn) saveBtn.style.display = (step == 1 ? 'inline-flex' : 'none');
+}
+
+// ====== 步骤1中实时计算合计 ======
+function calcDrawerTotal() {
+  var d = window._drawerData || {};
+  var contract = d.contract || {};
+  var w = parseFloat((document.getElementById('draw_water')||{}).value)||0;
+  var e = parseFloat((document.getElementById('draw_electric')||{}).value)||0;
+  var o = 0;
+  document.querySelectorAll('.misc-amount').forEach(function(el){ o += parseFloat(el.value)||0; });
+  var t = Number(contract.monthly_rent||0) + w + e + o;
+  var totalEl = document.getElementById('draw_total');
+  if (totalEl) totalEl.textContent = '¥'+t.toFixed(2);
 }
 
 function addMiscRow() {
@@ -1389,118 +1532,241 @@ async function saveDrawer(contractId, billId) {
   }
 
   if (res && !res.error) {
-    closeDrawer(); loadRentPlan();
+    // 更新全局数据
+    if (window._drawerData) {
+      window._drawerData.billId = res.id || billId;
+      window._drawerData.curBill = { id: res.id || billId, water_fee: waterFee, electric_fee: electricFee, other_fee: otherFee, status: 'pending' };
+    }
+    // 切换到步骤2：账单预览
+    switchDrawerStep(2);
+    loadRentPlan();
   } else {
     alert((res && res.error) || '保存失败');
   }
 }
 
-// 生成账单图片
-async function generateBillImage(contractId, billId) {
-  // 先保存数据
-  if (billId <= 0) {
-    alert('请先保存数据');
-    return;
-  }
+// Toast 提示
+function showToast(msg) {
+  var t = document.getElementById('_toast');
+  if (!t) { t = document.createElement('div'); t.id = '_toast'; t.className = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._tid); t._tid = setTimeout(function(){ t.classList.remove('show'); }, 2000);
+}
+
+// 辅助：从 data URL 加载 Image 对象
+function loadImg(src) {
+  return new Promise(function(resolve){
+    if (!src) return resolve(null);
+    var img = new Image();
+    img.onload = function(){ resolve(img); };
+    img.onerror = function(){ resolve(null); };
+    img.src = src;
+  });
+}
+
+// 生成账单图片，action: 'copy' 复制到剪贴板, 'save' 保存为文件
+async function generateBillImage(contractId, billId, action) {
+  action = action || 'copy';
+  var d = window._drawerData || {};
+  if (!billId || billId <= 0) billId = d.billId || 0;
+  if (billId <= 0) { showToast('请先在步骤1保存数据'); return; }
   var bill = await rental('bills','get',{id:billId});
   var contract = await rental('contracts','get',{id:contractId});
-  if (!bill || bill.error || !contract || contract.error) { alert('获取账单数据失败'); return; }
+  if (!bill || bill.error || !contract || contract.error) { showToast('获取账单数据失败'); return; }
+
+  var d = window._drawerData || {};
+  // 从全局数据读取照片，异步加载；如果失败则尝试从收据 DOM 中查找
+  var waterImg = await loadImg(d.waterImg || '');
+  var elecImg = await loadImg(d.elecImg || '');
+  if (!waterImg || !elecImg) {
+    var receiptImgs = document.querySelectorAll('#_drawer .drawer-body img');
+    receiptImgs.forEach(function(im){
+      if (!waterImg && im.src) { waterImg = new Image(); waterImg.src = im.src; }
+      else if (!elecImg && im.src) { elecImg = new Image(); elecImg.src = im.src; }
+    });
+    if (waterImg && waterImg.src) { await new Promise(function(r){ waterImg.onload=r; waterImg.onerror=r; }); }
+    if (elecImg && elecImg.src) { await new Promise(function(r){ elecImg.onload=r; elecImg.onerror=r; }); }
+  }
+
+  var roomNumber = contract.room_number || '';
+  var billNo = (bill.billing_month || '').replace('-', '') + roomNumber;
+
+  var rentAmount = Number(bill.rent_amount || 0);
+  var waterFee = Number(bill.water_fee || 0);
+  var electricFee = Number(bill.electric_fee || 0);
+  var otherFee = Number(bill.other_fee || 0);
+  var waterUnit = Number(contract.water_unit_price || 0);
+  var elecUnit = Number(contract.electric_unit_price || 0);
+  var total = Number(bill.total_amount || 0) || rentAmount + waterFee + electricFee + otherFee;
+  var otherFeeRows = [];
+  try { otherFeeRows = JSON.parse(bill.remark || '[]'); } catch (e) {}
+
+  // 先计算各区域高度
+  var rowHeight = 28;
+  var headerHeight = 32;
+  var tableRows = 3 + otherFeeRows.length;
+  var tableHeight = headerHeight + tableRows * rowHeight + 20;
+  var footerHeight = 10 + 20 * 3 + 10;
+  var photoHeight = 0;
+  if (waterImg || elecImg) photoHeight = (waterImg && elecImg ? 300 : 260) + 30;
+  var canvasH = 170 + tableHeight + 10 + footerHeight + photoHeight + 10;
 
   var canvas = document.createElement('canvas');
-  canvas.width = 750;
-  canvas.height = 1000;
+  var S = 4;
+  canvas.width = 750 * S;
+  canvas.height = canvasH * S;
   var ctx = canvas.getContext('2d');
+  ctx.scale(S, S);
 
-  // 背景
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0, 0, 750, 1000);
-
-  // 顶部蓝色条
-  ctx.fillStyle = '#3370FF';
-  ctx.fillRect(0, 0, 750, 8);
+  // 与预览一致的背景和边框
+  ctx.fillStyle = '#FFFEF9'; ctx.fillRect(0, 0, 750, canvasH);
+  ctx.strokeStyle = '#DDE3EA'; ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, 749, canvasH - 1);
 
   // 标题
-  ctx.fillStyle = '#1F2329';
-  ctx.font = 'bold 32px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
-  ctx.fillText('🏠 租金账单', 40, 60);
+  ctx.fillStyle = '#1F2329'; ctx.font = 'bold 26px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center'; ctx.fillText('房租、水、电费（专用）收据', 375, 55); ctx.textAlign = 'left';
 
-  // 月份
-  ctx.font = '16px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
-  ctx.fillStyle = '#646A73';
-  ctx.fillText(bill.billing_month || '', 40, 95);
-
-  // 分隔线
-  ctx.strokeStyle = '#E8EAED';
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(40, 115); ctx.lineTo(710, 115); ctx.stroke();
-
-  // 租客信息
-  ctx.fillStyle = '#8F959E'; ctx.font = '13px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
-  ctx.fillText('租客', 40, 145);
-  ctx.fillStyle = '#1F2329'; ctx.font = 'bold 16px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
-  ctx.fillText(contract.tenant_name || '', 40, 168);
-
-  ctx.fillStyle = '#8F959E'; ctx.font = '13px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
-  ctx.fillText('房间', 200, 145);
-  ctx.fillStyle = '#1F2329'; ctx.font = 'bold 16px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
-  ctx.fillText(contract.room_number || '', 200, 168);
-
-  // 费用明细表
-  var y = 210;
-  ctx.fillStyle = '#F5F6F7';
-  ctx.fillRect(40, y, 670, 32);
-  ctx.fillStyle = '#646A73'; ctx.font = 'bold 13px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
-  ctx.fillText('项目', 60, y+22);
-  ctx.fillText('金额（元）', 600, y+22);
-  y += 32;
-
-  var items = [
-    {name:'月租', val:Number(bill.rent_amount||0)},
-    {name:'水费', val:Number(bill.water_fee||0)},
-    {name:'电费', val:Number(bill.electric_fee||0)}
-  ];
-  // 解析杂项
-  try { var misc = JSON.parse(bill.remark||'[]'); misc.forEach(function(m){ items.push({name:m.name||'杂项', val:Number(m.amount||0)}); }); } catch(e){ if(Number(bill.other_fee||0)>0) items.push({name:'杂费', val:Number(bill.other_fee||0)}); }
-
-  items.forEach(function(item, i){
-    if (i%2==0) { ctx.fillStyle = '#FAFBFC'; ctx.fillRect(40, y, 670, 28); }
-    ctx.fillStyle = '#1F2329'; ctx.font = '14px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
-    ctx.fillText(item.name, 60, y+20);
-    ctx.fillText('¥'+Number(item.val).toFixed(2), 600, y+20);
-    y += 28;
-  });
-
-  // 合计
-  ctx.strokeStyle = '#E8EAED'; ctx.beginPath(); ctx.moveTo(40, y+6); ctx.lineTo(710, y+6); ctx.stroke();
-  y += 20;
-  ctx.fillStyle = '#3370FF'; ctx.font = 'bold 20px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
-  ctx.fillText('合计', 60, y);
-  ctx.font = 'bold 24px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
-  var tw = ctx.measureText('¥'+Number(bill.total_amount||0).toFixed(2)).width;
-  ctx.fillText('¥'+Number(bill.total_amount||0).toFixed(2), 710-tw, y);
-
-  // 底部
-  y = 880;
+  // 编号
   ctx.fillStyle = '#8F959E'; ctx.font = '12px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('租房管理系统 · 自动生成账单', 375, y);
-  ctx.fillText(new Date().toLocaleDateString('zh-CN')+' 生成', 375, y+20);
+  ctx.fillText('No.' + billNo, 40, 85);
+
+  ctx.strokeStyle = '#E8EAED'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(40, 95); ctx.lineTo(710, 95); ctx.stroke();
+
+  // 房间信息
+  ctx.fillStyle = '#1F2329'; ctx.font = 'bold 14px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillText('房间：' + roomNumber, 40, 120);
+
+  // 六列表格
+  var y = 150;
+  var cols = [40, 150, 240, 330, 420, 510, 710];
+  var colText = ['项目', '本月读数', '上月读数', '实用量', '单价', '金额'];
+  ctx.fillStyle = '#F5F6F7'; ctx.fillRect(40, y, 670, headerHeight);
+  ctx.fillStyle = '#646A73'; ctx.font = 'bold 12px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  for (var i = 0; i < 6; i++) {
+    ctx.textAlign = 'center';
+    ctx.fillText(colText[i], (cols[i] + cols[i + 1]) / 2, y + 22);
+  }
   ctx.textAlign = 'left';
 
-  // 转图片复制
-  canvas.toBlob(async function(blob){
-    try {
-      await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
-      alert('账单图片已复制到剪贴板，可直接粘贴发送！');
-    } catch(e) {
-      // 降级：打开新窗口显示图片
-      var w = window.open('','_blank','width=780,height=1050');
-      w.document.write('<img src="'+canvas.toDataURL()+'" style="width:100%"><p style="text-align:center;color:#666">右键复制图片，或截图发送</p>');
+  function drawRow(label, cur, last, usage, unit, amount, rowIdx) {
+    var ry = y + headerHeight + rowIdx * rowHeight;
+    ctx.strokeStyle = '#E8EAED'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (var c = 0; c < 7; c++) { ctx.moveTo(cols[c], ry); ctx.lineTo(cols[c], ry + rowHeight); }
+    ctx.moveTo(40, ry); ctx.lineTo(710, ry);
+    ctx.moveTo(40, ry + rowHeight); ctx.lineTo(710, ry + rowHeight);
+    ctx.stroke();
+    ctx.fillStyle = '#1F2329'; ctx.font = '13px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, (cols[0] + cols[1]) / 2, ry + 20);
+    ctx.fillText(cur, (cols[1] + cols[2]) / 2, ry + 20);
+    ctx.fillText(last, (cols[2] + cols[3]) / 2, ry + 20);
+    ctx.fillText(usage, (cols[3] + cols[4]) / 2, ry + 20);
+    ctx.fillText(unit, (cols[4] + cols[5]) / 2, ry + 20);
+    ctx.textAlign = 'right';
+    ctx.fillText(amount, cols[6] - 12, ry + 20);
+    ctx.textAlign = 'left';
+  }
+
+  var rowIdx = 0;
+  drawRow('水费（吨）', '—', '—', (waterUnit > 0 ? (waterFee / waterUnit).toFixed(1) + '吨' : '—'), waterUnit.toFixed(2), '¥' + waterFee.toFixed(2), rowIdx++);
+  drawRow('电费（度）', '—', '—', (elecUnit > 0 ? (electricFee / elecUnit).toFixed(0) + '度' : '—'), elecUnit.toFixed(2), '¥' + electricFee.toFixed(2), rowIdx++);
+  drawRow('房租', '', '', '', '', '¥' + rentAmount.toFixed(2), rowIdx++);
+  // 杂项
+  otherFeeRows.forEach(function (m) {
+    drawRow(m.name || '杂项', '', '', '', '', '¥' + Number(m.amount || 0).toFixed(2), rowIdx++);
+  });
+  y = y + headerHeight + rowIdx * rowHeight + 10;
+
+  // 合计
+  ctx.fillStyle = '#1F2329'; ctx.font = 'bold 16px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('合计：', 620, y + 20);
+  ctx.fillStyle = '#F54A45'; ctx.font = 'bold 22px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillText('¥' + total.toFixed(2), 710, y + 20);
+  ctx.textAlign = 'left';
+
+  // 签名区
+  y += 38;
+  var today = new Date().toISOString().split('T')[0];
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#646A73'; ctx.font = '12px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillText('交款人：' + (contract.tenant_name || ''), 710, y);
+  ctx.fillText('收款人：吴钦腾', 710, y + 20);
+  ctx.fillText('发单日期：' + today, 710, y + 40);
+  ctx.textAlign = 'left';
+
+  // 照片，并排
+  if (waterImg || elecImg) {
+    y += 55;
+    ctx.strokeStyle = '#DDE3EA'; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(710, y); ctx.stroke();
+    ctx.setLineDash([]);
+    y += 15;
+    // 正方形裁切
+    var sqSize = waterImg && elecImg ? 300 : 260;
+    var drawSquare = function(img, dx, dy) {
+      var nw = img.naturalWidth, nh = img.naturalHeight;
+      var sq = Math.min(nw, nh);
+      var srcX = (nw - sq) / 2, srcY = (nh - sq) / 2;
+      ctx.drawImage(img, srcX, srcY, sq, sq, dx, dy, sqSize, sqSize);
+    };
+    if (waterImg && elecImg) {
+      drawSquare(waterImg, 40, y);
+      drawSquare(elecImg, 390, y);
+    } else if (waterImg) {
+      drawSquare(waterImg, 40, y);
+    } else if (elecImg) {
+      drawSquare(elecImg, 40, y);
     }
-  }, 'image/png');
+  }
+
+  // 输出图片
+  if (action === 'save') {
+    var dataUrl = canvas.toDataURL('image/png');
+    var a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = 'bill_' + billNo + '.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('已保存：' + a.download);
+  } else {
+    canvas.toBlob(async function (blob) {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        showToast('已复制到剪贴板');
+      } catch (e) {
+        var w = window.open('', '_blank', 'width=780,height=1050');
+        w.document.write('<img src="' + canvas.toDataURL() + '" style="width:100%"><p style="text-align:center;color:#666">右键复制图片，或截图发送</p>');
+      }
+    }, 'image/png');
+  }
 }
 
 // 点击圆点标记已收
+// 标题栏"完成收款"按钮
+function doPayNow(contractId, billId) {
+  var total = parseFloat(document.getElementById('pay_amount')?.value) || 0;
+  if (total <= 0) { showToast('请填写实收金额'); return; }
+  confirmPayment(contractId, billId);
+}
+
+// 确认收款
+async function confirmPayment(contractId, billId) {
+  if (billId <= 0) { showToast('请先在步骤1保存数据'); return; }
+  var amount = parseFloat(document.getElementById('pay_amount').value) || 0;
+  var payDate = document.getElementById('pay_date').value || new Date().toISOString().split('T')[0];
+  if (amount <= 0) { showToast('请填写实收金额'); return; }
+  await rental('bills','update_status',{id:billId, status:'paid'});
+  await rental('payments','add',{bill_id:billId, amount:amount, pay_date:payDate, pay_method:'微信', remark:'账单预览页确认收款'});
+  window._drawerData.curBill.status = 'paid';
+  switchDrawerStep(3);
+  loadRentPlan();
+}
+
 async function markPaid(contractId, billId, tenantId, rentAmount, waterFee, electricFee, otherFee) {
   if (billId <= 0) { alert('请先在抽屉中编辑并保存账单明细'); return; }
   var bill = await rental('bills','get',{id:billId});
@@ -1516,6 +1782,9 @@ async function markPaid(contractId, billId, tenantId, rentAmount, waterFee, elec
   var total = Number(bill.total_amount||0);
   var today = new Date().toISOString().split('T')[0];
   await rental('payments','add',{bill_id:billId, amount:total, pay_date:today, pay_method:'微信', remark:'收租计划标记已收'});
+  // 更新状态并切换
+  window._drawerData.curBill.status = 'paid';
+  switchDrawerStep(3);
   loadRentPlan();
 }
 
