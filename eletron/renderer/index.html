@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -65,11 +65,12 @@ input[type="text"],input[type="number"],select,textarea{height:36px;border:1px s
 textarea{height:auto;padding:8px 12px;resize:vertical;min-height:60px}
 input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 2px rgba(51,112,255,0.15)}
 input::placeholder{color:#BBBFC4}
-input[type="date"],input[type="month"]{height:36px;border:1px solid var(--border);border-radius:6px;padding:0 12px;font-size:14px;outline:none;background:var(--white);cursor:pointer;color:var(--text);font-family:inherit}
-input[type="date"]:focus,input[type="month"]:focus{border-color:var(--blue);box-shadow:0 0 0 2px rgba(51,112,255,0.15)}
-input[type="date"]::-webkit-calendar-picker-indicator,input[type="month"]::-webkit-calendar-picker-indicator{cursor:pointer;opacity:0.5;transition:opacity 0.2s}
-input[type="date"]:hover::-webkit-calendar-picker-indicator,input[type="month"]:hover::-webkit-calendar-picker-indicator{opacity:0.8}
-.soft-input{height:38px;border:1px solid #DDE6F2;border-radius:8px;padding:0 12px;font-size:14px;outline:none;width:100%;background:#F8FAFD;color:var(--text);box-shadow:inset 0 1px 2px rgba(31,35,41,0.02);transition:all 0.2s;appearance:none;-webkit-appearance:none}
+
+input[type="date"],input[type="month"]{height:32px !important;border:1px solid #d9d9d9 !important;border-radius:6px !important;padding:0 11px !important;font-size:14px !important;outline:none !important;background:#fff !important;cursor:pointer;color:var(--text);font-family:inherit;width:100%;transition:all 0.2s}
+input[type="date"]:focus,input[type="month"]:focus{border-color:#4096ff !important;box-shadow:0 0 0 2px rgba(5,145,255,0.1) !important}
+input[type="date"]::-webkit-calendar-picker-indicator,input[type="month"]::-webkit-calendar-picker-indicator{cursor:pointer;opacity:0.5;transition:opacity 0.2s;filter:invert(0.5)}
+input[type="date"]:hover::-webkit-calendar-picker-indicator,input[type="month"]:hover::-webkit-calendar-picker-indicator{opacity:0.8;filter:invert(0.3)}
+
 .soft-input:focus{background:var(--white);border-color:var(--blue);box-shadow:0 0 0 3px rgba(51,112,255,0.12)}
 .soft-form{padding-top:2px}
 .date-trigger{height:38px;border:1px solid #DDE6F2;border-radius:8px;padding:0 36px 0 14px;font-size:14px;width:100%;background:#F8FAFD;color:var(--text);box-shadow:inset 0 1px 2px rgba(31,35,41,0.02);transition:all 0.2s;cursor:pointer;display:flex;align-items:center;position:relative;user-select:none}
@@ -235,6 +236,35 @@ table a:hover{text-decoration:underline}
 
 select.soft-input{appearance:auto;-webkit-appearance:auto;height:38px;padding:0 10px;cursor:pointer}
 .modal .soft-form{max-height:70vh;overflow-y:auto;padding-right:4px}
+
+
+.custom-select{position:relative}
+.select-trigger{height:32px;border:1px solid #d9d9d9;border-radius:6px;padding:0 30px 0 11px;background:#fff;color:var(--text);display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:14px;transition:all 0.2s}
+.select-trigger:hover{border-color:#4096ff}
+.select-trigger::after{content:"";position:absolute;right:11px;top:11px;width:6px;height:6px;border-right:1.5px solid #999;border-bottom:1.5px solid #999;transform:rotate(45deg)}
+.select-menu{display:none;position:absolute;left:0;right:0;top:42px;background:var(--white);border:1px solid var(--border-light);border-radius:8px;box-shadow:var(--shadow-md);padding:6px;z-index:1001;max-height:180px;overflow-y:auto}
+.custom-select.open .select-menu{display:block}
+.select-option{padding:5px 12px;border-radius:4px;font-size:14px;cursor:pointer;color:var(--text)}
+.select-option:hover{background:#F7FAFF;color:var(--blue)}
+.select-option.active{background:var(--blue-light);color:var(--blue);font-weight:600}
+.locked-field{height:32px;border:1px solid #d9d9d9;border-radius:6px;padding:0 11px;display:flex;align-items:center;font-size:14px;color:var(--text-sec);background:#fafafa}
+
+
+/* Override antd button styles */
+.btn{padding:7px 16px;border-radius:6px;border:none;cursor:pointer;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:5px;transition:all 0.15s ease;line-height:20px;box-shadow:none}
+.btn-primary{background:var(--blue);color:white}
+.btn-primary:hover{background:var(--blue-hover);color:white}
+.btn-outline{background:var(--white);border:1px solid var(--border);color:var(--text)}
+.btn-outline:hover{background:var(--bg);border-color:#C5C8CC}
+.btn-danger{background:var(--red);color:white}
+.btn-danger:hover{opacity:0.9}
+.btn-success{background:var(--green);color:white}
+.btn-success:hover{opacity:0.9}
+.btn-sm{padding:4px 12px;font-size:12px;line-height:18px}
+.modal-actions .ant-btn{background:var(--white);border:1px solid var(--border);color:var(--text);padding:7px 16px;border-radius:6px;font-size:13px;font-weight:500;height:auto;line-height:20px;box-shadow:none;cursor:pointer}
+.modal-actions .ant-btn:hover{background:var(--bg);border-color:#C5C8CC;color:var(--text)}
+.modal-actions .ant-btn-primary{background:var(--blue);border:none;color:white}
+.modal-actions .ant-btn-primary:hover{background:var(--blue-hover);color:white}
 
 /* Custom scrollbar */
 .modal::-webkit-scrollbar{width:4px}
@@ -406,7 +436,6 @@ function datePicked(id) {
     dt.classList.toggle('filled', !!val);
   }
 }
-var buildingQuery = '';
 var currentRoomBuildingId = null;
 var currentTenantBuildingId = null;
 var currentContractBuildingId = null;
@@ -419,31 +448,21 @@ async function loadBuildings() {
   var rooms = await rental('rooms','list') || [];
   var roomCount = {};
   rooms.forEach(function(r){ roomCount[r.building_id] = (roomCount[r.building_id] || 0) + 1; });
-  var q = buildingQuery.trim().toLowerCase();
-  var shown = q ? blds.filter(function(b){
-    return String(b.name || '').toLowerCase().indexOf(q) >= 0 || String(b.address || '').toLowerCase().indexOf(q) >= 0;
-  }) : blds;
-  var h = '<div class="toolbar"><button class="btn btn-primary btn-sm" onclick="showAddBuilding()">+ \u6dfb\u52a0\u697c\u680b</button><input class="soft-input" id="building_query" value="'+esc(buildingQuery)+'" placeholder="\u8f93\u5165\u540d\u79f0\u6216\u5730\u5740\u67e5\u8be2" style="width:220px;height:32px"><button class="btn btn-outline btn-sm" onclick="queryBuildings()">\u67e5\u8be2</button></div><div class="toolbar-divider"></div>';
+  var h = '<div class="toolbar"><button class="btn btn-primary btn-sm" onclick="showAddBuilding()">+ \u6dfb\u52a0\u697c\u680b</button></div><div class="toolbar-divider"></div>';
   if (blds.length == 0) h += '<div class="empty-state"><div class="icon">&#x1F3E2;</div><div>\u6682\u65e0\u697c\u680b\uff0c\u70b9\u51fb\u4e0a\u65b9\u6309\u94ae\u6dfb\u52a0</div></div>';
-  else if (shown.length == 0) h += '<div class="empty-state"><div class="icon">&#x1F50D;</div><div>\u6ca1\u6709\u627e\u5230\u5339\u914d\u7684\u697c\u680b</div></div>';
   else {
     h += '<div class="table-wrap"><table><thead><tr><th>\u540d\u79f0</th><th>\u5730\u5740</th><th>\u623f\u95f4\u6570</th></tr></thead><tbody>';
-    shown.forEach(function(b){ h += '<tr><td><span class="name-link" onclick="editBuilding('+Number(b.id)+')">'+esc(b.name)+'</span></td><td>'+esc(b.address||'')+'</td><td>'+(roomCount[b.id]||0)+' \u95f4</td></tr>'; });
+    blds.forEach(function(b){ h += '<tr><td><span class="name-link" onclick="editBuilding('+Number(b.id)+')">'+esc(b.name)+'</span></td><td>'+esc(b.address||'')+'</td><td>'+(roomCount[b.id]||0)+' \u95f4</td></tr>'; });
     h += '</tbody></table></div>';
   }
-  h += '<div class="list-meta">\u5171 '+shown.length+' / '+blds.length+' \u680b\u697c</div>';
+  h += '<div class="list-meta">\u5171 '+blds.length+' \u680b\u697c</div>';
   renderMain(h);
 }
-function queryBuildings() { var el = document.getElementById('building_query'); buildingQuery = el ? el.value : ''; loadBuildings(); }
-function showAddBuilding() { M('<div class="soft-form"><div class="form-group"><label>\u540d\u79f0</label><input class="soft-input" id="f_bname" placeholder="\u5982\uff1aA\u680b"></div><div class="form-group"><label>\u5730\u5740</label><input class="soft-input" id="f_baddr" placeholder="\u5982\uff1aXX\u8defXX\u53f7"></div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doAddBuilding()">\u6dfb\u52a0</button></div></div>'); }
-function doAddBuilding() { var n = document.getElementById('f_bname').value.trim(); if (!n) { alert('\u8bf7\u8f93\u5165\u697c\u680b\u540d\u79f0'); return; } rental('buildings','add',{name:n, address:document.getElementById('f_baddr').value.trim()}).then(function(res){ if (!res || res.error) { alert((res && res.error) || '\u65b0\u589e\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u540e\u7aef\u670d\u52a1'); return; } CM(); loadBuildings(); }); }
-async function editBuilding(id) {
+function showAddBuilding() { M('<div class="soft-form"><div class="form-group"><label>名称</label><input class="soft-input" id="f_bname" placeholder="如：A栋"></div><div class="form-group"><label>地址</label><input class="soft-input" id="f_baddr" placeholder="如：XX路XX号"></div><div class="form-group"><label>收租日期（每月几号）</label><input class="soft-input" type="number" id="f_brentday" value="1" min="1" max="28" placeholder="1"></div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddBuilding()">添加</button></div></div>'); }function doAddBuilding() { var n = document.getElementById('f_bname').value.trim(); if (!n) { alert('请输入楼栋名称'); return; } var rd = parseInt(document.getElementById('f_brentday').value) || 1; rental('buildings','add',{name:n, address:document.getElementById('f_baddr').value.trim(), rent_day:rd}).then(function(res){ if (!res || res.error) { alert((res && res.error) || '新增失败，请检查后端服务'); return; } CM(); loadBuildings(); }); }async function editBuilding(id) {
   var b = await rental('buildings','get',{id:id});
-  if (!b || b.error) { alert('\u672a\u627e\u5230\u8be5\u697c\u680b'); return; }
-  M('<div class="modal-title">\u7f16\u8f91\u697c\u680b</div><div class="soft-form"><div class="form-group"><label>\u540d\u79f0</label><input class="soft-input" id="f_bname" value="'+esc(b.name)+'"></div><div class="form-group"><label>\u5730\u5740</label><input class="soft-input" id="f_baddr" value="'+esc(b.address||'')+'"></div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doUpdateBuilding('+Number(id)+')">\u4fdd\u5b58</button></div></div>');
-}
-function doUpdateBuilding(id) { var n = document.getElementById('f_bname').value.trim(); if (!n) { alert('\u8bf7\u8f93\u5165\u697c\u680b\u540d\u79f0'); return; } rental('buildings','update',{id:id, name:n, address:document.getElementById('f_baddr').value.trim()}).then(function(res){ if (!res || res.error) { alert((res && res.error) || '\u4fdd\u5b58\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u540e\u7aef\u670d\u52a1'); return; } CM(); loadBuildings(); }); }
-async function loadRooms() {
+  if (!b || b.error) { alert('未找到该楼栋'); return; }
+  M('<div class="modal-title">编辑楼栋</div><div class="soft-form"><div class="form-group"><label>名称</label><input class="soft-input" id="f_bname" value="'+esc(b.name)+'"></div><div class="form-group"><label>地址</label><input class="soft-input" id="f_baddr" value="'+esc(b.address||'')+'"></div><div class="form-group"><label>收租日期（每月几号）</label><input class="soft-input" type="number" id="f_brentday" value="'+Number(b.rent_day||1)+'" min="1" max="28"></div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doUpdateBuilding('+Number(id)+')">保存</button></div></div>');
+}function doUpdateBuilding(id) { var n = document.getElementById('f_bname').value.trim(); if (!n) { alert('请输入楼栋名称'); return; } var rd = parseInt(document.getElementById('f_brentday').value) || 1; rental('buildings','update',{id:id, name:n, address:document.getElementById('f_baddr').value.trim(), rent_day:rd}).then(function(res){ if (!res || res.error) { alert((res && res.error) || '保存失败，请检查后端服务'); return; } CM(); loadBuildings(); }); }async function loadRooms() {
   var buildings = await rental('buildings','list') || [];
   if (buildings.length == 0) {
     currentRoomBuildingId = null;
@@ -665,34 +684,77 @@ async function loadContracts() {
   renderMain(h);
 }
 function switchContractBuilding(id) { currentContractBuildingId = id; loadContracts(); }
+
+function contractTenantPicker(tenants, selectedId) {
+  var selected = tenants.find(function(t){ return Number(t.id) == Number(selectedId); }) || tenants[0];
+  var h = '<input type="hidden" id="f_contract_tenant" value="'+Number(selected ? selected.id : '')+'"><div class="custom-select" id="contract_tenant_picker"><div class="select-trigger" onclick="toggleContractTenantMenu()"><span id="contract_tenant_label">'+esc(selected ? selected.name : '')+'</span></div><div class="select-menu">';
+  tenants.forEach(function(t){
+    var active = Number(t.id) == Number(selectedId) ? ' active' : '';
+    h += '<div class="select-option'+active+'" onclick="selectContractTenant('+Number(t.id)+', this)">'+esc(t.name)+'</div>';
+  });
+  return h + '</div></div>';
+}
+function toggleContractTenantMenu() {
+  var el = document.getElementById('contract_tenant_picker');
+  if (el) el.classList.toggle('open');
+}
+function selectContractTenant(id, el) {
+  document.getElementById('f_contract_tenant').value = id;
+  document.getElementById('contract_tenant_label').textContent = el.textContent;
+  document.getElementById('contract_tenant_picker').classList.remove('open');
+  var opts = document.querySelectorAll('#contract_tenant_picker .select-option');
+  opts.forEach(function(o){ o.classList.remove('active'); });
+  el.classList.add('active');
+}
+function contractRoomPicker(rooms, selectedId) {
+  var selected = rooms.find(function(r){ return Number(r.id) == Number(selectedId); }) || rooms[0];
+  var h = '<input type="hidden" id="f_contract_room" value="'+Number(selected ? selected.id : '')+'"><div class="custom-select" id="contract_room_picker"><div class="select-trigger" onclick="toggleContractRoomMenu()"><span id="contract_room_label">'+esc(selected ? selected.room_number : '')+'</span></div><div class="select-menu">';
+  rooms.forEach(function(r){
+    var active = Number(r.id) == Number(selectedId) ? ' active' : '';
+    h += '<div class="select-option'+active+'" onclick="selectContractRoom('+Number(r.id)+', this)">'+esc(r.room_number)+'</div>';
+  });
+  return h + '</div></div>';
+}
+function toggleContractRoomMenu() {
+  var el = document.getElementById('contract_room_picker');
+  if (el) el.classList.toggle('open');
+}
+function selectContractRoom(id, el) {
+  document.getElementById('f_contract_room').value = id;
+  document.getElementById('contract_room_label').textContent = el.textContent;
+  document.getElementById('contract_room_picker').classList.remove('open');
+  var opts = document.querySelectorAll('#contract_room_picker .select-option');
+  opts.forEach(function(o){ o.classList.remove('active'); });
+  el.classList.add('active');
+}
+
 async function showAddContract() {
   var bid = currentContractBuildingId;
+  var bld = await rental('buildings','get',{id:bid}) || {};
+  var rentDay = bld.rent_day || 1;
   var rooms = await rental('rooms','list',{building_id:bid}) || [];
   var tenants = await rental('tenants','list',{active_only:true,building_id:bid}) || [];
   if (tenants.length == 0) { alert('该楼栋没有租客，请先添加租客'); return; }
   if (rooms.length == 0) { alert('该楼栋没有房间，请先添加房间'); return; }
-  var h = '<div class="modal-title">新签合同</div><div class="soft-form"><div class="grid2">';
-  h += '<div class="form-group"><label>租客</label><select class="soft-input" id="f_contract_tenant">';
-  tenants.forEach(function(t){ h += '<option value="'+Number(t.id)+'">'+esc(t.name)+'</option>'; });
-  h += '</select></div>';
-  h += '<div class="form-group"><label>房间</label><select class="soft-input" id="f_contract_room">';
-  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'">'+esc(r.room_number||'')+'</option>'; });
-  h += '</select></div>';
-  h += '<div class="form-group"><label>合同开始</label>'+dateField('f_contract_start','')+'</div>';
-  h += '<div class="form-group"><label>合同结束</label>'+dateField('f_contract_end','')+'</div>';
-  h += '<div class="form-group"><label>月租（元）</label><input class="soft-input" type="number" id="f_contract_rent" placeholder="0.00" step="0.01"></div>';
-  h += '<div class="form-group"><label>保证金（元）</label><input class="soft-input" type="number" id="f_contract_deposit" placeholder="0.00" step="0.01"></div>';
-  h += '<div class="form-group"><label>水费单价（元/吨）</label><input class="soft-input" type="number" id="f_contract_water" placeholder="0.00" step="0.01"></div>';
-  h += '<div class="form-group"><label>电费单价（元/度）</label><input class="soft-input" type="number" id="f_contract_electric" placeholder="0.00" step="0.01"></div>';
+  var h = '<div class="soft-form"><div class="grid2">';
+  h += '<div class="form-group"><label>租客</label>'+contractTenantPicker(tenants, tenants[0] && tenants[0].id)+'</div>';
+  h += '<div class="form-group"><label>房间</label>'+contractRoomPicker(rooms, rooms[0] && rooms[0].id)+'</div>';
+  h += '<div class="form-group"><label>合同开始</label><input class="soft-input" type="date" id="f_contract_start"></div>';
+  h += '<div class="form-group"><label>合同结束</label><input class="soft-input" type="date" id="f_contract_end"></div>';
+  h += '<div class="form-group"><label>收租日期（每月几号）</label><input class="soft-input" type="number" id="f_contract_rentday" value="'+rentDay+'" min="1" max="28"></div>';
+  h += '<div class="form-group"><label>月租（元）</label><input class="soft-input" type="number" id="f_contract_rent" placeholder="0.00"></div>';
+  h += '<div class="form-group"><label>保证金（元）</label><input class="soft-input" type="number" id="f_contract_deposit" placeholder="0.00"></div>';
+  h += '<div class="form-group"><label>水费单价（元/吨）</label><input class="soft-input" type="number" id="f_contract_water" placeholder="0.00"></div>';
+  h += '<div class="form-group"><label>电费单价（元/度）</label><input class="soft-input" type="number" id="f_contract_electric" placeholder="0.00"></div>';
   h += '</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddContract()">保存</button></div></div>';
   M(h);
-}
-function doAddContract() {
+}function doAddContract() {
   var data = {
     tenant_id: document.getElementById('f_contract_tenant').value,
     room_id: document.getElementById('f_contract_room').value,
     start_date: document.getElementById('f_contract_start').value,
     end_date: document.getElementById('f_contract_end').value,
+    rent_day: parseInt(document.getElementById('f_contract_rentday').value) || 1,
     monthly_rent: parseFloat(document.getElementById('f_contract_rent').value) || 0,
     water_price: parseFloat(document.getElementById('f_contract_water').value) || 0,
     electric_price: parseFloat(document.getElementById('f_contract_electric').value) || 0,
@@ -703,38 +765,35 @@ function doAddContract() {
     if (!res || res.error) { alert((res && res.error) || '新增失败，请检查后端服务'); return; }
     CM(); loadContracts();
   });
-}
-async function editContract(id) {
+}async function editContract(id) {
   var c = await rental('contracts','get',{id:id});
   if (!c || c.error) { alert('未找到合同'); return; }
   var bid = currentContractBuildingId;
+  var bld = await rental('buildings','get',{id:bid}) || {};
   var rooms = await rental('rooms','list',{building_id:bid}) || [];
   var tenants = await rental('tenants','list',{active_only:true,building_id:bid}) || [];
   var allTenants = await rental('tenants','list',{active_only:false,building_id:bid}) || [];
   allTenants.forEach(function(t){ if(!tenants.some(function(x){return Number(x.id)==Number(t.id)})) tenants.push(t); });
-  var h = '<div class="modal-title">编辑合同</div><div class="soft-form"><div class="grid2">';
-  h += '<div class="form-group"><label>租客</label><select class="soft-input" id="f_contract_tenant">';
-  tenants.forEach(function(t){ h += '<option value="'+Number(t.id)+'"'+(Number(t.id)==Number(c.tenant_id)?' selected':'')+'>'+esc(t.name)+'</option>'; });
-  h += '</select></div>';
-  h += '<div class="form-group"><label>房间</label><select class="soft-input" id="f_contract_room">';
-  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'"'+(Number(r.id)==Number(c.room_id)?' selected':'')+'>'+esc(r.room_number||'')+'</option>'; });
-  h += '</select></div>';
-  h += '<div class="form-group"><label>合同开始</label>'+dateField('f_contract_start',esc(c.start_date||''))+'</div>';
-  h += '<div class="form-group"><label>合同结束</label>'+dateField('f_contract_end',esc(c.end_date||''))+'</div>';
-  h += '<div class="form-group"><label>月租（元）</label><input class="soft-input" type="number" id="f_contract_rent" value="'+Number(c.monthly_rent||0)+'" step="0.01"></div>';
-  h += '<div class="form-group"><label>保证金（元）</label><input class="soft-input" type="number" id="f_contract_deposit" value="'+Number(c.deposit||0)+'" step="0.01"></div>';
-  h += '<div class="form-group"><label>水费单价（元/吨）</label><input class="soft-input" type="number" id="f_contract_water" value="'+Number(c.water_unit_price||0)+'" step="0.01"></div>';
-  h += '<div class="form-group"><label>电费单价（元/度）</label><input class="soft-input" type="number" id="f_contract_electric" value="'+Number(c.electric_unit_price||0)+'" step="0.01"></div>';
+  var h = '<div class="soft-form"><div class="grid2">';
+  h += '<div class="form-group"><label>租客</label>'+contractTenantPicker(tenants, c.tenant_id)+'</div>';
+  h += '<div class="form-group"><label>房间</label>'+contractRoomPicker(rooms, c.room_id)+'</div>';
+  h += '<div class="form-group"><label>合同开始</label><input class="soft-input" type="date" id="f_contract_start" value="'+esc(c.start_date||'')+'"></div>';
+  h += '<div class="form-group"><label>合同结束</label><input class="soft-input" type="date" id="f_contract_end" value="'+esc(c.end_date||'')+'"></div>';
+  h += '<div class="form-group"><label>收租日期（每月几号）</label><input class="soft-input" type="number" id="f_contract_rentday" value="'+Number(bld.rent_day||1)+'" min="1" max="28"></div>';
+  h += '<div class="form-group"><label>月租（元）</label><input class="soft-input" type="number" id="f_contract_rent" value="'+Number(c.monthly_rent||0)+'"></div>';
+  h += '<div class="form-group"><label>保证金（元）</label><input class="soft-input" type="number" id="f_contract_deposit" value="'+Number(c.deposit||0)+'"></div>';
+  h += '<div class="form-group"><label>水费单价（元/吨）</label><input class="soft-input" type="number" id="f_contract_water" value="'+Number(c.water_unit_price||0)+'"></div>';
+  h += '<div class="form-group"><label>电费单价（元/度）</label><input class="soft-input" type="number" id="f_contract_electric" value="'+Number(c.electric_unit_price||0)+'"></div>';
   h += '</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doUpdateContract('+Number(id)+')">保存</button></div></div>';
   M(h);
-}
-function doUpdateContract(id) {
+}function doUpdateContract(id) {
   var data = {
     id: id,
     tenant_id: document.getElementById('f_contract_tenant').value,
     room_id: document.getElementById('f_contract_room').value,
     start_date: document.getElementById('f_contract_start').value,
     end_date: document.getElementById('f_contract_end').value,
+    rent_day: parseInt(document.getElementById('f_contract_rentday').value) || 1,
     monthly_rent: parseFloat(document.getElementById('f_contract_rent').value) || 0,
     water_price: parseFloat(document.getElementById('f_contract_water').value) || 0,
     electric_price: parseFloat(document.getElementById('f_contract_electric').value) || 0,
@@ -745,8 +804,7 @@ function doUpdateContract(id) {
     if (!res || res.error) { alert((res && res.error) || '保存失败，请检查后端服务'); return; }
     CM(); loadContracts();
   });
-}
-async function loadWaterMeters() {
+}async function loadWaterMeters() {
   var buildings = await rental('buildings','list') || [];
   if (buildings.length == 0) {
     currentWaterMeterBuildingId = null;
