@@ -71,6 +71,7 @@ input[type="date"]:focus,input[type="month"]:focus{border-color:#4096ff !importa
 input[type="date"]::-webkit-calendar-picker-indicator,input[type="month"]::-webkit-calendar-picker-indicator{cursor:pointer;opacity:0.5;transition:opacity 0.2s;filter:invert(0.5)}
 input[type="date"]:hover::-webkit-calendar-picker-indicator,input[type="month"]:hover::-webkit-calendar-picker-indicator{opacity:0.8;filter:invert(0.3)}
 
+.soft-input{height:36px;border:1px solid var(--border);border-radius:6px;padding:0 12px;font-size:14px;outline:none;width:100%;background:var(--white);transition:all 0.2s;color:var(--text)}
 .soft-input:focus{background:var(--white);border-color:var(--blue);box-shadow:0 0 0 3px rgba(51,112,255,0.12)}
 .soft-form{padding-top:2px}
 .date-trigger{height:38px;border:1px solid #DDE6F2;border-radius:8px;padding:0 36px 0 14px;font-size:14px;width:100%;background:#F8FAFD;color:var(--text);box-shadow:inset 0 1px 2px rgba(31,35,41,0.02);transition:all 0.2s;cursor:pointer;display:flex;align-items:center;position:relative;user-select:none}
@@ -277,6 +278,21 @@ select.soft-input{appearance:auto;-webkit-appearance:auto;height:38px;padding:0 
 #main-content::-webkit-scrollbar-thumb:hover{background:#B0B5BE}
 
 
+
+/* Month filter */
+.month-filter{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.month-nav{width:30px;height:30px;border:1px solid var(--border);border-radius:6px;background:var(--white);cursor:pointer;font-size:12px;color:var(--text-sec);display:flex;align-items:center;justify-content:center;transition:all 0.15s}
+.month-nav:hover{background:var(--blue-light);border-color:var(--blue);color:var(--blue)}
+.month-label{font-size:15px;font-weight:600;color:var(--text);min-width:90px;text-align:center}
+
+/* Hide scrollbar but keep scroll */
+#main-content, #main-content-rent, .drawer-body, .modal .soft-form {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+#main-content::-webkit-scrollbar, #main-content-rent::-webkit-scrollbar, .drawer-body::-webkit-scrollbar, .modal .soft-form::-webkit-scrollbar {
+  display: none;
+}
 </style>
 
 
@@ -625,6 +641,21 @@ function toggleTenantStatus() {
   sw.classList.toggle('rented', active);
   label.textContent = active ? '\u6b63\u5e38' : '\u505c\u7528';
 }
+function contractStatusSwitch(selected) {
+  var active = selected != 'ended';
+  return '<input type="hidden" id="f_contract_status" value="'+(active ? 'active' : 'ended')+'"><div class="status-switch-row"><button class="status-switch '+(active ? 'rented' : '')+'" id="contract_status_switch" onclick="toggleContractStatusSwitch()" type="button"></button><span class="status-switch-label" id="contract_status_label">'+(active ? '生效中' : '已解除')+'</span></div>';
+}
+function toggleContractStatusSwitch() {
+  var input = document.getElementById('f_contract_status');
+  var sw = document.getElementById('contract_status_switch');
+  var label = document.getElementById('contract_status_label');
+  var active = input.value == 'ended';
+  input.value = active ? 'active' : 'ended';
+  sw.classList.toggle('rented', active);
+  label.textContent = active ? '生效中' : '已解除';
+}
+
+
 async function showAddTenant() {
   var buildings = await rental('buildings','list') || [];
   if (buildings.length == 0) { alert('\u8bf7\u5148\u6dfb\u52a0\u697c\u680b'); return; }
@@ -676,7 +707,7 @@ async function loadContracts() {
   else {
     h += '<div class="table-wrap"><table><thead><tr><th>租客</th><th>房间</th><th>月租</th><th>合同期</th><th>保证金</th><th class="status-cell">状态</th></tr></thead><tbody>';
     cs.forEach(function(c){
-      h += '<tr><td><span class="name-link" onclick="editContract('+Number(c.id)+')">'+esc(c.tenant_name||'')+'</span></td><td>'+esc(c.room_number||'')+'</td><td>¥'+Number(c.monthly_rent||0).toFixed(2)+'</td><td>'+esc((c.start_date||'')+' ~ '+(c.end_date||''))+'</td><td>¥'+Number(c.deposit||0).toFixed(2)+'</td><td class="status-cell"><span class="status-dot '+(c.status=='active'?'rented':'idle')+'" title="'+(c.status=='active'?'有效':'已终止')+'"></span></td></tr>';
+      h += '<tr><td><span class="name-link" onclick="editContract('+Number(c.id)+')">'+esc(c.tenant_name||'')+'</span></td><td>'+esc(c.room_number||'')+'</td><td>¥'+Number(c.monthly_rent||0).toFixed(2)+'</td><td>'+esc((c.start_date||'')+' ~ '+(c.end_date||''))+'</td><td>¥'+Number(c.deposit||0).toFixed(2)+'</td><td class="status-cell"><span class="status-dot '+(c.status=='active'?'rented':'idle')+'" onclick="event.stopPropagation();toggleContractStatus(NaN,\'undefined\')" title="'+(c.status=='active'?'生效中，点击解除':'已解除，点击生效')+'"></span></td></tr>';
     });
     h += '</tbody></table></div>';
   }
@@ -684,6 +715,11 @@ async function loadContracts() {
   renderMain(h);
 }
 function switchContractBuilding(id) { currentContractBuildingId = id; loadContracts(); }
+async function toggleContractStatus(id, currentStatus) {
+  var newStatus = currentStatus == 'active' ? 'ended' : 'active';
+  await rental('contracts','update',{id:id, status:newStatus});
+  loadContracts();
+}
 
 function contractTenantPicker(tenants, selectedId) {
   var selected = tenants.find(function(t){ return Number(t.id) == Number(selectedId); }) || tenants[0];
@@ -784,6 +820,7 @@ async function showAddContract() {
   h += '<div class="form-group"><label>保证金（元）</label><input class="soft-input" type="number" id="f_contract_deposit" value="'+Number(c.deposit||0)+'"></div>';
   h += '<div class="form-group"><label>水费单价（元/吨）</label><input class="soft-input" type="number" id="f_contract_water" value="'+Number(c.water_unit_price||0)+'"></div>';
   h += '<div class="form-group"><label>电费单价（元/度）</label><input class="soft-input" type="number" id="f_contract_electric" value="'+Number(c.electric_unit_price||0)+'"></div>';
+  h += '<div class="form-group"><label>合同状态</label>'+contractStatusSwitch(c.status || 'active')+'</div>';
   h += '</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doUpdateContract('+Number(id)+')">保存</button></div></div>';
   M(h);
 }function doUpdateContract(id) {
@@ -978,6 +1015,11 @@ async function loadRentPlan() {
   if (!planBuildingId || !buildings.some(function(b){ return Number(b.id)==Number(planBuildingId); })) planBuildingId = buildings[0] ? buildings[0].id : null;
 
   var h = '';
+  // 月份筛选器
+  var monthLabel = planYear + '年' + planMonth + '月';
+  h += '<div class="month-filter"><button class="month-nav" onclick="planMonth--;if(planMonth<1){planMonth=12;planYear--;}loadRentPlan()">◀</button>';
+  h += '<span class="month-label">' + monthLabel + '</span>';
+  h += '<button class="month-nav" onclick="var now=new Date(),ny=now.getFullYear(),nm=now.getMonth()+1;if(planYear>=ny&&planMonth>=nm)return;planMonth++;if(planMonth>12){planMonth=1;planYear++;}loadRentPlan()">▶</button></div>';
   // 楼栋 tab 栏
   h += '<div class="tab-action-row"><div class="building-tabs">';
   buildings.forEach(function(b){
@@ -1000,17 +1042,22 @@ async function loadRentPlan() {
   });
 
   // 汇总
-  var totalRent = 0, paidCount = 0, unpaidCount = 0;
+  var totalRent = 0, paidAmount = 0, paidCount = 0, unpaidCount = 0;
   contracts.forEach(function(c){
-    totalRent += Number(c.monthly_rent||0);
     var bill = bills.find(function(b){ return Number(b.contract_id)==Number(c.id); });
-    if (bill && bill.status=='paid') paidCount++;
-    else unpaidCount++;
+    var wf = bill ? Number(bill.water_fee||0) : 0;
+    var ef = bill ? Number(bill.electric_fee||0) : 0;
+    var of = bill ? Number(bill.other_fee||0) : 0;
+    var ta = bill ? Number(bill.total_amount||0) : Number(c.monthly_rent||0);
+    totalRent += ta;
+    if (bill && bill.status=='paid') { paidCount++; paidAmount += ta; }
+    if (!bill || bill.status!='paid') unpaidCount++;
   });
 
   h += '<div class="summary-row"><div class="stat-card"><div>当月应收</div><div class="stat-val" style="color:var(--blue)">¥'+totalRent.toFixed(2)+'</div></div>';
-  h += '<div class="stat-card"><div>已收</div><div class="stat-val" style="color:var(--green)">'+paidCount+'户</div></div>';
-  h += '<div class="stat-card"><div>未收</div><div class="stat-val" style="color:var(--red)">'+unpaidCount+'户</div></div></div>';
+  h += '<div class="stat-card"><div>当月已收</div><div class="stat-val" style="color:var(--green)">¥'+paidAmount.toFixed(2)+'</div></div>';
+  h += '<div class="stat-card"><div>已收户数</div><div class="stat-val" style="color:var(--text-sec)">'+paidCount+'户</div></div>';
+  h += '<div class="stat-card"><div>未收户数</div><div class="stat-val" style="color:var(--red)">'+unpaidCount+'户</div></div></div>'
 
   if (contracts.length == 0) {
     h += '<div class="empty-state"><div class="icon">📋</div><div>当前筛选条件下没有合同</div></div>';
