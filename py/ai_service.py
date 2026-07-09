@@ -382,5 +382,65 @@ class AIService:
                     time.sleep(1.5)
         return {"content": "🐱 " + last_error, "tool_calls": None}
 
+    def read_meter_image(self, base64_image, meter_type="电表"):
+        """调用多模态AI识别水电表读数，返回数字"""
+        model_name = self._model()
+        pid, provider = get_provider(model_name)
+        api_key = self._api_key_for_model(model_name)
+        if not api_key:
+            return None, "请先配置 AI API Key"
+
+        # 获取 base URL
+        if pid == "custom":
+            cfg = self._load_config()
+            base_url = cfg.get("custom_base_url", "").strip()
+            if not base_url:
+                return None, "请先配置自定义 API 地址"
+        else:
+            base_url = provider["base_url"]
+
+        url = base_url.rstrip("/") + "/chat/completions"
+
+        # 确保是完整 data URL
+        if not base64_image.startswith("data:"):
+            base64_image = "data:image/jpeg;base64," + base64_image
+
+        messages = [
+            {"role": "system", "content": "你是一个水电表读数识别助手。只回复数字，不要任何解释。"},
+            {"role": "user", "content": [
+                {"type": "text", "text": "请识别这张" + meter_type + "照片中的读数。只回复数字，例如：20880。不要加任何单位或说明。"},
+                {"type": "image_url", "image_url": {"url": base64_image}}
+            ]}
+        ]
+
+        payload = {
+            "model": model_name,
+            "messages": messages,
+            "stream": False,
+            "max_tokens": 50,
+            "temperature": 0.1,
+        }
+
+        if HAS_REQUESTS:
+            sess = requests.Session()
+            sess.headers["Authorization"] = "Bearer " + api_key
+            sess.headers["Content-Type"] = "application/json"
+            try:
+                r = sess.post(url, json=payload, timeout=30)
+                if r.status_code != 200:
+                    return None, "AI 识别失败(" + str(r.status_code) + ")"
+                data = r.json()
+                text = data["choices"][0]["message"]["content"].strip()
+                # 提取数字
+                import re
+                nums = re.findall(r'\d+', text)
+                if nums:
+                    return int(nums[-1]), None
+                return None, "未识别到数字"
+            except Exception as e:
+                return None, str(e)
+        else:
+            return None, "需要 requests 库"
+
 
 ai_svc = AIService()

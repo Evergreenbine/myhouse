@@ -29,6 +29,16 @@ def init():
     except:
         pass
 
+    # AI 知识库表（向量存储用 SQLite 文本，实际用 TF-IDF）
+    c.execute("""CREATE TABLE IF NOT EXISTS ai_knowledge (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        category TEXT DEFAULT '',
+        embedding TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+
     # 租房管理表
     c.execute("""CREATE TABLE IF NOT EXISTS buildings (
         id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
@@ -62,6 +72,37 @@ def init():
         c.execute("ALTER TABLE tenants ADD COLUMN building_id INTEGER REFERENCES buildings(id)")
     except:
         pass
+    try:
+        c.execute("ALTER TABLE tenants ADD COLUMN room_id INTEGER REFERENCES rooms(id)")
+    except:
+        pass
+    try:
+        c.execute("ALTER TABLE tenants ADD COLUMN room_id TEXT")
+    except:
+        pass
+    # 如果 room_id 字段存在外键约束，则重建表去掉约束
+    cols = [row[1] for row in c.execute("PRAGMA table_info(tenants)").fetchall()]
+    if 'room_id' in cols:
+        fks = c.execute("PRAGMA foreign_key_list(tenants)").fetchall()
+        room_has_fk = any(fk[3] == 'room_id' for fk in fks)
+        if room_has_fk:
+            c.execute("PRAGMA foreign_keys=OFF")
+            c.execute("""
+                CREATE TABLE tenants_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    building_id INTEGER REFERENCES buildings(id),
+                    phone TEXT DEFAULT '',
+                    id_card TEXT DEFAULT '',
+                    status TEXT DEFAULT 'active',
+                    created_at TEXT DEFAULT (datetime('now','localtime')),
+                    room_id TEXT
+                )
+            """)
+            c.execute("INSERT INTO tenants_new (id,name,building_id,phone,id_card,status,created_at,room_id) SELECT id,name,building_id,phone,id_card,status,created_at,room_id FROM tenants")
+            c.execute("DROP TABLE tenants")
+            c.execute("ALTER TABLE tenants_new RENAME TO tenants")
+            c.execute("PRAGMA foreign_keys=ON")
     c.execute("""CREATE TABLE IF NOT EXISTS contracts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id),
@@ -163,6 +204,20 @@ def delete_chat(conv_id):
     c.commit()
     c.close()
 
+def save_chat(title, messages):
+    c = _conn()
+    c.execute("INSERT INTO chat_history (title, messages, created_at) VALUES (?,?,datetime('now','localtime'))", (title, json.dumps(messages, ensure_ascii=False)))
+    c.commit()
+    conv_id = c.lastrowid
+    c.close()
+    return conv_id
+
+def update_chat(conv_id, title, messages):
+    c = _conn()
+    c.execute("UPDATE chat_history SET title=?, messages=? WHERE id=?", (title, json.dumps(messages, ensure_ascii=False), conv_id))
+    c.commit()
+    c.close()
+
 
 # ============================================================
 # 租房管理 CRUD
@@ -222,9 +277,9 @@ def update_room(rid, building_id, room_number, floor=1, status='idle'):
     c.execute("UPDATE rooms SET building_id=?,room_number=?,floor=?,status=? WHERE id=?", (building_id, room_number, floor, status, rid))
     c.commit(); c.close()
 
-def add_tenant(name, phone='', id_card='', status='active', building_id=None):
+def add_tenant(name, phone='', id_card='', status='active', building_id=None, room_id=None):
     c = _conn()
-    cur = c.execute("INSERT INTO tenants (name, phone, id_card, status, building_id) VALUES (?,?,?,?,?)", (name, phone, id_card, status, building_id))
+    cur = c.execute("INSERT INTO tenants (name, phone, id_card, status, building_id, room_id) VALUES (?,?,?,?,?,?)", (name, phone, id_card, status, building_id, room_id))
     c.commit(); pk = cur.lastrowid; c.close()
     return pk
 
@@ -251,9 +306,9 @@ def get_tenant(tid):
     c.close()
     return dict(r) if r else None
 
-def update_tenant(tid, name, phone, id_card, status='active', building_id=None):
+def update_tenant(tid, name, phone, id_card, status='active', building_id=None, room_id=None):
     c = _conn()
-    c.execute("UPDATE tenants SET name=?,phone=?,id_card=?,status=?,building_id=? WHERE id=?", (name, phone, id_card, status, building_id, tid))
+    c.execute("UPDATE tenants SET name=?,phone=?,id_card=?,status=?,building_id=?,room_id=? WHERE id=?", (name, phone, id_card, status, building_id, room_id, tid))
     c.commit(); c.close()
 
 def set_tenant_status(tid, status):
@@ -505,4 +560,21 @@ def _update_bill_payment_status(bill_id):
         c.execute("UPDATE bills SET status='partial' WHERE id=?", (bill_id,))
     else:
         c.execute("UPDATE bills SET status='unpaid' WHERE id=?", (bill_id,))
+    c.commit(); c.close()
+
+# === AI 知识库 ===
+def save_knowledge(title, content, category=""):
+    c = _conn()
+    c.execute("INSERT INTO ai_knowledge (title, content, category) VALUES (?,?,?)", (title, content, category))
+    c.commit(); c.close()
+
+def get_all_knowledge():
+    c = _conn()
+    rows = c.execute("SELECT id, title, content, category FROM ai_knowledge ORDER BY id").fetchall()
+    c.close()
+    return [{"id":r["id"],"title":r["title"],"content":r["content"],"category":r["category"]} for r in rows]
+
+def clear_knowledge():
+    c = _conn()
+    c.execute("DELETE FROM ai_knowledge")
     c.commit(); c.close()

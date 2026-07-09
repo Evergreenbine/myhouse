@@ -222,22 +222,32 @@ table a:hover{text-decoration:underline}
 #ai-float-btn .ai-dot{position:absolute;top:4px;right:4px;width:10px;height:10px;background:var(--green);border-radius:50%;border:2px solid var(--white)}
 
 /* AI Chat Panel */
-.ai-chat-panel{position:fixed;right:24px;bottom:110px;width:380px;height:480px;background:var(--white);border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,0.15);z-index:901;display:none;flex-direction:column;overflow:hidden}
+.ai-chat-panel{position:fixed;right:24px;bottom:110px;width:440px;height:560px;background:var(--white);border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,0.15);z-index:901;display:none;flex-direction:column;overflow:hidden}
 .ai-chat-panel.open{display:flex}
-.ai-chat-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:linear-gradient(135deg,#3370FF,#5B8DEF);color:white;flex-shrink:0}
+.ai-chat-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(135deg,#3370FF,#5B8DEF);color:white;flex-shrink:0}
 .ai-chat-header .ai-title{font-size:14px;font-weight:600}
-.ai-chat-header .ai-close{background:rgba(255,255,255,0.2);border:none;color:white;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center}
-.ai-chat-header .ai-close:hover{background:rgba(255,255,255,0.3)}
-.ai-chat-body{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
-.ai-chat-footer{padding:12px;border-top:1px solid var(--border-light);display:flex;gap:8px;flex-shrink:0}
+.ai-chat-header .ai-actions{display:flex;gap:4px}
+.ai-chat-header .ai-actions button{background:rgba(255,255,255,0.2);border:none;color:white;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center}
+.ai-chat-header .ai-actions button:hover{background:rgba(255,255,255,0.35)}
+.ai-chat-body{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:#F7F8FA}
+.ai-chat-body .ai-msg{padding:10px 14px;border-radius:12px;font-size:13px;max-width:88%;word-break:break-word;line-height:1.6;animation:msgIn 0.25s ease}
+.ai-chat-body .ai-msg.user{align-self:flex-end;background:var(--blue);color:white;border-bottom-right-radius:4px}
+.ai-chat-body .ai-msg.bot{align-self:flex-start;background:var(--white);color:var(--text);border:1px solid var(--border-light);border-bottom-left-radius:4px;box-shadow:0 1px 2px rgba(0,0,0,0.04)}
+.ai-chat-body .ai-msg.bot p{margin:4px 0}
+.ai-chat-body .ai-msg.bot code{background:#F0F2F5;padding:1px 5px;border-radius:3px;font-size:12px}
+.ai-chat-body .ai-msg.bot pre{background:#1F2329;color:#E6EDF3;padding:10px 14px;border-radius:6px;overflow-x:auto;font-size:12px;line-height:1.5;margin:6px 0}
+.ai-chat-body .ai-msg.bot pre code{background:none;color:inherit;padding:0}
+.ai-chat-body .ai-msg.bot table{width:100%;border-collapse:collapse;font-size:12px;margin:6px 0}
+.ai-chat-body .ai-msg.bot table th,.ai-chat-body .ai-msg.bot table td{border:1px solid var(--border);padding:4px 8px;text-align:left}
+.ai-chat-body .ai-msg.bot table th{background:#F5F6F7;font-weight:500}
+.ai-chat-body .ai-msg.loading{color:var(--text-third);font-style:italic}
+@keyframes msgIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.ai-chat-footer{padding:12px;border-top:1px solid var(--border-light);display:flex;gap:8px;flex-shrink:0;background:var(--white)}
 .ai-chat-footer input{flex:1;height:36px;border:1px solid var(--border);border-radius:8px;padding:0 12px;font-size:13px;outline:none;background:#F8FAFD}
 .ai-chat-footer input:focus{border-color:var(--blue)}
 .ai-chat-footer button{height:36px;padding:0 16px;border-radius:8px;background:var(--blue);color:white;border:none;cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap}
 .ai-chat-footer button:hover{background:var(--blue-hover)}
-.ai-msg{padding:10px 14px;border-radius:10px;font-size:13px;max-width:85%;word-break:break-word;line-height:1.5}
-.ai-msg.user{align-self:flex-end;background:var(--blue);color:white;border-bottom-right-radius:4px}
-.ai-msg.bot{align-self:flex-start;background:#F2F4F7;color:var(--text);border-bottom-left-radius:4px}
-.ai-msg.loading{color:var(--text-third);font-style:italic}
+.ai-chat-body .ai-msg.bot a{color:var(--blue)}
 
 
 select.soft-input{appearance:auto;-webkit-appearance:auto;height:38px;padding:0 10px;cursor:pointer}
@@ -254,6 +264,7 @@ select.soft-input{appearance:auto;-webkit-appearance:auto;height:38px;padding:0 
 .select-option:hover{background:#F7FAFF;color:var(--blue)}
 .select-option.active{background:var(--blue-light);color:var(--blue);font-weight:600}
 .locked-field{height:32px;border:1px solid #d9d9d9;border-radius:6px;padding:0 11px;display:flex;align-items:center;font-size:14px;color:var(--text-sec);background:#fafafa}
+.multi-select{position:relative}.multi-select-trigger{min-height:34px;border:1px solid #d9d9d9;border-radius:6px;padding:4px 28px 4px 6px;background:#fff;color:var(--text);display:flex;align-items:center;flex-wrap:wrap;gap:4px;cursor:pointer;font-size:14px;transition:all 0.2s;position:relative}.multi-select-trigger:hover{border-color:#4096ff}.ms-arrow{font-size:10px;color:#999;position:absolute;right:8px;top:10px}.multi-select-dropdown{display:none;position:absolute;left:0;right:0;top:100%;margin-top:4px;background:var(--white);border:1px solid var(--border-light);border-radius:8px;box-shadow:var(--shadow-md);padding:6px;z-index:1001;max-height:200px;overflow-y:auto;scrollbar-width:none}.multi-select-dropdown::-webkit-scrollbar{display:none}.ms-actions{display:flex;gap:6px;padding:4px 4px 6px;border-bottom:1px solid #f0f0f0;margin-bottom:4px}.ms-actions .btn-xs{padding:2px 8px;font-size:11px;border-radius:4px;border:1px solid #d9d9d9;background:#fff;cursor:pointer}.ms-actions .btn-xs:hover{color:var(--blue);border-color:var(--blue)}.ms-option{display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:4px;font-size:13px;cursor:pointer;color:var(--text);white-space:nowrap}.ms-option:hover{background:#F7FAFF}.ms-option input[type=checkbox]{accent-color:var(--blue)}.ms-tag{display:inline-flex;align-items:center;gap:3px;background:var(--blue-light);color:var(--blue);border-radius:4px;padding:2px 6px;font-size:12px;line-height:18px}.ms-tag-x{font-size:14px;cursor:pointer;line-height:1;opacity:0.6}.ms-tag-x:hover{opacity:1}.ms-placeholder{color:var(--text-third);font-size:13px;padding-left:4px}
 
 
 /* Override antd button styles */
@@ -353,11 +364,15 @@ select.soft-input{appearance:auto;-webkit-appearance:auto;height:38px;padding:0 
 <!-- AI 对话框 -->
 <div class="ai-chat-panel" id="ai-chat-panel">
   <div class="ai-chat-header">
-    <span class="ai-title">🤖 租房助手</span>
-    <button class="ai-close" onclick="toggleAIChat()">✕</button>
+    <span class="ai-title">🤖 租房小管家</span>
+    <div class="ai-actions">
+      <button title="新对话" onclick="newAIChat()">＋</button>
+      <button title="历史记录" onclick="loadAIChats()">📋</button>
+      <button title="关闭" onclick="toggleAIChat()">✕</button>
+    </div>
   </div>
   <div class="ai-chat-body" id="ai-chat-body">
-    <div class="ai-msg bot">你好！我是租房助手，可以帮你：<br>• 查询租客信息<br>• 分析缴费情况<br>• 解答租房问题<br><br>有什么可以帮你的？</div>
+    <div class="ai-msg bot">你好！我是<b>租房小管家</b>，可以帮你：<br><br>• 查询租客信息和合同<br>• 分析缴费情况<br>• 解答租房相关问题<br><br>有什么可以帮你的？</div>
   </div>
   <div class="ai-chat-footer">
     <input id="ai-input" placeholder="输入你的问题..." onkeydown="if(event.key==='Enter')sendAIMsg()">
@@ -464,6 +479,7 @@ var currentWaterMeterBuildingId = null;
 var currentElectricMeterBuildingId = null;
 var currentBillBuildingId = null;
 var currentPaymentBuildingId = null;
+var tenantShowActiveOnly = true;
 async function loadBuildings() {
   var blds = await rental('buildings','list') || [];
   var rooms = await rental('rooms','list') || [];
@@ -558,6 +574,7 @@ async function editRoom(id) {
   var bld = buildings.find(function(b){ return Number(b.id)==Number(room.building_id); });
   var bldName = bld ? bld.name : '\u672a\u77e5\u697c\u680b';
   var h = '<div class="modal-title">\u7f16\u8f91\u623f\u95f4</div><div class="soft-form">';
+  h += '<input type="hidden" id="f_room_building_id" value="'+esc(room.building_id || '')+'">';
   h += '<div class="form-group"><label>\u6240\u5c5e\u697c\u680b</label><div class="locked-field">'+esc(bldName)+'</div></div>';
   h += '<div class="form-group"><label>\u697c\u5c42</label><input class="soft-input" id="f_room_floor" type="number" value="'+esc(room.floor || 1)+'" min="-9"></div>';
   h += '<div class="form-group"><label>\u623f\u95f4\u53f7</label><input class="soft-input" id="f_room_number" value="'+esc(room.room_number)+'"></div>';
@@ -566,12 +583,14 @@ async function editRoom(id) {
   M(h);
 }
 function doUpdateRoom(id) {
+  var buildingId = document.getElementById('f_room_building_id').value;
   var floor = parseInt(document.getElementById('f_room_floor').value, 10);
   var roomNumber = document.getElementById('f_room_number').value.trim();
   var status = document.getElementById('f_room_status').value;
+  if (!buildingId) { alert('\u697c\u680bID\u4e22\u5931\uff0c\u8bf7\u91cd\u65b0\u6253\u5f00\u7f16\u8f91'); return; }
   if (isNaN(floor)) { alert('\u8bf7\u8f93\u5165\u697c\u5c42'); return; }
   if (!roomNumber) { alert('\u8bf7\u8f93\u5165\u623f\u95f4\u53f7'); return; }
-  rental('rooms','update',{id:id, floor:floor, room_number:roomNumber, status:status}).then(function(res){
+  rental('rooms','update',{id:Number(id), building_id:Number(buildingId), floor:floor, room_number:roomNumber, status:status}).then(function(res){
     if (!res || res.error) { alert((res && res.error) || '\u4fdd\u5b58\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u540e\u7aef\u670d\u52a1'); return; }
     CM(); loadRooms();
   });
@@ -584,19 +603,26 @@ async function loadTenants() {
     return;
   }
   if (!currentTenantBuildingId || !buildings.some(function(b){ return Number(b.id) == Number(currentTenantBuildingId); })) currentTenantBuildingId = buildings[0].id;
-  var tenants = await rental('tenants','list',{active_only:false, building_id:currentTenantBuildingId}) || [];
+  var tenants = await rental('tenants','list',{active_only:tenantShowActiveOnly, building_id:currentTenantBuildingId}) || [];
+  var allRooms = await rental('rooms','list',{building_id:currentTenantBuildingId}) || [];
+  var roomMap = {};
+  allRooms.forEach(function(r){ roomMap[Number(r.id)] = r.room_number; });
   var h = '<div class="tab-action-row"><div class="building-tabs">';
   buildings.forEach(function(b){
     var active = Number(b.id) == Number(currentTenantBuildingId) ? ' active' : '';
     h += '<button class="building-tab'+active+'" onclick="switchTenantBuilding('+Number(b.id)+')">'+esc(b.name)+'</button>';
   });
-  h += '</div><button class="btn btn-primary btn-sm" onclick="showAddTenant()">+ \u6dfb\u52a0\u79df\u5ba2</button></div>';
+  h += '</div><span class="filter-chip'+(tenantShowActiveOnly?' active':'')+'" onclick="tenantShowActiveOnly=!tenantShowActiveOnly;loadTenants()" style="margin-right:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:14px;font-size:12px;'+(tenantShowActiveOnly?'background:var(--blue-light);color:var(--blue);':'color:var(--text-sec);background:#f0f0f0;')+'"><span style="width:6px;height:6px;border-radius:50%;background:'+(tenantShowActiveOnly?'var(--blue)':'#999')+'"></span>'+(tenantShowActiveOnly?'\u5728\u79df':'\u5168\u90e8')+'</span><button class="btn btn-primary btn-sm" onclick="showAddTenant()">+ \u6dfb\u52a0\u79df\u5ba2</button></div>';
   if (tenants.length == 0) h += '<div class="empty-state"><div class="icon">&#x1F464;</div><div>\u6682\u65e0\u79df\u5ba2\uff0c\u70b9\u51fb\u53f3\u4e0a\u65b9\u6309\u94ae\u6dfb\u52a0</div></div>';
   else {
-    h += '<div class="table-wrap"><table><thead><tr><th>\u59d3\u540d</th><th>\u624b\u673a\u53f7</th><th>\u8bc1\u4ef6\u53f7</th><th class="status-cell">\u72b6\u6001</th></tr></thead><tbody>';
+    h += '<div class="table-wrap"><table><thead><tr><th>\u59d3\u540d</th><th>\u623f\u95f4\u53f7</th><th>\u624b\u673a\u53f7</th><th>\u8bc1\u4ef6\u53f7</th><th class="status-cell">\u72b6\u6001</th></tr></thead><tbody>';
     tenants.forEach(function(t){
       var active = t.status != 'inactive';
-      h += '<tr><td><span class="name-link" onclick="editTenant('+Number(t.id)+')">'+esc(t.name)+'</span></td><td>'+esc(t.phone||'')+'</td><td>'+esc(t.id_card||'')+'</td><td class="status-cell"><span class="status-dot '+(active ? 'rented' : 'idle')+'" title="'+(active ? '\u6b63\u5e38' : '\u505c\u7528')+'"></span></td></tr>';
+      var roomTags = '';
+      if (t.room_id) {
+        roomTags = String(t.room_id).split(',').map(function(rid){ var rn=roomMap[Number(rid)]||rid; return '<span class="ms-tag">'+esc(rn)+'</span>'; }).join('');
+      }
+      h += '<tr><td><span class="name-link" onclick="editTenant('+Number(t.id)+')">'+esc(t.name)+'</span></td><td><div style="display:flex;flex-wrap:wrap;gap:3px">'+roomTags+'</div></td><td>'+esc(t.phone||'')+'</td><td>'+esc(t.id_card||'')+'</td><td class="status-cell"><span class="status-dot '+(active ? 'rented' : 'idle')+'" title="'+(active ? '\u6b63\u5e38' : '\u505c\u7528')+'"></span></td></tr>';
     });
     h += '</tbody></table></div>';
   }
@@ -633,6 +659,95 @@ function lockedTenantBuilding(buildings, selectedId) {
   if (!selected) return '';
   return '<input type="hidden" id="f_tenant_building" value="'+Number(selected.id)+'"><div class="locked-field">'+esc(selected.name)+'</div>';
 }
+function tenantRoomSelect(rooms, selectedRoomIds) {
+  var selIds = selectedRoomIds ? String(selectedRoomIds).split(',').map(function(v){ return Number(v); }) : [];
+  var selRooms = rooms.filter(function(r){ return selIds.indexOf(Number(r.id)) >= 0; });
+  // 已选标签
+  var tags = '';
+  selRooms.forEach(function(r){
+    tags += '<span class="ms-tag">'+esc(r.room_number||'')+' ('+esc(r.floor||'')+'\u697c)<span class="ms-tag-x" onclick="event.stopPropagation();removeTenantRoom('+Number(r.id)+')">×</span></span>';
+  });
+  var h = '<div class="multi-select" id="f_tenant_room_wrap">';
+  h += '<div class="multi-select-trigger" onclick="toggleTenantRoomMulti()"><span id="tenant_room_label">'+(selRooms.length>0 ? tags : '\u70b9\u51fb\u9009\u62e9\u623f\u95f4')+'</span><span class="ms-arrow">▼</span></div>';
+  h += '<div class="multi-select-dropdown" id="tenant_room_dropdown">';
+  h += '<div class="ms-actions"><button class="btn btn-xs" onclick="event.stopPropagation();selectAllTenantRooms()">\u5168\u9009</button><button class="btn btn-xs" onclick="event.stopPropagation();clearAllTenantRooms()">\u6e05\u7a7a</button></div>';
+  rooms.forEach(function(r){
+    var checked = selIds.indexOf(Number(r.id)) >= 0 ? ' checked' : '';
+    h += '<label class="ms-option"><input type="checkbox" value="'+Number(r.id)+'"'+checked+' onchange="updateTenantRoomLabel()">'+esc(r.room_number||'')+' ('+esc(r.floor||'')+'\u697c)</label>';
+  });
+  h += '</div></div>';
+  h += '<input type="hidden" id="f_tenant_room" value="'+(selIds.join(',')||'')+'">';
+  return h;
+}
+function toggleTenantRoomMulti() {
+  var dd = document.getElementById('tenant_room_dropdown');
+  if (dd) dd.style.display = dd.style.display=='block' ? 'none' : 'block';
+}
+function updateTenantRoomLabel() {
+  var cbs = document.querySelectorAll('#tenant_room_dropdown input[type=checkbox]');
+  var ids = [];
+  cbs.forEach(function(cb){ if (cb.checked) ids.push(cb.value); });
+  document.getElementById('f_tenant_room').value = ids.join(',');
+  // 重建标签
+  var label = document.getElementById('tenant_room_label');
+  if (!label) return;
+  if (ids.length == 0) { label.innerHTML = '\u70b9\u51fb\u9009\u62e9\u623f\u95f4'; return; }
+  var tags = '';
+  cbs.forEach(function(cb){
+    if (cb.checked) {
+      var txt = cb.parentNode.textContent.trim();
+      tags += '<span class="ms-tag">'+esc(txt)+'<span class="ms-tag-x" onclick="event.stopPropagation();removeTenantRoom('+cb.value+')">×</span></span>';
+    }
+  });
+  label.innerHTML = tags;
+}
+function removeTenantRoom(roomId) {
+  var cb = document.querySelector('#tenant_room_dropdown input[value="'+roomId+'"]');
+  if (cb) { cb.checked = false; }
+  updateTenantRoomLabel();
+}
+function selectAllTenantRooms() {
+  document.querySelectorAll('#tenant_room_dropdown input[type=checkbox]').forEach(function(cb){ cb.checked = true; });
+  updateTenantRoomLabel();
+}
+function clearAllTenantRooms() {
+  document.querySelectorAll('#tenant_room_dropdown input[type=checkbox]').forEach(function(cb){ cb.checked = false; });
+  updateTenantRoomLabel();
+}
+async function refreshTenantRoomSelect(buildingId) {
+  var rooms = await rental('rooms','list',{building_id:buildingId}) || [];
+  var curVal = document.getElementById('f_tenant_room').value;
+  var selIds = curVal ? curVal.split(',').map(function(v){ return Number(v); }) : [];
+  var dd = document.getElementById('tenant_room_dropdown');
+  if (!dd) return;
+  var h = '<div class="ms-actions"><button class="btn btn-xs" onclick="selectAllTenantRooms()">\u5168\u9009</button><button class="btn btn-xs" onclick="clearAllTenantRooms()">\u6e05\u7a7a</button></div>';
+  rooms.forEach(function(r){
+    var checked = selIds.indexOf(Number(r.id)) >= 0 ? ' checked' : '';
+    h += '<label class="ms-option"><input type="checkbox" value="'+Number(r.id)+'"'+checked+' onchange="updateTenantRoomLabel()">'+esc(r.room_number||'')+' ('+esc(r.floor||'')+'\u697c)</label>';
+  });
+  dd.innerHTML = h;
+}
+function tenantBuildingPicker(buildings, selectedId, rooms) {
+  var selected = buildings.find(function(b){ return Number(b.id) == Number(selectedId); }) || buildings[0];
+  if (!selected) return '';
+  var h = '<input type="hidden" id="f_tenant_building" value="'+Number(selected.id)+'"><div class="custom-select" id="tenant_building_picker"><div class="select-trigger" onclick="toggleTenantBuildingMenu()"><span id="tenant_building_label">'+esc(selected.name)+'</span></div><div class="select-menu">';
+  buildings.forEach(function(b){
+    var active = Number(b.id) == Number(selected.id) ? ' active' : '';
+    h += '<div class="select-option'+active+'" onclick="selectTenantBuildingFromPicker('+Number(b.id)+', this)">'+esc(b.name)+'</div>';
+  });
+  return h + '</div></div>';
+}
+function selectTenantBuildingFromPicker(id, optionEl) {
+  document.getElementById('f_tenant_building').value = id;
+  document.getElementById('tenant_building_label').textContent = optionEl.textContent;
+  var picker = document.getElementById('tenant_building_picker');
+  if (picker) {
+    picker.classList.remove('open');
+    picker.querySelectorAll('.select-option').forEach(function(o){ o.classList.remove('active'); });
+    optionEl.classList.add('active');
+  }
+  refreshTenantRoomSelect(id);
+}
 function tenantStatusSwitch(selected) {
   var active = selected != 'inactive';
   return '<input type="hidden" id="f_tenant_status" value="'+(active ? 'active' : 'inactive')+'"><div class="status-switch-row"><button class="status-switch '+(active ? 'rented' : '')+'" id="tenant_status_switch" onclick="toggleTenantStatus()" type="button"></button><span class="status-switch-label" id="tenant_status_label">'+(active ? '\u6b63\u5e38' : '\u505c\u7528')+'</span></div>';
@@ -665,13 +780,23 @@ async function showAddTenant() {
   var buildings = await rental('buildings','list') || [];
   if (buildings.length == 0) { alert('\u8bf7\u5148\u6dfb\u52a0\u697c\u680b'); return; }
   var selectedId = currentTenantBuildingId || buildings[0].id;
-  M('<div class="soft-form"><div class="form-group"><label>\u6240\u5c5e\u697c\u680b</label>'+tenantBuildingPicker(buildings, selectedId)+'</div><div class="form-group"><label>\u59d3\u540d</label><input class="soft-input" id="f_tenant_name" placeholder="\u5982\uff1a\u5f20\u4e09"></div><div class="form-group"><label>\u624b\u673a\u53f7</label><input class="soft-input" id="f_tenant_phone" placeholder="\u5982\uff1a13800000000"></div><div class="form-group"><label>\u8bc1\u4ef6\u53f7</label><input class="soft-input" id="f_tenant_id_card" placeholder="\u8eab\u4efd\u8bc1\u6216\u5176\u4ed6\u8bc1\u4ef6"></div><div class="form-group"><label>\u72b6\u6001</label>'+tenantStatusSwitch('active')+'</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doAddTenant()">\u6dfb\u52a0</button></div></div>');
+  var rooms = await rental('rooms','list',{building_id:selectedId}) || [];
+  var h = '<div class="soft-form">';
+  h += '<div class="form-group"><label>\u6240\u5c5e\u697c\u680b</label>'+tenantBuildingPicker(buildings, selectedId, rooms)+'</div>';
+  h += '<div class="form-group"><label>\u623f\u95f4\u53f7</label>'+tenantRoomSelect(rooms, '')+'</div>';
+  h += '<div class="form-group"><label>\u59d3\u540d</label><input class="soft-input" id="f_tenant_name" placeholder="\u5982\uff1a\u5f20\u4e09"></div>';
+  h += '<div class="form-group"><label>\u624b\u673a\u53f7</label><input class="soft-input" id="f_tenant_phone" placeholder="\u5982\uff1a13800000000"></div>';
+  h += '<div class="form-group"><label>\u8bc1\u4ef6\u53f7</label><input class="soft-input" id="f_tenant_id_card" placeholder="\u8eab\u4efd\u8bc1\u6216\u5176\u4ed6\u8bc1\u4ef6"></div>';
+  h += '<div class="form-group"><label>\u72b6\u6001</label>'+tenantStatusSwitch('active')+'</div>';
+  h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doAddTenant()">\u6dfb\u52a0</button></div></div>';
+  M(h);
 }
 function doAddTenant() {
   var name = document.getElementById('f_tenant_name').value.trim();
   if (!name) { alert('\u8bf7\u8f93\u5165\u79df\u5ba2\u59d3\u540d'); return; }
   var buildingId = document.getElementById('f_tenant_building').value;
-  rental('tenants','add',{building_id:buildingId, name:name, phone:document.getElementById('f_tenant_phone').value.trim(), id_card:document.getElementById('f_tenant_id_card').value.trim(), status:document.getElementById('f_tenant_status').value}).then(function(res){
+  var roomId = document.getElementById('f_tenant_room').value || null;
+  rental('tenants','add',{building_id:buildingId, room_id:roomId, name:name, phone:document.getElementById('f_tenant_phone').value.trim(), id_card:document.getElementById('f_tenant_id_card').value.trim(), status:document.getElementById('f_tenant_status').value}).then(function(res){
     if (!res || res.error) { alert((res && res.error) || '\u65b0\u589e\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u540e\u7aef\u670d\u52a1'); return; }
     currentTenantBuildingId = buildingId; CM(); loadTenants();
   });
@@ -681,13 +806,23 @@ async function editTenant(id) {
   if (!t || t.error) { alert('\u672a\u627e\u5230\u8be5\u79df\u5ba2'); return; }
   var buildings = await rental('buildings','list') || [];
   var selectedId = currentTenantBuildingId || t.building_id || (buildings[0] && buildings[0].id);
-  M('<div class="modal-title">\u7f16\u8f91\u79df\u5ba2</div><div class="soft-form"><div class="form-group"><label>\u6240\u5c5e\u697c\u680b</label>'+lockedTenantBuilding(buildings, selectedId)+'</div><div class="form-group"><label>\u59d3\u540d</label><input class="soft-input" id="f_tenant_name" value="'+esc(t.name)+'"></div><div class="form-group"><label>\u624b\u673a\u53f7</label><input class="soft-input" id="f_tenant_phone" value="'+esc(t.phone||'')+'"></div><div class="form-group"><label>\u8bc1\u4ef6\u53f7</label><input class="soft-input" id="f_tenant_id_card" value="'+esc(t.id_card||'')+'"></div><div class="form-group"><label>\u72b6\u6001</label>'+tenantStatusSwitch(t.status || 'active')+'</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doUpdateTenant('+Number(id)+')">\u4fdd\u5b58</button></div></div>');
+  var rooms = await rental('rooms','list',{building_id:selectedId}) || [];
+  var h = '<div class="modal-title">\u7f16\u8f91\u79df\u5ba2</div><div class="soft-form">';
+  h += '<div class="form-group"><label>\u6240\u5c5e\u697c\u680b</label>'+lockedTenantBuilding(buildings, selectedId)+'</div>';
+  h += '<div class="form-group"><label>\u623f\u95f4\u53f7</label>'+tenantRoomSelect(rooms, t.room_id || '')+'</div>';
+  h += '<div class="form-group"><label>\u59d3\u540d</label><input class="soft-input" id="f_tenant_name" value="'+esc(t.name)+'"></div>';
+  h += '<div class="form-group"><label>\u624b\u673a\u53f7</label><input class="soft-input" id="f_tenant_phone" value="'+esc(t.phone||'')+'"></div>';
+  h += '<div class="form-group"><label>\u8bc1\u4ef6\u53f7</label><input class="soft-input" id="f_tenant_id_card" value="'+esc(t.id_card||'')+'"></div>';
+  h += '<div class="form-group"><label>\u72b6\u6001</label>'+tenantStatusSwitch(t.status || 'active')+'</div>';
+  h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">\u53d6\u6d88</button><button class="btn btn-primary" onclick="doUpdateTenant('+Number(id)+')">\u4fdd\u5b58</button></div></div>';
+  M(h);
 }
 function doUpdateTenant(id) {
   var name = document.getElementById('f_tenant_name').value.trim();
   if (!name) { alert('\u8bf7\u8f93\u5165\u79df\u5ba2\u59d3\u540d'); return; }
   var buildingId = document.getElementById('f_tenant_building').value;
-  rental('tenants','update',{id:id, building_id:buildingId, name:name, phone:document.getElementById('f_tenant_phone').value.trim(), id_card:document.getElementById('f_tenant_id_card').value.trim(), status:document.getElementById('f_tenant_status').value}).then(function(res){
+  var roomId = document.getElementById('f_tenant_room').value || null;
+  rental('tenants','update',{id:id, building_id:buildingId, room_id:roomId, name:name, phone:document.getElementById('f_tenant_phone').value.trim(), id_card:document.getElementById('f_tenant_id_card').value.trim(), status:document.getElementById('f_tenant_status').value}).then(function(res){
     if (!res || res.error) { alert((res && res.error) || '\u4fdd\u5b58\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u540e\u7aef\u670d\u52a1'); return; }
     currentTenantBuildingId = buildingId; CM(); loadTenants();
   });
@@ -1479,8 +1614,28 @@ function previewUpload(type, input) {
   drawerUploads[type] = file;
   var preview = document.getElementById('preview_'+type);
   var reader = new FileReader();
-  reader.onload = function(e){
-    preview.innerHTML = '<img src="'+e.target.result+'" style="height:70px;border-radius:4px"> <span style="font-size:11px">'+file.name+'</span>';
+  reader.onload = async function(e){
+    var dataUrl = e.target.result;
+    preview.innerHTML = '<img src="'+dataUrl+'" style="height:70px;border-radius:4px"> <span style="font-size:11px">'+file.name+'</span>';
+    // 调用 OCR 识别数字
+    try {
+      var res = await rental('_ocr','read',{image:dataUrl, meter_type: type==='water'?'水表':'电表'});
+      if (res && res.numbers && res.numbers.length > 0) {
+        // 取最大值作为电表/水表读数
+        var maxNum = Math.max.apply(null, res.numbers);
+        var inputId = type === 'water' ? 'draw_water' : 'draw_electric';
+        var inputEl = document.getElementById(inputId);
+        if (inputEl) {
+          inputEl.value = maxNum;
+          inputEl.dispatchEvent(new Event('input'));
+          showToast('已识别数字：' + maxNum);
+        }
+      } else {
+        showToast('未识别到数字，请手动输入');
+      }
+    } catch(err) {
+      showToast('OCR 识别失败，请手动输入');
+    }
   };
   reader.readAsDataURL(file);
 }
@@ -1789,11 +1944,101 @@ async function markPaid(contractId, billId, tenantId, rentAmount, waterFee, elec
 }
 
 // ====== AI 助手 ======
+var aiChatHistory = [];  // 当前会话的消息历史
+var aiConvId = 0;        // 当前会话 ID
+var mdRender = null;
+
+function loadMarked() {
+  if (mdRender) return mdRender;
+  // 轻量 Markdown 渲染（不使用外部库）
+  mdRender = function(text) {
+    if (!text) return '';
+    // 代码块 ```
+    text = text.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+    // 行内代码
+    text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // 粗体
+    text = text.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+    // 表格
+    text = text.replace(/(\|[^\n]+\|\n\|[-:\|\s]+\|\n((?:\|[^\n]+\|\n?)*))/g, function(m){
+      var lines = m.trim().split('\n');
+      var h = '<table>';
+      lines.forEach(function(line, i){
+        if (i === 1) return; // 分隔行
+        var cells = line.split('|').filter(function(c){return c.trim()});
+        var tag = i === 0 ? 'th' : 'td';
+        h += '<tr>'+cells.map(function(c){return '<'+tag+'>'+c.trim()+'</'+tag+'>'}).join('')+'</tr>';
+      });
+      return h+'</table>';
+    });
+    // 链接
+    text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+    // 换行
+    text = text.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>');
+    return '<p>'+text+'</p>';
+  };
+  return mdRender;
+}
+
 function toggleAIChat() {
   document.getElementById('ai-chat-panel').classList.toggle('open');
   if (document.getElementById('ai-chat-panel').classList.contains('open')) {
     document.getElementById('ai-input').focus();
   }
+}
+
+function newAIChat() {
+  if (aiChatHistory.length > 0 && !confirm('确定开始新对话？当前对话将丢失。')) return;
+  aiChatHistory = [];
+  aiConvId = 0;
+  var body = document.getElementById('ai-chat-body');
+  body.innerHTML = '<div class="ai-msg bot">你好！我是<b>租房小管家</b>，可以帮你：<br><br>• 查询租客信息和合同<br>• 分析缴费情况<br>• 解答租房相关问题<br><br>有什么可以帮你的？</div>';
+}
+
+async function loadAIChats() {
+  try {
+    var chats = await rental('_ai','list_chats') || [];
+    if (chats.length === 0) { showToast('暂无历史对话'); return; }
+    var h = '<div style="max-height:300px;overflow-y:auto">';
+    chats.forEach(function(c){
+      var title = c.title || '对话 ' + c.id;
+      h += '<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center" onclick="restoreChat('+c.id+')">';
+      h += '<span style="font-size:13px">'+esc(title.substring(0,40))+'</span>';
+      h += '<button class="btn btn-sm" style="color:var(--red);font-size:11px;padding:2px 8px" onclick="event.stopPropagation();deleteChat('+c.id+')">删除</button>';
+      h += '</div>';
+    });
+    h += '</div>';
+    var body = document.getElementById('ai-chat-body');
+    body.innerHTML = '<div class="ai-msg bot">'+h+'</div>';
+  } catch(e) { showToast('加载失败'); }
+}
+
+async function restoreChat(id) {
+  try {
+    var chats = await rental('_ai','list_chats') || [];
+    var chat = chats.find(function(c){return c.id === id});
+    if (!chat) return;
+    aiChatHistory = chat.messages || [];
+    aiConvId = id;
+    var body = document.getElementById('ai-chat-body');
+    body.innerHTML = '';
+    var render = loadMarked();
+    aiChatHistory.forEach(function(m){
+      if (m.role === 'user') {
+        body.innerHTML += '<div class="ai-msg user">'+esc(m.content)+'</div>';
+      } else {
+        body.innerHTML += '<div class="ai-msg bot">'+render(m.content)+'</div>';
+      }
+    });
+    body.scrollTop = body.scrollHeight;
+  } catch(e) {}
+}
+
+async function deleteChat(id) {
+  if (!confirm('确定删除该对话？')) return;
+  await rental('_ai','delete_chat',{id:id});
+  if (aiConvId === id) newAIChat();
+  loadAIChats();
 }
 
 async function sendAIMsg() {
@@ -1803,85 +2048,199 @@ async function sendAIMsg() {
   input.value = '';
 
   var body = document.getElementById('ai-chat-body');
+  var render = loadMarked();
+
   // 用户消息
   body.innerHTML += '<div class="ai-msg user">'+esc(msg)+'</div>';
-  body.innerHTML += '<div class="ai-msg bot loading" id="ai-loading">思考中...</div>';
+  aiChatHistory.push({role:'user', content:msg});
+
+  // 加载状态
+  var loadEl = document.createElement('div');
+  loadEl.className = 'ai-msg bot loading';
+  loadEl.textContent = '思考中...';
+  body.appendChild(loadEl);
   body.scrollTop = body.scrollHeight;
-
-  // 收集上下文数据
-  var buildings = await rental('buildings','list') || [];
-  var tenants = await rental('tenants','list',{active_only:false}) || [];
-  var contracts = await rental('contracts','list',{active_only:true}) || [];
-  var bills = await rental('bills','list',{month:''}) || [];
-
-  var context = '当前租房系统数据概览：\n';
-  context += '- 楼栋：'+buildings.length+'栋（'+buildings.map(function(b){return b.name}).join('、')+'）\n';
-  context += '- 租客：'+tenants.length+'人\n';
-  context += '- 有效合同：'+contracts.length+'份\n';
-  context += '- 近期账单：'+bills.length+'单\n';
-  contracts.forEach(function(c){
-    context += '  · '+c.tenant_name+' 租住 '+c.room_number+'，月租¥'+c.monthly_rent+'\n';
-  });
-
-  var prompt = '你是租房管理系统助手。根据以下数据回答用户问题。回答要简洁实用。\n\n'+context+'\n\n用户问题：'+msg;
 
   try {
-    var res = await api('/api/rental', {method:'POST', body: JSON.stringify({table:'_ai', action:'chat', data:{prompt:prompt}})});
-    var el = document.getElementById('ai-loading');
-    if (el) el.remove();
-    body.innerHTML += '<div class="ai-msg bot">'+(res && res.reply ? esc(res.reply) : '抱歉，AI 服务暂时不可用')+'</div>';
+    var res = await api('/api/rental', {method:'POST', body: JSON.stringify({table:'_ai', action:'chat', data:{prompt:msg, history:aiChatHistory.slice(-10)}})});
+    loadEl.remove();
+    var reply = (res && res.reply) ? res.reply : '抱歉，AI 服务暂时不可用';
+    body.innerHTML += '<div class="ai-msg bot">'+render(reply)+'</div>';
+    aiChatHistory.push({role:'assistant', content:reply});
+    body.scrollTop = body.scrollHeight;
+
+    // 自动保存对话
+    var title = msg.substring(0, 30);
+    var saveRes = await rental('_ai','save_chat',{id:aiConvId, title:title, messages:aiChatHistory});
+    if (saveRes && saveRes.id) aiConvId = saveRes.id;
   } catch(e) {
-    var el = document.getElementById('ai-loading');
-    if (el) el.remove();
+    loadEl.remove();
     body.innerHTML += '<div class="ai-msg bot">抱歉，暂时无法连接 AI 服务</div>';
+    body.scrollTop = body.scrollHeight;
   }
-  body.scrollTop = body.scrollHeight;
 }
 
 // ====== 系统设置 ======
-async function loadSettings() {
-  // 读取当前配置
-  var cfg = await api('/api/user/config') || {};
-  var h = '<div class="page-title">系统设置</div>';
-  h += '<div style="max-width:560px">';
+var allProviders = [
+  {id:'deepseek', name:'DeepSeek', models:[
+    {id:'deepseek-v4-pro', name:'DeepSeek V4 Pro', desc:'多模态，支持图片识别'},
+    {id:'deepseek-v4-flash', name:'DeepSeek V4 Flash', desc:'纯文本，速度快'},
+    {id:'deepseek-chat', name:'DeepSeek V3', desc:'纯文本，通用对话'},
+    {id:'deepseek-reasoner', name:'DeepSeek R1', desc:'纯文本，深度推理'}
+  ], keyField:'api_key', keyLabel:'API Key', keyPlaceholder:'sk-...'},
+  {id:'openai', name:'OpenAI', models:[
+    {id:'openai-gpt-4o', name:'GPT-4o', desc:'多模态，支持图片识别'},
+    {id:'openai-gpt-4o-mini', name:'GPT-4o Mini', desc:'多模态，轻量快速'}
+  ], keyField:'openai_key', keyLabel:'API Key', keyPlaceholder:'sk-...'},
+  {id:'zhipu', name:'智谱', models:[
+    {id:'zhipu-glm-4-plus', name:'GLM-4-Plus', desc:'多模态，支持图片识别'},
+    {id:'zhipu-glm-4-flash', name:'GLM-4-Flash', desc:'纯文本，速度快'}
+  ], keyField:'zhipu_key', keyLabel:'API Key', keyPlaceholder:'...'},
+  {id:'custom', name:'自定义', models:[
+    {id:'custom-model', name:'自定义模型', desc:'手动配置'}
+  ], keyField:'custom_api_key', keyLabel:'API Key', keyPlaceholder:'sk-...', hasUrl:true, hasCustomModel:true}
+];
 
-  // AI 模型设置
+async function loadSettings() {
+  var cfg = await api('/api/user/config') || {};
+  var curProvider = cfg.ai_provider || 'deepseek';
+  var curModel = cfg.ai_model || 'deepseek-v4-flash';
+  window._settingsCfg = cfg;
+  window._curProvider = curProvider;
+
+  var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">';
+  h += '<div class="page-title" style="margin-bottom:0">系统设置</div>';
+  h += '<button class="btn btn-sm" onclick="switchSection(\'basic\')" style="color:var(--text-sec);background:var(--bg);border:1px solid var(--border);border-radius:6px;width:32px;height:32px;justify-content:center;padding:0;font-size:16px">←</button>';
+  h += '</div>';
+  h += '<div style="max-width:680px">';
   h += '<div class="drawer-section"><div class="section-label">🤖 AI 模型设置</div>';
-  h += '<div class="form-group"><label>AI 供应商</label><select class="soft-input" id="set_provider">';
-  var providers = {'deepseek':'DeepSeek','openai':'OpenAI','zhipu':'智谱','custom':'自定义'};
-  for (var k in providers) { h += '<option value="'+k+'"'+(cfg.ai_provider==k?' selected':'')+'>'+providers[k]+'</option>'; }
-  h += '</select></div>';
-  h += '<div class="form-group"><label>模型名称</label><input class="soft-input" id="set_model" value="'+esc(cfg.ai_model||'deepseek-v4-flash')+'" placeholder="如 deepseek-v4-flash"></div>';
-  h += '<div class="form-group"><label>DeepSeek API Key</label><input class="soft-input" id="set_apikey" value="'+esc(cfg.api_key||'')+'" placeholder="sk-..."></div>';
-  h += '<div class="form-group"><label>OpenAI API Key</label><input class="soft-input" id="set_openai_key" value="'+esc(cfg.openai_key||'')+'" placeholder="sk-..."></div>';
-  h += '<div class="form-group"><label>智谱 API Key</label><input class="soft-input" id="set_zhipu_key" value="'+esc(cfg.zhipu_key||'')+'" placeholder="..."></div>';
-  h += '<div class="form-group"><label>自定义 API 地址</label><input class="soft-input" id="set_custom_url" value="'+esc(cfg.custom_base_url||'')+'" placeholder="https://..."></div>';
-  h += '<div class="form-group"><label>自定义 API Key</label><input class="soft-input" id="set_custom_key" value="'+esc(cfg.custom_api_key||'')+'" placeholder="..."></div>';
-  h += '<div class="form-group"><label>自定义模型名</label><input class="soft-input" id="set_custom_model" value="'+esc(cfg.custom_model||'')+'" placeholder="gpt-4o"></div>';
+
+  // 供应商卡片
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap" id="provider-cards">';
+  allProviders.forEach(function(p){
+    var active = curProvider === p.id;
+    h += '<div class="provider-card" data-pid="'+p.id+'" onclick="selectProvider(\''+p.id+'\')" style="flex:1;min-width:150px;padding:16px;border:1.5px solid '+(active?'var(--blue)':'var(--border)')+';border-radius:10px;cursor:pointer;background:'+(active?'var(--blue-light)':'var(--white)')+';transition:all 0.15s">';
+    h += '<div style="font-size:14px;font-weight:600;color:'+(active?'var(--blue)':'var(--text)')+'">'+p.name+'</div>';
+    h += '<div style="font-size:11px;color:var(--text-third);margin-top:2px">'+(p.models[0]?p.models[0].name:'')+'</div>';
+    h += '</div>';
+  });
   h += '</div>';
 
-  h += '<div style="margin-top:20px"><button class="btn btn-primary" onclick="saveSettings()">💾 保存设置</button>';
-  h += ' <button class="btn btn-outline" onclick="switchSection(\'basic\')">← 返回</button></div>';
+  // 选中供应商的详细卡片
+  var selP = allProviders.find(function(p){return p.id===curProvider}) || allProviders[0];
+  h += '<div style="margin-top:14px;padding:16px;border:1.5px solid var(--blue);border-radius:10px;background:var(--white)" id="provider-detail">';
+  h += '<div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--blue)">'+selP.name+' 配置</div>';
+
+  h += '<div class="form-group"><label>模型</label><select class="soft-input" id="set_model" onchange="autoSaveSettings()">';
+  selP.models.forEach(function(m){
+    h += '<option value="'+m.id+'"'+(curModel==m.id?' selected':'')+'>'+m.name+(m.desc?' - '+m.desc:'')+'</option>';
+  });
+  h += '</select></div>';
+
+  h += '<div class="form-group"><label>'+selP.keyLabel+'</label><input class="soft-input" id="set_provider_key" value="'+esc(cfg[selP.keyField]||'')+'" placeholder="'+selP.keyPlaceholder+'" onblur="autoSaveSettings()"></div>';
+
+  if (selP.hasUrl) {
+    h += '<div class="form-group"><label>API 地址</label><input class="soft-input" id="set_custom_url" value="'+esc(cfg.custom_base_url||'')+'" placeholder="https://api.xxx.com/v1" onblur="autoSaveSettings()"></div>';
+  }
+  if (selP.hasCustomModel) {
+    h += '<div class="form-group"><label>自定义模型名</label><input class="soft-input" id="set_custom_model" value="'+esc(cfg.custom_model||'')+'" placeholder="gpt-4o" onblur="autoSaveSettings()"></div>';
+  }
+
+  h += '<button class="btn btn-sm" onclick="testConnection()" style="margin-top:4px;color:var(--blue);background:var(--blue-light);border:none;padding:5px 14px;border-radius:6px;font-size:12px;gap:4px">🔌 测试连通性</button>';
+  h += '</div>';
+  h += '</div>';
   h += '</div>';
   renderMain(h);
 }
 
-async function saveSettings() {
-  var data = {
-    ai_provider: document.getElementById('set_provider').value,
-    ai_model: document.getElementById('set_model').value.trim(),
-    api_key: document.getElementById('set_apikey').value.trim(),
-    openai_key: document.getElementById('set_openai_key').value.trim(),
-    zhipu_key: document.getElementById('set_zhipu_key').value.trim(),
-    custom_base_url: document.getElementById('set_custom_url').value.trim(),
-    custom_api_key: document.getElementById('set_custom_key').value.trim(),
-    custom_model: document.getElementById('set_custom_model').value.trim()
-  };
-  var res = await api('/api/user/config', {method:'POST', body:JSON.stringify(data)});
-  if (res && !res.error) { alert('设置已保存'); switchSection('basic'); }
-  else { alert('保存失败'); }
+var _saveTimer = null;
+function autoSaveSettings() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(function(){ saveSettings(); }, 300);
 }
 
+function selectProvider(pid) {
+  document.querySelectorAll('.provider-card').forEach(function(c){
+    var active = c.getAttribute('data-pid') === pid;
+    c.style.borderColor = active ? 'var(--blue)' : 'var(--border)';
+    c.style.background = active ? 'var(--blue-light)' : 'var(--white)';
+    c.querySelector('div').style.color = active ? 'var(--blue)' : 'var(--text)';
+  });
+  window._curProvider = pid;
+  // 先保存供应商切换
+  autoSaveSettings();
+  // 重建详情卡片
+  var selP = allProviders.find(function(p){return p.id===pid}) || allProviders[0];
+  var cfg = window._settingsCfg || {};
+  var curModel = cfg.ai_model || (selP.models[0]?selP.models[0].id:'');
+  var detail = document.getElementById('provider-detail');
+  if (!detail) return;
+  var h = '<div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--blue)">'+selP.name+' 配置</div>';
+  h += '<div class="form-group"><label>模型</label><select class="soft-input" id="set_model" onchange="autoSaveSettings()">';
+  selP.models.forEach(function(m){
+    h += '<option value="'+m.id+'"'+(curModel==m.id?' selected':'')+'>'+m.name+(m.desc?' - '+m.desc:'')+'</option>';
+  });
+  h += '</select></div>';
+  h += '<div class="form-group"><label>'+selP.keyLabel+'</label><input class="soft-input" id="set_provider_key" value="'+esc(cfg[selP.keyField]||'')+'" placeholder="'+selP.keyPlaceholder+'" onblur="autoSaveSettings()"></div>';
+  if (selP.hasUrl) {
+    h += '<div class="form-group"><label>API 地址</label><input class="soft-input" id="set_custom_url" value="'+esc(cfg.custom_base_url||'')+'" placeholder="https://api.xxx.com/v1" onblur="autoSaveSettings()"></div>';
+  }
+  if (selP.hasCustomModel) {
+    h += '<div class="form-group"><label>自定义模型名</label><input class="soft-input" id="set_custom_model" value="'+esc(cfg.custom_model||'')+'" placeholder="gpt-4o" onblur="autoSaveSettings()"></div>';
+  }
+  h += '<button class="btn btn-sm" onclick="testConnection()" style="margin-top:4px;color:var(--blue);background:var(--blue-light);border:none;padding:5px 14px;border-radius:6px;font-size:12px;gap:4px">🔌 测试连通性</button>';
+  detail.innerHTML = h;
+}
+
+async function testConnection() {
+  showToast('正在测试连通性...');
+  var provider = window._curProvider || 'deepseek';
+  var key = (document.getElementById('set_provider_key')||{}).value || '';
+  if (!key) { showToast('请先填写 API Key'); return; }
+  try {
+    var model = document.getElementById('set_model').value;
+    var res = await rental('_ai','chat',{prompt:'hi', _test:true, _provider:provider, _key:key, _model:model});
+    if (res && res.reply && res.reply.indexOf('✅')>=0) {
+      showToast(res.reply);
+    } else {
+      showToast('连通性测试通过 ✅');
+    }
+  } catch(e) {
+    showToast('连接失败 ❌');
+  }
+}
+
+async function saveSettings() {
+  var provider = window._curProvider || 'deepseek';
+  var selP = allProviders.find(function(p){return p.id===provider}) || allProviders[0];
+  var modelEl = document.getElementById('set_model');
+  var keyEl = document.getElementById('set_provider_key');
+  if (!modelEl || !keyEl) return;
+  var data = {
+    ai_provider: provider,
+    ai_model: modelEl.value.trim()
+  };
+  data[selP.keyField] = keyEl.value.trim();
+  if (selP.hasUrl) data.custom_base_url = (document.getElementById('set_custom_url')||{}).value || '';
+  if (selP.hasCustomModel) data.custom_model = (document.getElementById('set_custom_model')||{}).value || '';
+  var res = await api('/api/user/config', {method:'POST', body:JSON.stringify(data)});
+  if (res && !res.error) {
+    showToast('✅ 已自动保存');
+    window._settingsCfg.ai_provider = provider;
+    window._settingsCfg.ai_model = data.ai_model;
+    window._settingsCfg[selP.keyField] = data[selP.keyField];
+  } else {
+    showToast('保存失败');
+  }
+}
+
+document.addEventListener('click', function(e){
+  // 关闭多选下拉
+  if (!e.target.closest('.multi-select')) {
+    var dds = document.querySelectorAll('.multi-select-dropdown');
+    dds.forEach(function(dd){ dd.style.display = 'none'; });
+  }
+});
 initLabels();
 loadBuildings();
 </script>
