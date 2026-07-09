@@ -66,10 +66,7 @@ textarea{height:auto;padding:8px 12px;resize:vertical;min-height:60px}
 input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 2px rgba(51,112,255,0.15)}
 input::placeholder{color:#BBBFC4}
 
-input[type="date"],input[type="month"]{height:32px !important;border:1px solid #d9d9d9 !important;border-radius:6px !important;padding:0 11px !important;font-size:14px !important;outline:none !important;background:#fff !important;cursor:pointer;color:var(--text);font-family:inherit;width:100%;transition:all 0.2s}
-input[type="date"]:focus,input[type="month"]:focus{border-color:#4096ff !important;box-shadow:0 0 0 2px rgba(5,145,255,0.1) !important}
-input[type="date"]::-webkit-calendar-picker-indicator,input[type="month"]::-webkit-calendar-picker-indicator{cursor:pointer;opacity:0.5;transition:opacity 0.2s;filter:invert(0.5)}
-input[type="date"]:hover::-webkit-calendar-picker-indicator,input[type="month"]:hover::-webkit-calendar-picker-indicator{opacity:0.8;filter:invert(0.3)}
+.date-picker-wrap{position:relative}.date-picker-input{height:32px;border:1px solid #d9d9d9;border-radius:6px;padding:0 30px 0 11px;background:#fff;display:flex;align-items:center;cursor:pointer;font-size:14px;transition:all 0.2s;position:relative}.date-picker-input:hover{border-color:#4096ff}.date-picker-text{flex:1;color:var(--text)}.date-picker-icon{position:absolute;right:8px;top:5px;font-size:14px}.date-picker-dropdown{display:none;position:absolute;left:0;top:100%;margin-top:4px;background:var(--white);border:1px solid var(--border-light);border-radius:8px;box-shadow:var(--shadow-md);padding:10px;z-index:1002;width:260px}.dp-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.dp-nav{cursor:pointer;padding:2px 6px;border-radius:4px;font-size:12px;color:var(--text-sec);user-select:none}.dp-nav:hover{background:var(--bg-hover);color:var(--blue)}.dp-title{font-size:14px;font-weight:600;color:var(--text)}.dp-week-row{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-size:11px;color:var(--text-third);margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid #f0f0f0}.dp-week-row span{line-height:24px}.dp-day-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}.dp-day-cell{padding:4px 0;border-radius:4px;font-size:13px;cursor:pointer;color:var(--text)}.dp-day-cell:hover{background:var(--blue-light);color:var(--blue)}.dp-day-cell.active{background:var(--blue);color:#fff;font-weight:600}.dp-day-cell.today:not(.active){color:var(--blue);font-weight:600}.dp-month-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}.dp-month-cell{padding:8px 4px;border-radius:4px;font-size:13px;cursor:pointer;text-align:center;color:var(--text)}.dp-month-cell:hover{background:var(--blue-light);color:var(--blue)}.dp-month-cell.active{background:var(--blue);color:#fff;font-weight:600}
 
 .soft-input{height:36px;border:1px solid var(--border);border-radius:6px;padding:0 12px;font-size:14px;outline:none;width:100%;background:var(--white);transition:all 0.2s;color:var(--text)}
 .soft-input:focus{background:var(--white);border-color:var(--blue);box-shadow:0 0 0 3px rgba(51,112,255,0.12)}
@@ -191,11 +188,13 @@ table a:hover{text-decoration:underline}
 .drawer-section .compare-item{flex:1;background:var(--bg);border-radius:8px;padding:10px 12px}
 .drawer-section .compare-item .compare-label{font-size:11px;color:var(--text-third);margin-bottom:2px}
 .drawer-section .compare-item .compare-val{font-size:14px;font-weight:600;color:var(--text)}
-.upload-area{height:80px;border:1.5px dashed #DDE3EA;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--text-third);font-size:13px;cursor:pointer;transition:all 0.15s;position:relative;overflow:hidden}
+.upload-area{height:90px;border:1.5px dashed #DDE3EA;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--text-third);font-size:13px;cursor:pointer;transition:all 0.15s;position:relative;overflow:hidden}
 .upload-area:hover{border-color:var(--blue);color:var(--blue);background:#F7FAFF}
+.upload-area.dragover{border-color:var(--blue);background:var(--blue-light);color:var(--blue)}
 .upload-area img{max-width:100%;max-height:100%;object-fit:contain}
 .upload-area input[type="file"]{position:absolute;inset:0;opacity:0;cursor:pointer}
 .upload-area .upload-preview{display:flex;align-items:center;gap:6px}
+.meter-preview-img{height:70px;border-radius:4px;cursor:zoom-in;transition:transform 0.15s}.meter-preview-img:hover{transform:scale(1.05)}
 .drawer .form-group{margin-bottom:14px}
 .drawer .form-group label{font-size:13px}
 .drawer input.soft-input,.drawer select.soft-input{height:36px}
@@ -258,7 +257,8 @@ select.soft-input{appearance:auto;-webkit-appearance:auto;height:38px;padding:0 
 .select-trigger{height:32px;border:1px solid #d9d9d9;border-radius:6px;padding:0 30px 0 11px;background:#fff;color:var(--text);display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:14px;transition:all 0.2s}
 .select-trigger:hover{border-color:#4096ff}
 .select-trigger::after{content:"";position:absolute;right:11px;top:11px;width:6px;height:6px;border-right:1.5px solid #999;border-bottom:1.5px solid #999;transform:rotate(45deg)}
-.select-menu{display:none;position:absolute;left:0;right:0;top:42px;background:var(--white);border:1px solid var(--border-light);border-radius:8px;box-shadow:var(--shadow-md);padding:6px;z-index:1001;max-height:180px;overflow-y:auto}
+.select-menu{display:none;position:absolute;left:0;right:0;top:42px;background:var(--white);border:1px solid var(--border-light);border-radius:8px;box-shadow:var(--shadow-md);padding:6px;z-index:1001;max-height:200px;overflow-y:auto;scrollbar-width:none}.select-menu::-webkit-scrollbar{display:none}
+.cs-tenant-menu .select-option{display:flex;align-items:center;gap:8px;padding:7px 12px}.cs-tenant-menu .ct-tags{display:flex;gap:3px;flex-shrink:0}.cs-tenant-menu .ct-name{font-weight:500;white-space:nowrap}
 .custom-select.open .select-menu{display:block}
 .select-option{padding:5px 12px;border-radius:4px;font-size:14px;cursor:pointer;color:var(--text)}
 .select-option:hover{background:#F7FAFF;color:var(--blue)}
@@ -455,22 +455,130 @@ function renderMain(html) {
   else document.getElementById('main-content-settings').innerHTML = html;
 }
 function esc(v) { return String(v == null ? '' : v).replace(/[&<>'"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]; }); }
+function modelSelect(models, selectedId) {
+  var selected = models.find(function(m){ return m.id == selectedId; }) || models[0];
+  var h = '<input type="hidden" id="set_model" value="'+(selected?selected.id:'')+'"><div class="custom-select" id="model_picker"><div class="select-trigger" onclick="event.stopPropagation();toggleModelMenu()"><span id="model_label">'+(selected?(selected.name+(selected.desc?' - '+selected.desc:'')):'')+'</span></div><div class="select-menu">';
+  models.forEach(function(m){
+    var active = m.id == selectedId ? ' active' : '';
+    h += '<div class="select-option'+active+'" onclick="selectModel(\''+m.id+'\', this)">'+m.name+(m.desc?' - '+m.desc:'')+'</div>';
+  });
+  return h + '</div></div>';
+}
+function toggleModelMenu() {
+  var el = document.getElementById('model_picker');
+  if (el) el.classList.toggle('open');
+}
+function selectModel(id, el) {
+  document.getElementById('set_model').value = id;
+  document.getElementById('model_label').textContent = el.textContent;
+  document.getElementById('model_picker').classList.remove('open');
+  var opts = document.querySelectorAll('#model_picker .select-option');
+  opts.forEach(function(o){ o.classList.remove('active'); });
+  el.classList.add('active');
+  autoSaveSettings();
+}
 function dateField(id, value, type) {
   type = type || 'date';
-  var cls = value ? ' filled' : '';
-  var label = value || '<span class="placeholder">'+(type=='month'?'请选择月份':'请选择日期')+'</span>';
-  var h = '<div class="date-trigger'+cls+'" id="dt_'+id+'" onclick="document.getElementById(\''+id+'\').showPicker()"><span class="date-text">'+label+'</span><span class="date-icon">'+(type=='month'?'📆':'📅')+'</span>';
-  h += '<input class="date-hidden" type="'+type+'" id="'+id+'" value="'+value+'" onchange="datePicked(\''+id+'\')"></div>';
+  var display = value || '';
+  var placeholder = type=='month'?'选择月份':'选择日期';
+  var h = '<div class="date-picker-wrap" id="dpw_'+id+'">';
+  h += '<div class="date-picker-input" onclick="event.stopPropagation();toggleDatePicker(\''+id+'\',\''+type+'\')">';
+  h += '<span class="date-picker-text" id="dpt_'+id+'">'+(display||'<span style="color:#BBBFC4">'+placeholder+'</span>')+'</span>';
+  h += '<span class="date-picker-icon">'+(type=='month'?'📆':'📅')+'</span>';
+  h += '</div>';
+  h += '<input type="hidden" id="'+id+'" value="'+value+'">';
+  h += '<div class="date-picker-dropdown" id="dpd_'+id+'"></div>';
+  h += '</div>';
   return h;
 }
-function datePicked(id) {
+var datePickerActiveId = null;
+function toggleDatePicker(id, type) {
+  var dd = document.getElementById('dpd_'+id);
+  if (!dd) return;
+  var isOpen = datePickerActiveId == id;
+  closeAllDatePickers();
+  if (isOpen) return;
+  datePickerActiveId = id;
+  dd.style.display = 'block';
+  if (type == 'month') renderMonthPicker(id);
+  else renderDayPicker(id);
+}
+function closeAllDatePickers() {
+  datePickerActiveId = null;
+  var dds = document.querySelectorAll('.date-picker-dropdown');
+  dds.forEach(function(dd){ dd.style.display = 'none'; });
+}
+function renderMonthPicker(id) {
   var input = document.getElementById(id);
-  var dt = document.getElementById('dt_'+id);
-  if (dt && input) {
-    var val = input.value;
-    dt.querySelector('.date-text').innerHTML = val || '<span class="placeholder">请选择日期</span>';
-    dt.classList.toggle('filled', !!val);
+  var val = input.value; // yyyy-mm
+  var year = val ? parseInt(val.split('-')[0]) : new Date().getFullYear();
+  var month = val ? parseInt(val.split('-')[1]) : new Date().getMonth()+1;
+  var h = '<div class="dp-header"><span class="dp-nav" onclick="event.stopPropagation();changeMonthPicker(\''+id+'\',-12)">◀◀</span><span class="dp-nav" onclick="event.stopPropagation();changeMonthPicker(\''+id+'\',-1)">◀</span><span class="dp-title">'+year+'年</span><span class="dp-nav" onclick="event.stopPropagation();changeMonthPicker(\''+id+'\',1)">▶</span><span class="dp-nav" onclick="event.stopPropagation();changeMonthPicker(\''+id+'\',12)">▶▶</span></div>';
+  h += '<div class="dp-month-grid">';
+  for (var m=1; m<=12; m++) {
+    var cls = (year==(val?parseInt(val.split('-')[0]):0) && month==m) ? ' active' : '';
+    h += '<div class="dp-month-cell'+cls+'" onclick="event.stopPropagation();pickMonth(\''+id+'\','+year+','+m+')">'+m+'月</div>';
   }
+  h += '</div>';
+  document.getElementById('dpd_'+id).innerHTML = h;
+}
+function changeMonthPicker(id, delta) {
+  var input = document.getElementById(id);
+  var val = input.value || (new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0'));
+  var parts = val.split('-');
+  var year = parseInt(parts[0]);
+  var month = parseInt(parts[1]) + delta;
+  while (month > 12) { month -= 12; year++; }
+  while (month < 1) { month += 12; year--; }
+  input.value = year + '-' + String(month).padStart(2,'0');
+  renderMonthPicker(id);
+}
+function pickMonth(id, year, month) {
+  var input = document.getElementById(id);
+  var val = year + '-' + String(month).padStart(2,'0');
+  input.value = val;
+  document.getElementById('dpt_'+id).textContent = val;
+  closeAllDatePickers();
+}
+function renderDayPicker(id) {
+  var input = document.getElementById(id);
+  var val = input.value || ''; // yyyy-mm-dd
+  var today = new Date();
+  var year = val ? parseInt(val.split('-')[0]) : today.getFullYear();
+  var month = val ? parseInt(val.split('-')[1]) : today.getMonth()+1;
+  var day = val ? parseInt(val.split('-')[2]) : today.getDate();
+  var firstDay = new Date(year, month-1, 1).getDay();
+  var daysInMonth = new Date(year, month, 0).getDate();
+  var h = '<div class="dp-header"><span class="dp-nav" onclick="event.stopPropagation();changeDayPicker(\''+id+'\',-1)">◀</span><span class="dp-title">'+year+'年'+month+'月</span><span class="dp-nav" onclick="event.stopPropagation();changeDayPicker(\''+id+'\',1)">▶</span></div>';
+  h += '<div class="dp-week-row"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div>';
+  h += '<div class="dp-day-grid">';
+  for (var i=0; i<firstDay; i++) h += '<span></span>';
+  for (var d=1; d<=daysInMonth; d++) {
+    var cls = (year==(val?parseInt(val.split('-')[0]):today.getFullYear()) && month==(val?parseInt(val.split('-')[1]):today.getMonth()+1) && d==day) ? ' active' : '';
+    var isToday = (d==today.getDate() && month==today.getMonth()+1 && year==today.getFullYear()) ? ' today' : '';
+    h += '<span class="dp-day-cell'+cls+isToday+'" onclick="event.stopPropagation();pickDay(\''+id+'\','+year+','+month+','+d+')">'+d+'</span>';
+  }
+  h += '</div>';
+  document.getElementById('dpd_'+id).innerHTML = h;
+}
+function changeDayPicker(id, delta) {
+  var input = document.getElementById(id);
+  var val = input.value || '';
+  var today = new Date();
+  var year = val ? parseInt(val.split('-')[0]) : today.getFullYear();
+  var month = val ? parseInt(val.split('-')[1]) : today.getMonth()+1;
+  month += delta;
+  if (month > 12) { month = 1; year++; }
+  if (month < 1) { month = 12; year--; }
+  input.value = year + '-' + String(month).padStart(2,'0') + '-' + (val ? String(parseInt(val.split('-')[2])).padStart(2,'0') : '01');
+  renderDayPicker(id);
+}
+function pickDay(id, year, month, day) {
+  var input = document.getElementById(id);
+  var val = year + '-' + String(month).padStart(2,'0') + '-' + String(day).padStart(2,'0');
+  input.value = val;
+  document.getElementById('dpt_'+id).textContent = val;
+  closeAllDatePickers();
 }
 var currentRoomBuildingId = null;
 var currentTenantBuildingId = null;
@@ -861,12 +969,22 @@ async function toggleContractStatus(id, currentStatus) {
   loadContracts();
 }
 
-function contractTenantPicker(tenants, selectedId) {
+function contractTenantPicker(tenants, selectedId, rooms) {
+  var roomMap = {};
+  if (rooms) rooms.forEach(function(r){ roomMap[Number(r.id)] = r.room_number; });
   var selected = tenants.find(function(t){ return Number(t.id) == Number(selectedId); }) || tenants[0];
-  var h = '<input type="hidden" id="f_contract_tenant" value="'+Number(selected ? selected.id : '')+'"><div class="custom-select" id="contract_tenant_picker"><div class="select-trigger" onclick="toggleContractTenantMenu()"><span id="contract_tenant_label">'+esc(selected ? selected.name : '')+'</span></div><div class="select-menu">';
+  var selRoomTags = '';
+  if (selected && selected.room_id) {
+    selRoomTags = String(selected.room_id).split(',').map(function(rid){ var rn=roomMap[Number(rid)]||rid; return '<span class="ms-tag">'+esc(rn)+'</span>'; }).join('');
+  }
+  var h = '<input type="hidden" id="f_contract_tenant" value="'+Number(selected ? selected.id : '')+'"><div class="custom-select" id="contract_tenant_picker"><div class="select-trigger" onclick="toggleContractTenantMenu()"><span id="contract_tenant_label">'+(selRoomTags||'')+esc(selected ? selected.name : '')+'</span></div><div class="select-menu cs-tenant-menu">';
   tenants.forEach(function(t){
     var active = Number(t.id) == Number(selectedId) ? ' active' : '';
-    h += '<div class="select-option'+active+'" onclick="selectContractTenant('+Number(t.id)+', this)">'+esc(t.name)+'</div>';
+    var tRoomTags = '';
+    if (t.room_id) {
+      tRoomTags = String(t.room_id).split(',').map(function(rid){ var rn=roomMap[Number(rid)]||rid; return '<span class="ms-tag">'+esc(rn)+'</span>'; }).join('');
+    }
+    h += '<div class="select-option'+active+'" onclick="selectContractTenant('+Number(t.id)+', this)"><span class="ct-tags">'+(tRoomTags||'')+'</span><span class="ct-name">'+esc(t.name)+'</span></div>';
   });
   return h + '</div></div>';
 }
@@ -876,7 +994,10 @@ function toggleContractTenantMenu() {
 }
 function selectContractTenant(id, el) {
   document.getElementById('f_contract_tenant').value = id;
-  document.getElementById('contract_tenant_label').textContent = el.textContent;
+  var label = document.getElementById('contract_tenant_label');
+  var tagsHtml = el.querySelector('.ct-tags') ? el.querySelector('.ct-tags').innerHTML : '';
+  var nameHtml = el.querySelector('.ct-name') ? el.querySelector('.ct-name').textContent : '';
+  label.innerHTML = tagsHtml + nameHtml;
   document.getElementById('contract_tenant_picker').classList.remove('open');
   var opts = document.querySelectorAll('#contract_tenant_picker .select-option');
   opts.forEach(function(o){ o.classList.remove('active'); });
@@ -913,7 +1034,7 @@ async function showAddContract() {
   if (tenants.length == 0) { alert('该楼栋没有租客，请先添加租客'); return; }
   if (rooms.length == 0) { alert('该楼栋没有房间，请先添加房间'); return; }
   var h = '<div class="soft-form"><div class="grid2">';
-  h += '<div class="form-group"><label>租客</label>'+contractTenantPicker(tenants, tenants[0] && tenants[0].id)+'</div>';
+  h += '<div class="form-group"><label>租客</label>'+contractTenantPicker(tenants, tenants[0] && tenants[0].id, rooms)+'</div>';
   h += '<div class="form-group"><label>房间</label>'+contractRoomPicker(rooms, rooms[0] && rooms[0].id)+'</div>';
   h += '<div class="form-group"><label>合同开始</label><input class="soft-input" type="date" id="f_contract_start"></div>';
   h += '<div class="form-group"><label>合同结束</label><input class="soft-input" type="date" id="f_contract_end"></div>';
@@ -951,7 +1072,7 @@ async function showAddContract() {
   var allTenants = await rental('tenants','list',{active_only:false,building_id:bid}) || [];
   allTenants.forEach(function(t){ if(!tenants.some(function(x){return Number(x.id)==Number(t.id)})) tenants.push(t); });
   var h = '<div class="soft-form"><div class="grid2">';
-  h += '<div class="form-group"><label>租客</label>'+contractTenantPicker(tenants, c.tenant_id)+'</div>';
+  h += '<div class="form-group"><label>租客</label>'+contractTenantPicker(tenants, c.tenant_id, rooms)+'</div>';
   h += '<div class="form-group"><label>房间</label>'+contractRoomPicker(rooms, c.room_id)+'</div>';
   h += '<div class="form-group"><label>合同开始</label><input class="soft-input" type="date" id="f_contract_start" value="'+esc(c.start_date||'')+'"></div>';
   h += '<div class="form-group"><label>合同结束</label><input class="soft-input" type="date" id="f_contract_end" value="'+esc(c.end_date||'')+'"></div>';
@@ -1420,20 +1541,47 @@ function renderDrawerStep1() {
   var contract = d.contract || {};
   var curBill = d.curBill || {};
   var lastBill = d.lastBill;
-  var total = Number(contract.monthly_rent||0) + Number(curBill.water_fee||0) + Number(curBill.electric_fee||0) + Number(curBill.other_fee||0);
+  var waterUnit = Number(contract.water_unit_price||0);
+  var elecUnit = Number(contract.electric_unit_price||0);
+  var wLast = Number(curBill.water_last_reading||0) || Number(lastBill?lastBill.water_current_reading:0) || 0;
+  var eLast = Number(curBill.electric_last_reading||0) || Number(lastBill?lastBill.electric_current_reading:0) || 0;
+  var wCurr = Number(curBill.water_current_reading||0);
+  var eCurr = Number(curBill.electric_current_reading||0);
+  var waterFee = (wCurr - wLast) * waterUnit; if (waterFee < 0) waterFee = 0;
+  var elecFee = (eCurr - eLast) * elecUnit; if (elecFee < 0) elecFee = 0;
+  var total = Number(contract.monthly_rent||0) + waterFee + elecFee + Number(curBill.other_fee||0);
+
+  var wPhoto = curBill.water_photo || '';
+  var ePhoto = curBill.electric_photo || '';
+
   var h = '';
   h += '<div class="drawer-section"><div class="section-label">📋 月租</div>';
   h += '<div class="locked-field">¥'+Number(contract.monthly_rent||0).toFixed(2)+' / 月</div></div>';
-  h += '<div class="drawer-section"><div class="section-label">💧 水费</div>';
-  h += '<div class="compare-row">';
-  h += '<div class="compare-item"><div class="compare-label">上月读数</div><div class="compare-val">'+(lastBill?Number(lastBill.water_fee||0).toFixed(2):'—')+' 元</div></div>';
-  h += '<div class="compare-item"><div class="compare-label">上月电费</div><div class="compare-val">'+(lastBill?Number(lastBill.electric_fee||0).toFixed(2):'—')+' 元</div></div>';
+
+  // 水费区域
+  h += '<div class="drawer-section"><div class="section-label">💧 水费（单价：¥'+waterUnit.toFixed(2)+'/m³）</div>';
+  h += '<div style="display:flex;gap:8px;margin-bottom:8px">';
+  h += '<div style="flex:1"><label style="font-size:11px;color:var(--text-sec)">上月读数（m³）</label><input class="soft-input" type="number" id="draw_water_last" value="'+wLast+'" step="0.1" placeholder="0" oninput="calcDrawerTotal()" style="height:32px"></div>';
+  h += '<div style="flex:1"><label style="font-size:11px;color:var(--text-sec)">本月读数（m³）</label><input class="soft-input" type="number" id="draw_water_curr" value="'+wCurr+'" step="0.1" placeholder="0" oninput="calcDrawerTotal()" style="height:32px"></div>';
+  h += '<div style="flex:1"><label style="font-size:11px;color:var(--text-sec)">水费（元）</label><div class="locked-field" id="draw_water_fee_label" style="height:32px">¥'+waterFee.toFixed(2)+'</div></div>';
   h += '</div>';
-  h += '<div class="form-group"><label>本月水费（元）</label><input class="soft-input" type="number" id="draw_water" value="'+Number(curBill.water_fee||0)+'" step="0.01" placeholder="0.00" oninput="calcDrawerTotal()"></div>';
-  h += '<div class="form-group"><label>水表照片</label><div class="upload-area" id="upload_water"><input type="file" id="file_water" accept="image/*" onchange="previewUpload(\'water\',this)"><div class="upload-preview" id="preview_water">📷 点击上传水表照片</div></div></div>';
-  h += '<div class="drawer-section"><div class="section-label">⚡ 电费</div>';
-  h += '<div class="form-group"><label>本月电费（元）</label><input class="soft-input" type="number" id="draw_electric" value="'+Number(curBill.electric_fee||0)+'" step="0.01" placeholder="0.00" oninput="calcDrawerTotal()"></div>';
-  h += '<div class="form-group"><label>电表照片</label><div class="upload-area" id="upload_electric"><input type="file" id="file_electric" accept="image/*" onchange="previewUpload(\'electric\',this)"><div class="upload-preview" id="preview_electric">📷 点击上传电表照片</div></div></div>';
+  h += '<div class="upload-area" id="upload_water" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropFile(event,\'water\')">';
+  h += '<input type="file" id="file_water" accept="image/*" onchange="previewUpload(\'water\',this)">';
+  h += '<div class="upload-preview" id="preview_water">'+(wPhoto?'<img src="'+wPhoto+'" class="meter-preview-img" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">':'📷 点击或拖拽上传水表照片')+'</div>';
+  h += '</div></div>';
+
+  // 电费区域
+  h += '<div class="drawer-section"><div class="section-label">⚡ 电费（单价：¥'+elecUnit.toFixed(2)+'/度）</div>';
+  h += '<div style="display:flex;gap:8px;margin-bottom:8px">';
+  h += '<div style="flex:1"><label style="font-size:11px;color:var(--text-sec)">上月读数（度）</label><input class="soft-input" type="number" id="draw_electric_last" value="'+eLast+'" step="0.1" placeholder="0" oninput="calcDrawerTotal()" style="height:32px"></div>';
+  h += '<div style="flex:1"><label style="font-size:11px;color:var(--text-sec)">本月读数（度）</label><input class="soft-input" type="number" id="draw_electric_curr" value="'+eCurr+'" step="0.1" placeholder="0" oninput="calcDrawerTotal()" style="height:32px"></div>';
+  h += '<div style="flex:1"><label style="font-size:11px;color:var(--text-sec)">电费（元）</label><div class="locked-field" id="draw_electric_fee_label" style="height:32px">¥'+elecFee.toFixed(2)+'</div></div>';
+  h += '</div>';
+  h += '<div class="upload-area" id="upload_electric" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropFile(event,\'electric\')">';
+  h += '<input type="file" id="file_electric" accept="image/*" onchange="previewUpload(\'electric\',this)">';
+  h += '<div class="upload-preview" id="preview_electric">'+(ePhoto?'<img src="'+ePhoto+'" class="meter-preview-img" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">':'📷 点击或拖拽上传电表照片')+'</div>';
+  h += '</div></div>';
+
   h += '<div class="drawer-section">';
   h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span class="section-label" style="margin-bottom:0">📝 杂项</span><div style="display:flex;gap:4px"><button class="btn btn-sm btn-outline" onclick="addMiscRow()" style="padding:2px 8px;font-size:16px;line-height:1">+</button><button class="btn btn-sm btn-outline" onclick="removeCheckedMisc()" style="padding:2px 8px;font-size:16px;line-height:1">−</button></div></div>';
   h += '<div class="table-wrap"><table id="misc_table"><thead><tr><th style="width:24px"></th><th>项目</th><th style="width:110px">金额（元）</th></tr></thead><tbody>';
@@ -1454,10 +1602,10 @@ function renderDrawerStep2() {
 
   // 从步骤1输入读取当前值
   var waterFee = 0, electricFee = 0, otherFee = 0;
-  var waterEl = document.getElementById('draw_water');
-  var elecEl = document.getElementById('draw_electric');
-  if (waterEl) waterFee = parseFloat(waterEl.value) || 0;
-  if (elecEl) electricFee = parseFloat(elecEl.value) || 0;
+  var wLabel = document.getElementById('draw_water_fee_label');
+  var eLabel = document.getElementById('draw_electric_fee_label');
+  if (wLabel) waterFee = parseFloat(wLabel.textContent.replace('¥','')) || 0;
+  if (eLabel) electricFee = parseFloat(eLabel.textContent.replace('¥','')) || 0;
   var miscEls = document.querySelectorAll('.misc-amount');
   miscEls.forEach(function(el){ otherFee += parseFloat(el.value) || 0; });
 
@@ -1583,8 +1731,18 @@ function switchDrawerStep(step) {
 function calcDrawerTotal() {
   var d = window._drawerData || {};
   var contract = d.contract || {};
-  var w = parseFloat((document.getElementById('draw_water')||{}).value)||0;
-  var e = parseFloat((document.getElementById('draw_electric')||{}).value)||0;
+  var waterUnit = Number(contract.water_unit_price||0);
+  var elecUnit = Number(contract.electric_unit_price||0);
+  var wLast = parseFloat((document.getElementById('draw_water_last')||{}).value)||0;
+  var wCurr = parseFloat((document.getElementById('draw_water_curr')||{}).value)||0;
+  var eLast = parseFloat((document.getElementById('draw_electric_last')||{}).value)||0;
+  var eCurr = parseFloat((document.getElementById('draw_electric_curr')||{}).value)||0;
+  var w = (wCurr - wLast) * waterUnit; if (w < 0) w = 0;
+  var e = (eCurr - eLast) * elecUnit; if (e < 0) e = 0;
+  var wLabel = document.getElementById('draw_water_fee_label');
+  var eLabel = document.getElementById('draw_electric_fee_label');
+  if (wLabel) wLabel.textContent = '¥'+w.toFixed(2);
+  if (eLabel) eLabel.textContent = '¥'+e.toFixed(2);
   var o = 0;
   document.querySelectorAll('.misc-amount').forEach(function(el){ o += parseFloat(el.value)||0; });
   var t = Number(contract.monthly_rent||0) + w + e + o;
@@ -1616,28 +1774,65 @@ function previewUpload(type, input) {
   var reader = new FileReader();
   reader.onload = async function(e){
     var dataUrl = e.target.result;
-    preview.innerHTML = '<img src="'+dataUrl+'" style="height:70px;border-radius:4px"> <span style="font-size:11px">'+file.name+'</span>';
-    // 调用 OCR 识别数字
+    preview.innerHTML = '<img src="'+dataUrl+'" class="meter-preview-img" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">';
+    // 调用 AI 识别读数
     try {
       var res = await rental('_ocr','read',{image:dataUrl, meter_type: type==='water'?'水表':'电表'});
       if (res && res.numbers && res.numbers.length > 0) {
-        // 取最大值作为电表/水表读数
-        var maxNum = Math.max.apply(null, res.numbers);
-        var inputId = type === 'water' ? 'draw_water' : 'draw_electric';
+        var num = res.numbers[0];
+        var inputId = type === 'water' ? 'draw_water_curr' : 'draw_electric_curr';
         var inputEl = document.getElementById(inputId);
         if (inputEl) {
-          inputEl.value = maxNum;
+          inputEl.value = num;
           inputEl.dispatchEvent(new Event('input'));
-          showToast('已识别数字：' + maxNum);
+          showToast('AI识别读数：' + num);
         }
       } else {
         showToast('未识别到数字，请手动输入');
       }
     } catch(err) {
-      showToast('OCR 识别失败，请手动输入');
+      showToast('识别失败，请手动输入');
     }
   };
   reader.readAsDataURL(file);
+}
+function dragOver(e) { e.preventDefault(); e.currentTarget.classList.add('dragover'); }
+function dragLeave(e) { e.currentTarget.classList.remove('dragover'); }
+function dropFile(e, type) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('dragover');
+  var file = e.dataTransfer.files[0];
+  if (!file) return;
+  var input = document.getElementById('file_'+type);
+  var dt = new DataTransfer();
+  dt.items.add(file);
+  input.files = dt.files;
+  previewUpload(type, input);
+}
+function zoomMeterImg(e, img) {
+  var z = document.getElementById('meter_zoom');
+  if (!z) {
+    z = document.createElement('div'); z.id = 'meter_zoom';
+    z.style.cssText = 'position:fixed;z-index:9999;pointer-events:none;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.3);overflow:hidden;display:none';
+    document.body.appendChild(z);
+  }
+  var big = document.createElement('img');
+  big.src = img.src;
+  big.style.cssText = 'max-width:500px;max-height:500px;display:block';
+  z.innerHTML = '';
+  z.appendChild(big);
+  z.style.display = 'block';
+  var rect = img.getBoundingClientRect();
+  var x = rect.left + rect.width/2 - 250;
+  var y = rect.bottom + 8;
+  if (x < 10) x = 10;
+  if (y + 500 > window.innerHeight) y = rect.top - 508;
+  z.style.left = x+'px';
+  z.style.top = y+'px';
+}
+function unzoomMeterImg() {
+  var z = document.getElementById('meter_zoom');
+  if (z) z.style.display = 'none';
 }
 
 function closeDrawer() {
@@ -1648,8 +1843,23 @@ function closeDrawer() {
 }
 
 async function saveDrawer(contractId, billId) {
-  var waterFee = parseFloat(document.getElementById('draw_water').value)||0;
-  var electricFee = parseFloat(document.getElementById('draw_electric').value)||0;
+  var d = window._drawerData || {};
+  var contract = d.contract || {};
+  var wLast = parseFloat((document.getElementById('draw_water_last')||{}).value)||0;
+  var wCurr = parseFloat((document.getElementById('draw_water_curr')||{}).value)||0;
+  var eLast = parseFloat((document.getElementById('draw_electric_last')||{}).value)||0;
+  var eCurr = parseFloat((document.getElementById('draw_electric_curr')||{}).value)||0;
+  var waterUnit = Number(contract.water_unit_price||0);
+  var elecUnit = Number(contract.electric_unit_price||0);
+  var waterFee = (wCurr - wLast) * waterUnit; if (waterFee < 0) waterFee = 0;
+  var electricFee = (eCurr - eLast) * elecUnit; if (electricFee < 0) electricFee = 0;
+
+  // 照片 base64
+  var waterPhoto = '', elecPhoto = '';
+  var pw = document.getElementById('preview_water');
+  var pe = document.getElementById('preview_electric');
+  if (pw) { var wImg = pw.querySelector('img'); if (wImg) waterPhoto = wImg.src; }
+  if (pe) { var eImg = pe.querySelector('img'); if (eImg) elecPhoto = eImg.src; }
 
   // 从杂项表格收集
   var miscItems = [];
@@ -1675,7 +1885,10 @@ async function saveDrawer(contractId, billId) {
     water_fee: waterFee,
     electric_fee: electricFee,
     other_fee: otherFee,
-    remark: remark
+    remark: remark,
+    water_last: wLast, water_curr: wCurr,
+    electric_last: eLast, electric_curr: eCurr,
+    water_photo: waterPhoto, electric_photo: elecPhoto
   };
 
   var res;
@@ -2083,7 +2296,7 @@ async function sendAIMsg() {
 // ====== 系统设置 ======
 var allProviders = [
   {id:'deepseek', name:'DeepSeek', models:[
-    {id:'deepseek-v4-pro', name:'DeepSeek V4 Pro', desc:'多模态，支持图片识别'},
+    {id:'deepseek-v4-pro', name:'DeepSeek V4 Pro', desc:'纯文本，深度推理'},
     {id:'deepseek-v4-flash', name:'DeepSeek V4 Flash', desc:'纯文本，速度快'},
     {id:'deepseek-chat', name:'DeepSeek V3', desc:'纯文本，通用对话'},
     {id:'deepseek-reasoner', name:'DeepSeek R1', desc:'纯文本，深度推理'}
@@ -2096,6 +2309,11 @@ var allProviders = [
     {id:'zhipu-glm-4-plus', name:'GLM-4-Plus', desc:'多模态，支持图片识别'},
     {id:'zhipu-glm-4-flash', name:'GLM-4-Flash', desc:'纯文本，速度快'}
   ], keyField:'zhipu_key', keyLabel:'API Key', keyPlaceholder:'...'},
+  {id:'qwen', name:'千问 (DashScope)', models:[
+    {id:'qwen-vl-max', name:'Qwen-VL-Max', desc:'多模态，支持图片识别'},
+    {id:'qwen-plus', name:'Qwen-Plus', desc:'纯文本，通用对话'},
+    {id:'qwen-turbo', name:'Qwen-Turbo', desc:'纯文本，速度快'}
+  ], keyField:'qwen_key', keyLabel:'DashScope API Key', keyPlaceholder:'sk-...'},
   {id:'custom', name:'自定义', models:[
     {id:'custom-model', name:'自定义模型', desc:'手动配置'}
   ], keyField:'custom_api_key', keyLabel:'API Key', keyPlaceholder:'sk-...', hasUrl:true, hasCustomModel:true}
@@ -2131,26 +2349,50 @@ async function loadSettings() {
   h += '<div style="margin-top:14px;padding:16px;border:1.5px solid var(--blue);border-radius:10px;background:var(--white)" id="provider-detail">';
   h += '<div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--blue)">'+selP.name+' 配置</div>';
 
-  h += '<div class="form-group"><label>模型</label><select class="soft-input" id="set_model" onchange="autoSaveSettings()">';
-  selP.models.forEach(function(m){
-    h += '<option value="'+m.id+'"'+(curModel==m.id?' selected':'')+'>'+m.name+(m.desc?' - '+m.desc:'')+'</option>';
-  });
-  h += '</select></div>';
+  h += '<div class="form-group"><label>模型</label>'+modelSelect(selP.models, curModel)+'</div>';
 
-  h += '<div class="form-group"><label>'+selP.keyLabel+'</label><input class="soft-input" id="set_provider_key" value="'+esc(cfg[selP.keyField]||'')+'" placeholder="'+selP.keyPlaceholder+'" onblur="autoSaveSettings()"></div>';
+  h += '<div class="form-group"><label>'+selP.keyLabel+'</label><input class="soft-input" id="set_provider_key" value="'+esc(cfg[selP.keyField]||'')+'" placeholder="'+selP.keyPlaceholder+'" oninput="autoSaveSettings()" onblur="autoSaveSettings()"></div>';
 
   if (selP.hasUrl) {
-    h += '<div class="form-group"><label>API 地址</label><input class="soft-input" id="set_custom_url" value="'+esc(cfg.custom_base_url||'')+'" placeholder="https://api.xxx.com/v1" onblur="autoSaveSettings()"></div>';
+    h += '<div class="form-group"><label>API 地址</label><input class="soft-input" id="set_custom_url" value="'+esc(cfg.custom_base_url||'')+'" placeholder="https://api.xxx.com/v1" oninput="autoSaveSettings()" onblur="autoSaveSettings()"></div>';
   }
   if (selP.hasCustomModel) {
-    h += '<div class="form-group"><label>自定义模型名</label><input class="soft-input" id="set_custom_model" value="'+esc(cfg.custom_model||'')+'" placeholder="gpt-4o" onblur="autoSaveSettings()"></div>';
+    h += '<div class="form-group"><label>自定义模型名</label><input class="soft-input" id="set_custom_model" value="'+esc(cfg.custom_model||'')+'" placeholder="gpt-4o" oninput="autoSaveSettings()" onblur="autoSaveSettings()"></div>';
   }
 
   h += '<button class="btn btn-sm" onclick="testConnection()" style="margin-top:4px;color:var(--blue);background:var(--blue-light);border:none;padding:5px 14px;border-radius:6px;font-size:12px;gap:4px">🔌 测试连通性</button>';
   h += '</div>';
   h += '</div>';
+
+  // ====== 图片识别 AI 独立设置 ======
+  var ocrProviders = [
+    {id:'qwen', name:'千问 (DashScope)', models:[{id:'qwen-vl-max', name:'Qwen-VL-Max', desc:'多模态'}]},
+    {id:'openai', name:'OpenAI', models:[{id:'openai-gpt-4o', name:'GPT-4o', desc:'多模态'},{id:'openai-gpt-4o-mini', name:'GPT-4o Mini', desc:'多模态'}]},
+    {id:'zhipu', name:'智谱', models:[{id:'zhipu-glm-4-plus', name:'GLM-4-Plus', desc:'多模态'}]}
+  ];
+  var ocrProvider = cfg.ocr_provider || 'qwen';
+  var ocrModel = cfg.ocr_model || 'qwen-vl-max';
+  var ocrSel = ocrProviders.find(function(p){return p.id===ocrProvider}) || ocrProviders[0];
+  var ocrCurModel = ocrSel.models.find(function(m){return m.id===ocrModel}) ? ocrModel : ocrSel.models[0].id;
+
+  h += '<div class="drawer-section" style="margin-top:24px"><div class="section-label">📷 图片识别 AI（水电表识别）</div>';
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap">';
+  ocrProviders.forEach(function(p){
+    var active = ocrProvider === p.id;
+    h += '<div class="provider-card" data-ocrpid="'+p.id+'" onclick="selectOcrProvider(\''+p.id+'\')" style="flex:1;min-width:140px;padding:14px;border:1.5px solid '+(active?'var(--blue)':'var(--border)')+';border-radius:10px;cursor:pointer;background:'+(active?'var(--blue-light)':'var(--white)')+';transition:all 0.15s">';
+    h += '<div style="font-size:13px;font-weight:600;color:'+(active?'var(--blue)':'var(--text)')+'">'+p.name+'</div>';
+    h += '</div>';
+  });
+  h += '</div>';
+  h += '<div style="margin-top:10px;padding:14px;border:1.5px solid var(--blue);border-radius:10px;background:var(--white)" id="ocr-provider-detail">';
+  h += '<div class="form-group"><label>模型</label>'+ocrModelSelect(ocrSel.models, ocrCurModel)+'</div>';
+  h += '<div class="form-group"><label>API Key</label><input class="soft-input" id="set_ocr_key" value="'+esc(cfg.ocr_key||'')+'" placeholder="sk-..." oninput="autoSaveOcrSettings()" onblur="autoSaveOcrSettings()"></div>';
+  h += '<button class="btn btn-sm" onclick="testOcrConnection()" style="margin-top:4px;color:var(--blue);background:var(--blue-light);border:none;padding:5px 14px;border-radius:6px;font-size:12px;gap:4px">🔌 测试连通性</button>';
+  h += '</div></div>';
+
   h += '</div>';
   renderMain(h);
+  window._ocrProvider = ocrProvider;
 }
 
 var _saveTimer = null;
@@ -2176,17 +2418,13 @@ function selectProvider(pid) {
   var detail = document.getElementById('provider-detail');
   if (!detail) return;
   var h = '<div style="font-size:13px;font-weight:600;margin-bottom:12px;color:var(--blue)">'+selP.name+' 配置</div>';
-  h += '<div class="form-group"><label>模型</label><select class="soft-input" id="set_model" onchange="autoSaveSettings()">';
-  selP.models.forEach(function(m){
-    h += '<option value="'+m.id+'"'+(curModel==m.id?' selected':'')+'>'+m.name+(m.desc?' - '+m.desc:'')+'</option>';
-  });
-  h += '</select></div>';
-  h += '<div class="form-group"><label>'+selP.keyLabel+'</label><input class="soft-input" id="set_provider_key" value="'+esc(cfg[selP.keyField]||'')+'" placeholder="'+selP.keyPlaceholder+'" onblur="autoSaveSettings()"></div>';
+  h += '<div class="form-group"><label>模型</label>'+modelSelect(selP.models, curModel)+'</div>';
+  h += '<div class="form-group"><label>'+selP.keyLabel+'</label><input class="soft-input" id="set_provider_key" value="'+esc(cfg[selP.keyField]||'')+'" placeholder="'+selP.keyPlaceholder+'" oninput="autoSaveSettings()" onblur="autoSaveSettings()"></div>';
   if (selP.hasUrl) {
-    h += '<div class="form-group"><label>API 地址</label><input class="soft-input" id="set_custom_url" value="'+esc(cfg.custom_base_url||'')+'" placeholder="https://api.xxx.com/v1" onblur="autoSaveSettings()"></div>';
+    h += '<div class="form-group"><label>API 地址</label><input class="soft-input" id="set_custom_url" value="'+esc(cfg.custom_base_url||'')+'" placeholder="https://api.xxx.com/v1" oninput="autoSaveSettings()" onblur="autoSaveSettings()"></div>';
   }
   if (selP.hasCustomModel) {
-    h += '<div class="form-group"><label>自定义模型名</label><input class="soft-input" id="set_custom_model" value="'+esc(cfg.custom_model||'')+'" placeholder="gpt-4o" onblur="autoSaveSettings()"></div>';
+    h += '<div class="form-group"><label>自定义模型名</label><input class="soft-input" id="set_custom_model" value="'+esc(cfg.custom_model||'')+'" placeholder="gpt-4o" oninput="autoSaveSettings()" onblur="autoSaveSettings()"></div>';
   }
   h += '<button class="btn btn-sm" onclick="testConnection()" style="margin-top:4px;color:var(--blue);background:var(--blue-light);border:none;padding:5px 14px;border-radius:6px;font-size:12px;gap:4px">🔌 测试连通性</button>';
   detail.innerHTML = h;
@@ -2199,8 +2437,9 @@ async function testConnection() {
   if (!key) { showToast('请先填写 API Key'); return; }
   try {
     var model = document.getElementById('set_model').value;
-    var res = await rental('_ai','chat',{prompt:'hi', _test:true, _provider:provider, _key:key, _model:model});
-    if (res && res.reply && res.reply.indexOf('✅')>=0) {
+    var customUrl = (document.getElementById('set_custom_url')||{}).value || '';
+    var res = await rental('_ai','chat',{prompt:'hi', _test:true, _provider:provider, _key:key, _model:model, _url:customUrl});
+    if (res && res.reply) {
       showToast(res.reply);
     } else {
       showToast('连通性测试通过 ✅');
@@ -2234,11 +2473,113 @@ async function saveSettings() {
   }
 }
 
+// ====== 图片识别 AI 独立设置 ======
+var _ocrSaveTimer = null;
+function autoSaveOcrSettings() {
+  clearTimeout(_ocrSaveTimer);
+  _ocrSaveTimer = setTimeout(function(){ saveOcrSettings(); }, 300);
+}
+function ocrModelSelect(models, selectedId) {
+  var selected = models.find(function(m){ return m.id == selectedId; }) || models[0];
+  var h = '<input type="hidden" id="set_ocr_model" value="'+(selected?selected.id:'')+'"><div class="custom-select" id="ocr_model_picker"><div class="select-trigger" onclick="event.stopPropagation();toggleOcrModelMenu()"><span id="ocr_model_label">'+(selected?selected.name:'')+'</span></div><div class="select-menu">';
+  models.forEach(function(m){
+    var active = m.id == selectedId ? ' active' : '';
+    h += '<div class="select-option'+active+'" onclick="selectOcrModel(\''+m.id+'\', this)">'+m.name+'</div>';
+  });
+  return h + '</div></div>';
+}
+function toggleOcrModelMenu() {
+  var el = document.getElementById('ocr_model_picker');
+  if (el) el.classList.toggle('open');
+}
+function selectOcrModel(id, el) {
+  document.getElementById('set_ocr_model').value = id;
+  document.getElementById('ocr_model_label').textContent = el.textContent;
+  document.getElementById('ocr_model_picker').classList.remove('open');
+  var opts = document.querySelectorAll('#ocr_model_picker .select-option');
+  opts.forEach(function(o){ o.classList.remove('active'); });
+  el.classList.add('active');
+  autoSaveOcrSettings();
+}
+async function saveOcrSettings() {
+  var provider = window._ocrProvider || 'qwen';
+  var modelEl = document.getElementById('set_ocr_model');
+  var keyEl = document.getElementById('set_ocr_key');
+  if (!modelEl || !keyEl) return;
+  var data = {
+    ocr_provider: provider,
+    ocr_model: modelEl.value.trim(),
+    ocr_key: keyEl.value.trim()
+  };
+  var res = await api('/api/user/config', {method:'POST', body:JSON.stringify(data)});
+  if (res && !res.error) {
+    window._settingsCfg.ocr_provider = provider;
+    window._settingsCfg.ocr_model = data.ocr_model;
+    window._settingsCfg.ocr_key = data.ocr_key;
+    showToast('✅ 已自动保存');
+  } else {
+    showToast('保存失败');
+  }
+}
+function selectOcrProvider(pid) {
+  document.querySelectorAll('[data-ocrpid]').forEach(function(c){
+    var active = c.getAttribute('data-ocrpid') === pid;
+    c.style.borderColor = active ? 'var(--blue)' : 'var(--border)';
+    c.style.background = active ? 'var(--blue-light)' : 'var(--white)';
+    c.querySelector('div').style.color = active ? 'var(--blue)' : 'var(--text)';
+  });
+  window._ocrProvider = pid;
+  var providers = [
+    {id:'qwen', models:[{id:'qwen-vl-max', name:'Qwen-VL-Max'}]},
+    {id:'openai', models:[{id:'openai-gpt-4o', name:'GPT-4o'},{id:'openai-gpt-4o-mini', name:'GPT-4o Mini'}]},
+    {id:'zhipu', models:[{id:'zhipu-glm-4-plus', name:'GLM-4-Plus'}]}
+  ];
+  var selP = providers.find(function(p){return p.id===pid}) || providers[0];
+  var detail = document.getElementById('ocr-provider-detail');
+  if (!detail) return;
+  var h = '<div class="form-group"><label>模型</label>'+ocrModelSelect(selP.models, selP.models[0].id)+'</div>';
+  h += '<div class="form-group"><label>API Key</label><input class="soft-input" id="set_ocr_key" value="'+esc((window._settingsCfg||{}).ocr_key||'')+'" placeholder="sk-..." oninput="autoSaveOcrSettings()" onblur="autoSaveOcrSettings()"></div>';
+  h += '<button class="btn btn-sm" onclick="testOcrConnection()" style="margin-top:4px;color:var(--blue);background:var(--blue-light);border:none;padding:5px 14px;border-radius:6px;font-size:12px;gap:4px">🔌 测试连通性</button>';
+  detail.innerHTML = h;
+  autoSaveOcrSettings();
+}
+async function testOcrConnection() {
+  showToast('正在测试...');
+  var provider = window._ocrProvider || 'qwen';
+  var key = (document.getElementById('set_ocr_key')||{}).value || '';
+  if (!key) { showToast('请先填写 API Key'); return; }
+  try {
+    var model = document.getElementById('set_ocr_model').value;
+    var res = await rental('_ai','chat',{prompt:'hi', _test:true, _provider:provider, _key:key, _model:model});
+    if (res && res.reply) {
+      showToast(res.reply);
+    } else {
+      showToast('测试完成');
+    }
+  } catch(e) {
+    showToast('连接失败 ❌');
+  }
+}
+
 document.addEventListener('click', function(e){
   // 关闭多选下拉
   if (!e.target.closest('.multi-select')) {
     var dds = document.querySelectorAll('.multi-select-dropdown');
     dds.forEach(function(dd){ dd.style.display = 'none'; });
+  }
+  // 关闭日期选择器
+  if (!e.target.closest('.date-picker-wrap')) {
+    closeAllDatePickers();
+  }
+  // 关闭模型下拉
+  if (!e.target.closest('#model_picker')) {
+    var mp = document.getElementById('model_picker');
+    if (mp) mp.classList.remove('open');
+  }
+  // 关闭OCR模型下拉
+  if (!e.target.closest('#ocr_model_picker')) {
+    var omp = document.getElementById('ocr_model_picker');
+    if (omp) omp.classList.remove('open');
   }
 });
 initLabels();

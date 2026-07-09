@@ -33,6 +33,12 @@ PROVIDERS = {
         "key_field": "zhipu_key",
         "models": ["zhipu-glm-4-plus", "zhipu-glm-4-flash"]
     },
+    "qwen": {
+        "name": "千问",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "key_field": "qwen_key",
+        "models": ["qwen-vl-max", "qwen-plus", "qwen-turbo"]
+    },
     "custom": {
         "name": "自定义",
         "base_url": "",
@@ -383,21 +389,22 @@ class AIService:
         return {"content": "🐱 " + last_error, "tool_calls": None}
 
     def read_meter_image(self, base64_image, meter_type="电表"):
-        """调用多模态AI识别水电表读数，返回数字"""
-        model_name = self._model()
-        pid, provider = get_provider(model_name)
-        api_key = self._api_key_for_model(model_name)
+        """调用多模态AI识别水电表读数，使用独立的OCR配置"""
+        # 从数据库读 OCR 独立配置
+        from local_db import load_app_user
+        cfg = load_app_user()
+        ocr_provider = cfg.get("ocr_provider", "qwen")
+        ocr_model = cfg.get("ocr_model", "qwen-vl-max")
+        api_key = cfg.get("ocr_key", "")
         if not api_key:
-            return None, "请先配置 AI API Key"
+            return None, "请先在系统设置中配置图片识别 AI 的 API Key"
 
-        # 获取 base URL
-        if pid == "custom":
-            cfg = self._load_config()
-            base_url = cfg.get("custom_base_url", "").strip()
-            if not base_url:
-                return None, "请先配置自定义 API 地址"
-        else:
-            base_url = provider["base_url"]
+        provider = PROVIDERS.get(ocr_provider)
+        if not provider:
+            return None, "未知的图片识别供应商：" + ocr_provider
+        base_url = provider["base_url"]
+        if not base_url:
+            return None, "图片识别供应商未配置 API 地址"
 
         url = base_url.rstrip("/") + "/chat/completions"
 
@@ -414,7 +421,7 @@ class AIService:
         ]
 
         payload = {
-            "model": model_name,
+            "model": ocr_model,
             "messages": messages,
             "stream": False,
             "max_tokens": 50,

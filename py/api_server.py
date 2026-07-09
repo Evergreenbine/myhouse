@@ -7,46 +7,6 @@ from user_auth import load_user_config, save_user_config
 from local_db import init as init_db, load_app_user, save_app_user, add_building, get_buildings, get_building, update_building, add_room, get_rooms, get_room, update_room, add_tenant, get_tenants, get_tenant, update_tenant, set_tenant_status, add_contract, get_contracts, get_contract, update_contract, end_contract, add_meter, get_meters, get_meter, update_meter, add_reading, get_readings, get_latest_reading, add_bill, get_bills, get_bill, update_bill, update_bill_status, add_payment, get_payments, delete_payment
 PORT = 18520
 
-# EasyOCR 全局实例（懒加载）
-_easyocr_reader = None
-
-def get_ocr_reader():
-    global _easyocr_reader
-    if _easyocr_reader is None:
-        import easyocr
-        _easyocr_reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
-    return _easyocr_reader
-
-def ocr_read_numbers(base64_data):
-    """从 base64 图片中识别数字，返回识别到的数字列表"""
-    if not base64_data:
-        return []
-    # 去掉 data:image/xxx;base64, 前缀
-    if ',' in base64_data:
-        base64_data = base64_data.split(',', 1)[1]
-    img_bytes = base64.b64decode(base64_data)
-    with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
-        f.write(img_bytes)
-        tmp_path = f.name
-    try:
-        reader = get_ocr_reader()
-        results = reader.readtext(tmp_path)
-        numbers = []
-        for (bbox, text, confidence) in results:
-            # 只保留数字和点
-            import re
-            nums = re.findall(r'\d+\.?\d*', text)
-            for n in nums:
-                try:
-                    val = float(n)
-                    numbers.append(val)
-                except:
-                    pass
-        return numbers
-    finally:
-        try: os.unlink(tmp_path)
-        except: pass
-
 class APIHandler(BaseHTTPRequestHandler):
     def _send_json(self, data, status=200):
         self.send_response(status)
@@ -90,60 +50,28 @@ class APIHandler(BaseHTTPRequestHandler):
             if path == "/api/status":
                 return self._send_json({"status": "ok", "time": datetime.now().isoformat()})
 
-            elif path == "/api/user/config":
+            elif path == "/api/user/config" and self.command == "GET":
                 local = load_app_user()
-                if local and local.get("empno"):
+                if local:
                     def _get(key, default=""):
                         return local.get(key, default)
-                    bs = float(_get("base_salary", 30))
-                    wm = int(_get("water_ml", 300))
-                    we = _get("water_enabled", "True").lower() == "true"
-                    ee = _get("eye_enabled", "True").lower() == "true"
                     return self._send_json({
-                        "empno": _get("empno",""), "empname": _get("empname",""),
-                        "car_plate": _get("car_plate",""), "base_salary": bs,
-                        "avatar": _get("avatar_path","cat_icon.png"),
-                        "water_enabled": we, "eye_enabled": ee, "water_ml": wm,
                         "api_key": _get("api_key",""), "openai_key": _get("openai_key",""),
-                        "zhipu_key": _get("zhipu_key",""),
+                        "zhipu_key": _get("zhipu_key",""), "qwen_key": _get("qwen_key",""),
                         "custom_api_key": _get("custom_api_key",""),
                         "custom_base_url": _get("custom_base_url",""),
                         "custom_model": _get("custom_model",""),
                         "ai_provider": _get("ai_provider",""),
                         "ai_model": _get("ai_model","deepseek-v4-flash"),
+                        "ocr_provider": _get("ocr_provider","qwen"),
+                        "ocr_model": _get("ocr_model","qwen-vl-max"),
+                        "ocr_key": _get("ocr_key",""),
                         "ai_persona": _get("ai_persona","warm"),
                         "ai_nickname": _get("ai_nickname","哈基米"),
                         "user_nickname": _get("user_nickname","主人"),
                         "ai_avatar": _get("ai_avatar","cat_icon.png"),
-                        "lunch_start": _get("lunch_start","12:05"),
-                        "lunch_end": _get("lunch_end","13:05"),
-                        "dinner_start": _get("dinner_start","17:30"),
-                        "dinner_end": _get("dinner_end","18:00"),
                     })
-                cfg = load_user_config()
-                if cfg:
-                    return self._send_json({
-                        "empno": cfg.empno or "", "empname": cfg.empname or "",
-                        "car_plate": cfg.car_plate or "", "base_salary": cfg.base_salary or 0,
-                        "avatar": getattr(cfg,"avatar_path","cat_icon.png"),
-                        "water_enabled": getattr(cfg,"water_enabled",True),
-                        "eye_enabled": getattr(cfg,"eye_enabled",True),
-                        "water_ml": getattr(cfg,"water_ml",300),
-                        "api_key": getattr(cfg,"api_key",""),
-                        "openai_key": getattr(cfg,"openai_key",""),
-                        "zhipu_key": getattr(cfg,"zhipu_key",""),
-                        "custom_api_key": getattr(cfg,"custom_api_key",""),
-                        "custom_base_url": getattr(cfg,"custom_base_url",""),
-                        "custom_model": getattr(cfg,"custom_model",""),
-                        "ai_provider": getattr(cfg,"ai_provider",""),
-                        "ai_model": getattr(cfg,"ai_model","deepseek-v4-flash"),
-                        "ai_persona": getattr(cfg,"ai_persona","warm"),
-                        "lunch_start": getattr(cfg,"lunch_start","12:05"),
-                        "lunch_end": getattr(cfg,"lunch_end","13:05"),
-                        "dinner_start": getattr(cfg,"dinner_start","17:30"),
-                        "dinner_end": getattr(cfg,"dinner_end","18:00"),
-                    })
-                return self._send_json({"error":"not configured"}, 404)
+                return self._send_json({})
 
             elif path == "/api/chat/list":
                 from local_db import load_chats
@@ -222,8 +150,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 elif table=="bills":
                     if action=="list": result = get_bills(data.get("month"),data.get("contract_id"))
                     elif action=="get": result = get_bill(data.get("id"))
-                    elif action=="add": result = add_bill(data.get("contract_id"),data.get("billing_month",""),data.get("rent_amount",0),data.get("water_fee",0),data.get("electric_fee",0),data.get("other_fee",0),data.get("remark",""))
-                    elif action=="update": update_bill(data.get("id"),data.get("contract_id"),data.get("billing_month"),data.get("rent_amount"),data.get("water_fee"),data.get("electric_fee"),data.get("other_fee"),data.get("remark"));result={"success":True}
+                    elif action=="add": result = add_bill(data.get("contract_id"),data.get("billing_month",""),data.get("rent_amount",0),data.get("water_fee",0),data.get("electric_fee",0),data.get("other_fee",0),data.get("remark",""),data.get("water_last",0),data.get("water_curr",0),data.get("electric_last",0),data.get("electric_curr",0),data.get("water_photo",""),data.get("electric_photo",""))
+                    elif action=="update": update_bill(data.get("id"),data.get("contract_id"),data.get("billing_month"),data.get("rent_amount"),data.get("water_fee"),data.get("electric_fee"),data.get("other_fee"),data.get("remark"),data.get("water_last"),data.get("water_curr"),data.get("electric_last"),data.get("electric_curr"),data.get("water_photo"),data.get("electric_photo"));result={"success":True}
                     elif action=="update_status": update_bill_status(data.get("id"),data.get("status","unpaid"));result={"success":True}
                 elif table=="payments":
                     if action=="list": result = get_payments(data.get("bill_id"))
@@ -233,9 +161,9 @@ class APIHandler(BaseHTTPRequestHandler):
                     if action=="chat":
                         # 测试连通性：真正发送一条消息给AI，检查是否返回有效回复
                         if data.get("_test"):
-                            from ai_service import ai_svc, get_provider
-                            provider_id = data.get("_provider", "deepseek")
-                            pid, provider = get_provider(provider_id)
+                            from ai_service import PROVIDERS
+                            pid = data.get("_provider", "deepseek")
+                            provider = PROVIDERS.get(pid, PROVIDERS["deepseek"])
                             api_key = data.get("_key", "")
                             model = data.get("_model", "deepseek-v4-flash")
                             if not api_key:
@@ -244,33 +172,36 @@ class APIHandler(BaseHTTPRequestHandler):
                                 try:
                                     # 构建请求直接测试
                                     import requests
+                                    url = None
                                     if pid == "custom":
                                         base_url = data.get("_url", "")
                                         if not base_url:
                                             result = {"reply": "请配置自定义API地址"}
+                                            url = None
                                         else:
                                             url = base_url.rstrip("/") + "/chat/completions"
                                     else:
                                         url = provider["base_url"].rstrip("/") + "/chat/completions"
-                                    payload = {"model": model, "messages": [{"role":"user","content":"回复OK"}], "max_tokens": 10, "temperature": 0}
-                                    r = requests.post(url, json=payload, headers={"Authorization":"Bearer "+api_key}, timeout=10)
-                                    if r.status_code == 200:
-                                        data_resp = r.json()
-                                        content = data_resp.get("choices",[{}])[0].get("message",{}).get("content","")
-                                        if content:
-                                            result = {"reply": "✅ 连通性测试通过（回复："+content[:40]+"）"}
+                                    if url:
+                                        payload = {"model": model, "messages": [{"role":"user","content":"回复OK"}], "max_tokens": 10, "temperature": 0}
+                                        r = requests.post(url, json=payload, headers={"Authorization":"Bearer "+api_key}, timeout=10)
+                                        if r.status_code == 200:
+                                            data_resp = r.json()
+                                            content = data_resp.get("choices",[{}])[0].get("message",{}).get("content","")
+                                            if content:
+                                                result = {"reply": "✅ 连通性测试通过（回复："+content[:40]+"）"}
+                                            else:
+                                                result = {"reply": "✅ 连通性测试通过"}
+                                        elif r.status_code == 401:
+                                            result = {"reply": "❌ API Key 无效"}
+                                        elif r.status_code == 402:
+                                            result = {"reply": "❌ 账户余额不足"}
                                         else:
-                                            result = {"reply": "✅ 连通性测试通过"}
-                                    elif r.status_code == 401:
-                                        result = {"reply": "❌ API Key 无效"}
-                                    elif r.status_code == 402:
-                                        result = {"reply": "❌ 账户余额不足"}
-                                    else:
-                                        try:
-                                            err = r.json().get("error",{}).get("message","")
-                                        except:
-                                            err = ""
-                                        result = {"reply": "❌ 请求失败("+str(r.status_code)+")："+err[:60]}
+                                            try:
+                                                err = r.json().get("error",{}).get("message","")
+                                            except:
+                                                err = ""
+                                            result = {"reply": "❌ 请求失败("+str(r.status_code)+")："+err[:60]}
                                 except Exception as e:
                                     result = {"reply": "❌ 连接失败："+str(e)[:60]}
                         else:
@@ -328,17 +259,12 @@ class APIHandler(BaseHTTPRequestHandler):
                     if action=="read":
                         image = data.get("image","")
                         meter_type = data.get("meter_type", "电表")
-                        # 优先用 AI 识别
-                        try:
-                            from ai_service import ai_svc
-                            num, err = ai_svc.read_meter_image(image, meter_type)
-                            if num is not None:
-                                result = {"numbers": [num], "source": "ai"}
-                            else:
-                                # 降级到 EasyOCR
-                                result = {"numbers": ocr_read_numbers(image), "source": "ocr"}
-                        except Exception as e:
-                            result = {"numbers": ocr_read_numbers(image), "source": "ocr", "ai_error": str(e)}
+                        from ai_service import ai_svc
+                        num, err = ai_svc.read_meter_image(image, meter_type)
+                        if num is not None:
+                            result = {"numbers": [num], "source": "ai"}
+                        else:
+                            result = {"numbers": [], "source": "ai", "error": err or "AI识别失败"}
                 if result is None: result = {"error":"unknown table or action"}
                 return self._send_json(result)
 
