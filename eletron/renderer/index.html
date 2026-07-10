@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -130,6 +130,7 @@ table a:hover{text-decoration:underline}
 .modal-title{font-size:16px;font-weight:600;margin-bottom:20px;color:var(--text);letter-spacing:-0.2px}
 .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
 
 /* Bottom bar */
 #bottom-bar{display:flex;align-items:center;padding:0 20px;background:var(--white);border-top:1px solid var(--border-light);font-size:11px;flex-shrink:0;height:32px}
@@ -203,12 +204,14 @@ table a:hover{text-decoration:underline}
 .drawer-steps{display:flex;align-items:center;padding:12px 24px;background:#F8FAFD;border-bottom:1px solid var(--border-light);flex-shrink:0;gap:0}
 .drawer-steps .step{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-third);flex:1;text-align:center;justify-content:center;position:relative;border:none;background:transparent;cursor:pointer;padding:4px 0;font-family:inherit;line-height:1.4}
 .drawer-steps .step .step-num{width:22px;height:22px;border-radius:50%;background:#DEE0E3;color:white;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0}
-.drawer-steps .step.active .step-num{background:var(--blue)}
-.drawer-steps .step.done .step-num{background:var(--green)}
-.drawer-steps .step.active{color:var(--blue);font-weight:500}
-.drawer-steps .step.done{color:var(--green)}
+.drawer-steps .step.active.step-1 .step-num,.drawer-steps .step.done.step-1 .step-num{background:var(--blue)}
+.drawer-steps .step.active.step-2 .step-num,.drawer-steps .step.done.step-2 .step-num{background:var(--orange)}
+.drawer-steps .step.active.step-3 .step-num,.drawer-steps .step.done.step-3 .step-num{background:var(--green)}
+.drawer-steps .step.active{font-weight:500}.drawer-steps .step.active.step-1{color:var(--blue)}.drawer-steps .step.active.step-2{color:var(--orange)}.drawer-steps .step.active.step-3{color:var(--green)}
+.drawer-steps .step.done{color:var(--text-sec)}
 .drawer-steps .step-line{width:24px;height:1px;background:#DEE0E3;flex-shrink:0}
-.drawer-steps .step.done+.step-line{background:var(--green)}
+.drawer-steps .step.done.step-1+.step-line{background:var(--blue)}
+.drawer-steps .step.done.step-2+.step-line{background:var(--orange)}
 
 /* Toast */
 .toast{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);background:#1F2329;color:#fff;padding:10px 24px;border-radius:8px;font-size:13px;z-index:9999;opacity:0;transition:opacity 0.3s;pointer-events:none}
@@ -298,7 +301,7 @@ select.soft-input{appearance:auto;-webkit-appearance:auto;height:38px;padding:0 
 /* Month filter */
 .month-filter{display:flex;align-items:center;gap:12px;margin-bottom:16px}
 .month-nav{width:30px;height:30px;border:1px solid var(--border);border-radius:6px;background:var(--white);cursor:pointer;font-size:12px;color:var(--text-sec);display:flex;align-items:center;justify-content:center;transition:all 0.15s}
-.month-nav:hover{background:var(--blue-light);border-color:var(--blue);color:var(--blue)}
+.month-nav:hover{background:var(--blue-light);border-color:var(--blue);color:var(--blue)}.month-nav-overview{padding:0 14px;width:auto;font-size:13px;font-weight:500;margin-left:auto;border-radius:8px;height:32px}.month-nav-overview:hover{background:var(--blue-light);color:var(--blue)}
 .month-label{font-size:15px;font-weight:600;color:var(--text);min-width:90px;text-align:center}
 
 /* Hide scrollbar but keep scroll */
@@ -342,6 +345,8 @@ select.soft-input{appearance:auto;-webkit-appearance:auto;height:38px;padding:0 
         <div class="side-item active" onclick="switchSideRent('plan')" id="side-plan"></div>
         <div class="side-item" onclick="switchSideRent('bills')" id="side-bills"></div>
         <div class="side-item" onclick="switchSideRent('payments')" id="side-payments"></div>
+        <div class="side-item" onclick="switchSideRent('waterUsage')" id="side-water-usage"></div>
+        <div class="side-item" onclick="switchSideRent('electricUsage')" id="side-electric-usage"></div>
       </div>
       <div id="main-content-rent"></div>
     </div>
@@ -399,6 +404,8 @@ function initLabels() {
   S('side-plan', '\u6536\u79df\u8ba1\u5212');
   S('side-bills', '\u8d26\u5355\u7ba1\u7406');
   S('side-payments', '\u6536\u6b3e\u8bb0\u5f55');
+  S('side-water-usage', '\u6c34\u8868\u7528\u91cf');
+  S('side-electric-usage', '\u7535\u8868\u7528\u91cf');
   S('bottom-status', '\u5df2\u5c31\u7eea');
 }
 async function api(path, opts) {
@@ -442,12 +449,14 @@ function switchSide(name) {
 var currentSideRent = 'plan';
 function switchSideRent(name) {
   document.querySelectorAll('#sidebar-rent .side-item').forEach(function(s){ s.classList.remove('active'); });
-  var map = {plan:'side-plan', bills:'side-bills', payments:'side-payments'};
+  var map = {plan:'side-plan', bills:'side-bills', payments:'side-payments', waterUsage:'side-water-usage', electricUsage:'side-electric-usage'};
   document.getElementById(map[name]).classList.add('active');
   currentSideRent = name;
   if (name == 'plan') loadRentPlan();
   else if (name == 'bills') loadBills();
-  else loadPayments();
+  else if (name == 'payments') loadPayments();
+  else if (name == 'waterUsage') loadMeterUsage('water');
+  else loadMeterUsage('electric');
 }
 function renderMain(html) {
   if (currentSection == 'basic') document.getElementById('main-content').innerHTML = html;
@@ -1024,6 +1033,53 @@ function selectContractRoom(id, el) {
   opts.forEach(function(o){ o.classList.remove('active'); });
   el.classList.add('active');
 }
+function roomPicker(rooms, suffix, selectedId) {
+  var selId = selectedId || '';
+  var selected = rooms.find(function(r){ return Number(r.id)==Number(selId); }) || rooms[0];
+  var pid = 'room_picker_'+suffix;
+  var h = '<input type="hidden" id="f_'+suffix+'_room" value="'+(selected?selected.id:'')+'"><div class="custom-select" id="'+pid+'"><div class="select-trigger" onclick="event.stopPropagation();toggleRoomPicker(\''+suffix+'\')"><span id="'+pid+'_label">'+(selected?esc(selected.room_number):'')+'</span></div><div class="select-menu">';
+  rooms.forEach(function(r){
+    var active = Number(r.id)==Number(selId) ? ' active' : '';
+    h += '<div class="select-option'+active+'" onclick="selectRoomPicker(\''+suffix+'\','+Number(r.id)+',this)">'+esc(r.room_number)+'</div>';
+  });
+  return h + '</div></div>';
+}
+function toggleRoomPicker(suffix) {
+  var el = document.getElementById('room_picker_'+suffix);
+  if (el) el.classList.toggle('open');
+}
+function selectRoomPicker(suffix, id, el) {
+  document.getElementById('f_'+suffix+'_room').value = id;
+  document.getElementById('room_picker_'+suffix+'_label').textContent = el.textContent;
+  document.getElementById('room_picker_'+suffix).classList.remove('open');
+  var opts = document.querySelectorAll('#room_picker_'+suffix+' .select-option');
+  opts.forEach(function(o){ o.classList.remove('active'); });
+  el.classList.add('active');
+}
+function meterPicker(meters, type, selectedId) {
+  var selId = selectedId || '';
+  var selected = meters.find(function(m){ return Number(m.id)==Number(selId); });
+  var label = selected ? (esc(selected.room_number||'')+' - '+esc(selected.meter_no||'')) : '';
+  var pid = 'meter_picker_'+type;
+  var h = '<input type="hidden" id="f_contract_'+type+'_meter" value="'+selId+'"><div class="custom-select" id="'+pid+'"><div class="select-trigger" onclick="event.stopPropagation();toggleMeterMenu(\''+type+'\')"><span id="'+pid+'_label">'+label+'</span></div><div class="select-menu">';
+  meters.forEach(function(m){
+    var active = Number(m.id)==Number(selId) ? ' active' : '';
+    h += '<div class="select-option'+active+'" onclick="selectMeter(\''+type+'\','+Number(m.id)+',this)">'+esc(m.room_number||'')+' - '+esc(m.meter_no||'')+'</div>';
+  });
+  return h + '</div></div>';
+}
+function toggleMeterMenu(type) {
+  var el = document.getElementById('meter_picker_'+type);
+  if (el) el.classList.toggle('open');
+}
+function selectMeter(type, id, el) {
+  document.getElementById('f_contract_'+type+'_meter').value = id;
+  document.getElementById('meter_picker_'+type+'_label').textContent = el.textContent;
+  document.getElementById('meter_picker_'+type).classList.remove('open');
+  var opts = document.querySelectorAll('#meter_picker_'+type+' .select-option');
+  opts.forEach(function(o){ o.classList.remove('active'); });
+  el.classList.add('active');
+}
 
 async function showAddContract() {
   var bid = currentContractBuildingId;
@@ -1033,29 +1089,42 @@ async function showAddContract() {
   var tenants = await rental('tenants','list',{active_only:true,building_id:bid}) || [];
   if (tenants.length == 0) { alert('该楼栋没有租客，请先添加租客'); return; }
   if (rooms.length == 0) { alert('该楼栋没有房间，请先添加房间'); return; }
-  var h = '<div class="soft-form"><div class="grid2">';
-  h += '<div class="form-group"><label>租客</label>'+contractTenantPicker(tenants, tenants[0] && tenants[0].id, rooms)+'</div>';
+  var waterMeters = await rental('meters','list',{building_id:bid,type:'water'}) || [];
+  var electricMeters = await rental('meters','list',{building_id:bid,type:'electric'}) || [];
+  var h = '<div class="soft-form"><div class="grid3">';
+  // 行1：房间 租客 月租
   h += '<div class="form-group"><label>房间</label>'+contractRoomPicker(rooms, rooms[0] && rooms[0].id)+'</div>';
-  h += '<div class="form-group"><label>合同开始</label><input class="soft-input" type="date" id="f_contract_start"></div>';
-  h += '<div class="form-group"><label>合同结束</label><input class="soft-input" type="date" id="f_contract_end"></div>';
-  h += '<div class="form-group"><label>收租日期（每月几号）</label><input class="soft-input" type="number" id="f_contract_rentday" value="'+rentDay+'" min="1" max="28"></div>';
+  h += '<div class="form-group"><label>租客</label>'+contractTenantPicker(tenants, tenants[0] && tenants[0].id, rooms)+'</div>';
   h += '<div class="form-group"><label>月租（元）</label><input class="soft-input" type="number" id="f_contract_rent" placeholder="0.00"></div>';
-  h += '<div class="form-group"><label>保证金（元）</label><input class="soft-input" type="number" id="f_contract_deposit" placeholder="0.00"></div>';
+  // 行2：合同开始 合同结束 收租日期
+  h += '<div class="form-group"><label>合同开始</label>'+dateField('f_contract_start', '', 'date')+'</div>';
+  h += '<div class="form-group"><label>合同结束</label>'+dateField('f_contract_end', '', 'date')+'</div>';
+  h += '<div class="form-group"><label>收租日（每月几号）</label><input class="soft-input" type="number" id="f_contract_rentday" value="'+rentDay+'" min="1" max="28"></div>';
+  // 行3：水表起始读数 水表 水费单价
+  h += '<div class="form-group"><label>水表起始读数</label><input class="soft-input" type="number" id="f_contract_water_init" placeholder="0" step="0.1"></div>';
+  h += '<div class="form-group"><label>水表</label>'+meterPicker(waterMeters, 'water', '')+'</div>';
   h += '<div class="form-group"><label>水费单价（元/吨）</label><input class="soft-input" type="number" id="f_contract_water" placeholder="0.00"></div>';
+  // 行4：电表起始读数 电表 电费单价
+  h += '<div class="form-group"><label>电表起始读数</label><input class="soft-input" type="number" id="f_contract_electric_init" placeholder="0" step="0.1"></div>';
+  h += '<div class="form-group"><label>电表</label>'+meterPicker(electricMeters, 'electric', '')+'</div>';
   h += '<div class="form-group"><label>电费单价（元/度）</label><input class="soft-input" type="number" id="f_contract_electric" placeholder="0.00"></div>';
+  // 行5：保证金
+  h += '<div class="form-group"><label>保证金（元）</label><input class="soft-input" type="number" id="f_contract_deposit" placeholder="0.00"></div>';
   h += '</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddContract()">保存</button></div></div>';
   M(h);
 }function doAddContract() {
   var data = {
     tenant_id: document.getElementById('f_contract_tenant').value,
     room_id: document.getElementById('f_contract_room').value,
-    start_date: document.getElementById('f_contract_start').value,
-    end_date: document.getElementById('f_contract_end').value,
+    start_date: (document.getElementById('f_contract_start')||{}).value || '',
+    end_date: (document.getElementById('f_contract_end')||{}).value || '',
     rent_day: parseInt(document.getElementById('f_contract_rentday').value) || 1,
     monthly_rent: parseFloat(document.getElementById('f_contract_rent').value) || 0,
     water_price: parseFloat(document.getElementById('f_contract_water').value) || 0,
     electric_price: parseFloat(document.getElementById('f_contract_electric').value) || 0,
-    deposit: parseFloat(document.getElementById('f_contract_deposit').value) || 0
+    deposit: parseFloat(document.getElementById('f_contract_deposit').value) || 0,
+    water_meter_id: (document.getElementById('f_contract_water_meter')||{}).value || null,
+    electric_meter_id: (document.getElementById('f_contract_electric_meter')||{}).value || null
   };
   if (!data.start_date) { alert('请选择合同开始日期'); return; }
   rental('contracts','add',data).then(function(res){
@@ -1071,16 +1140,22 @@ async function showAddContract() {
   var tenants = await rental('tenants','list',{active_only:true,building_id:bid}) || [];
   var allTenants = await rental('tenants','list',{active_only:false,building_id:bid}) || [];
   allTenants.forEach(function(t){ if(!tenants.some(function(x){return Number(x.id)==Number(t.id)})) tenants.push(t); });
-  var h = '<div class="soft-form"><div class="grid2">';
-  h += '<div class="form-group"><label>租客</label>'+contractTenantPicker(tenants, c.tenant_id, rooms)+'</div>';
+  var waterMeters = await rental('meters','list',{building_id:bid,type:'water'}) || [];
+  var electricMeters = await rental('meters','list',{building_id:bid,type:'electric'}) || [];
+  var h = '<div class="soft-form"><div class="grid3">';
   h += '<div class="form-group"><label>房间</label>'+contractRoomPicker(rooms, c.room_id)+'</div>';
-  h += '<div class="form-group"><label>合同开始</label><input class="soft-input" type="date" id="f_contract_start" value="'+esc(c.start_date||'')+'"></div>';
-  h += '<div class="form-group"><label>合同结束</label><input class="soft-input" type="date" id="f_contract_end" value="'+esc(c.end_date||'')+'"></div>';
-  h += '<div class="form-group"><label>收租日期（每月几号）</label><input class="soft-input" type="number" id="f_contract_rentday" value="'+Number(bld.rent_day||1)+'" min="1" max="28"></div>';
+  h += '<div class="form-group"><label>租客</label>'+contractTenantPicker(tenants, c.tenant_id, rooms)+'</div>';
   h += '<div class="form-group"><label>月租（元）</label><input class="soft-input" type="number" id="f_contract_rent" value="'+Number(c.monthly_rent||0)+'"></div>';
-  h += '<div class="form-group"><label>保证金（元）</label><input class="soft-input" type="number" id="f_contract_deposit" value="'+Number(c.deposit||0)+'"></div>';
+  h += '<div class="form-group"><label>合同开始</label>'+dateField('f_contract_start', c.start_date||'', 'date')+'</div>';
+  h += '<div class="form-group"><label>合同结束</label>'+dateField('f_contract_end', c.end_date||'', 'date')+'</div>';
+  h += '<div class="form-group"><label>收租日</label><input class="soft-input" type="number" id="f_contract_rentday" value="'+Number(bld.rent_day||1)+'" min="1" max="28"></div>';
+  h += '<div class="form-group"><label>水表起始读数</label><input class="soft-input" type="number" id="f_contract_water_init" value="0" step="0.1"></div>';
+  h += '<div class="form-group"><label>水表</label>'+meterPicker(waterMeters, 'water', c.water_meter_id)+'</div>';
   h += '<div class="form-group"><label>水费单价（元/吨）</label><input class="soft-input" type="number" id="f_contract_water" value="'+Number(c.water_unit_price||0)+'"></div>';
+  h += '<div class="form-group"><label>电表起始读数</label><input class="soft-input" type="number" id="f_contract_electric_init" value="0" step="0.1"></div>';
+  h += '<div class="form-group"><label>电表</label>'+meterPicker(electricMeters, 'electric', c.electric_meter_id)+'</div>';
   h += '<div class="form-group"><label>电费单价（元/度）</label><input class="soft-input" type="number" id="f_contract_electric" value="'+Number(c.electric_unit_price||0)+'"></div>';
+  h += '<div class="form-group"><label>保证金（元）</label><input class="soft-input" type="number" id="f_contract_deposit" value="'+Number(c.deposit||0)+'"></div>';
   h += '<div class="form-group"><label>合同状态</label>'+contractStatusSwitch(c.status || 'active')+'</div>';
   h += '</div><div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doUpdateContract('+Number(id)+')">保存</button></div></div>';
   M(h);
@@ -1089,13 +1164,15 @@ async function showAddContract() {
     id: id,
     tenant_id: document.getElementById('f_contract_tenant').value,
     room_id: document.getElementById('f_contract_room').value,
-    start_date: document.getElementById('f_contract_start').value,
-    end_date: document.getElementById('f_contract_end').value,
+    start_date: (document.getElementById('f_contract_start')||{}).value || '',
+    end_date: (document.getElementById('f_contract_end')||{}).value || '',
     rent_day: parseInt(document.getElementById('f_contract_rentday').value) || 1,
     monthly_rent: parseFloat(document.getElementById('f_contract_rent').value) || 0,
     water_price: parseFloat(document.getElementById('f_contract_water').value) || 0,
     electric_price: parseFloat(document.getElementById('f_contract_electric').value) || 0,
-    deposit: parseFloat(document.getElementById('f_contract_deposit').value) || 0
+    deposit: parseFloat(document.getElementById('f_contract_deposit').value) || 0,
+    water_meter_id: (document.getElementById('f_contract_water_meter')||{}).value || null,
+    electric_meter_id: (document.getElementById('f_contract_electric_meter')||{}).value || null
   };
   if (!data.start_date) { alert('请选择合同开始日期'); return; }
   rental('contracts','update',data).then(function(res){
@@ -1134,9 +1211,7 @@ async function showAddWaterMeter() {
   var rooms = await rental('rooms','list',{building_id:bid}) || [];
   if (rooms.length == 0) { alert('该楼栋没有房间，请先添加房间'); return; }
   var h = '<div class="soft-form">';
-  h += '<div class="form-group"><label>房间</label><select class="soft-input" id="f_wmeter_room">';
-  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'">'+esc(r.room_number)+'</option>'; });
-  h += '</select></div>';
+  h += '<div class="form-group"><label>房间</label>'+roomPicker(rooms, 'wmeter', rooms[0]?rooms[0].id:'')+'</div>';
   h += '<div class="form-group"><label>表编号</label><input class="soft-input" id="f_wmeter_no" placeholder="如：WS-001"></div>';
   h += '<div class="form-group"><label>初始读数</label><input class="soft-input" type="number" id="f_wmeter_reading" placeholder="0"></div>';
   h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddWaterMeter()">保存</button></div></div>';
@@ -1160,9 +1235,7 @@ async function editWaterMeter(id) {
   var bid = currentWaterMeterBuildingId;
   var rooms = await rental('rooms','list',{building_id:bid}) || [];
   var h = '<div class="soft-form">';
-  h += '<div class="form-group"><label>房间</label><select class="soft-input" id="f_wmeter_room">';
-  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'"'+(Number(r.id)==Number(m.room_id)?' selected':'')+'>'+esc(r.room_number)+'</option>'; });
-  h += '</select></div>';
+  h += '<div class="form-group"><label>房间</label>'+roomPicker(rooms, 'wmeter', m.room_id)+'</div>';
   h += '<div class="form-group"><label>表编号</label><input class="soft-input" id="f_wmeter_no" value="'+esc(m.meter_no||'')+'"></div>';
   h += '<div class="form-group"><label>初始读数</label><input class="soft-input" type="number" id="f_wmeter_reading" value="'+Number(m.init_reading||0)+'"></div>';
   h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doUpdateWaterMeter('+Number(id)+')">保存</button></div></div>';
@@ -1214,9 +1287,7 @@ async function showAddElectricMeter() {
   var rooms = await rental('rooms','list',{building_id:bid}) || [];
   if (rooms.length == 0) { alert('该楼栋没有房间，请先添加房间'); return; }
   var h = '<div class="soft-form">';
-  h += '<div class="form-group"><label>房间</label><select class="soft-input" id="f_emeter_room">';
-  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'">'+esc(r.room_number)+'</option>'; });
-  h += '</select></div>';
+  h += '<div class="form-group"><label>房间</label>'+roomPicker(rooms, 'emeter', rooms[0]?rooms[0].id:'')+'</div>';
   h += '<div class="form-group"><label>表编号</label><input class="soft-input" id="f_emeter_no" placeholder="如：ES-001"></div>';
   h += '<div class="form-group"><label>初始读数</label><input class="soft-input" type="number" id="f_emeter_reading" placeholder="0"></div>';
   h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddElectricMeter()">保存</button></div></div>';
@@ -1240,9 +1311,7 @@ async function editElectricMeter(id) {
   var bid = currentElectricMeterBuildingId;
   var rooms = await rental('rooms','list',{building_id:bid}) || [];
   var h = '<div class="soft-form">';
-  h += '<div class="form-group"><label>房间</label><select class="soft-input" id="f_emeter_room">';
-  rooms.forEach(function(r){ h += '<option value="'+Number(r.id)+'"'+(Number(r.id)==Number(m.room_id)?' selected':'')+'>'+esc(r.room_number)+'</option>'; });
-  h += '</select></div>';
+  h += '<div class="form-group"><label>房间</label>'+roomPicker(rooms, 'emeter', m.room_id)+'</div>';
   h += '<div class="form-group"><label>表编号</label><input class="soft-input" id="f_emeter_no" value="'+esc(m.meter_no||'')+'"></div>';
   h += '<div class="form-group"><label>初始读数</label><input class="soft-input" type="number" id="f_emeter_reading" value="'+Number(m.init_reading||0)+'"></div>';
   h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doUpdateElectricMeter('+Number(id)+')">保存</button></div></div>';
@@ -1266,6 +1335,14 @@ function doUpdateElectricMeter(id) {
 var planYear = new Date().getFullYear();
 var planMonth = new Date().getMonth() + 1;
 var planBuildingId = null;
+var usageStartYear = 2026;
+var usageStartMonth = 6;
+var usageYear = usageStartYear;
+var usageMonth = usageStartMonth;
+var usageBuildingId = null;
+var usageEditingKey = '';
+var usagePhotoDrafts = {};
+var usageRowsById = {};
 
 async function loadRentPlan() {
   var buildings = await rental('buildings','list') || [];
@@ -1471,6 +1548,218 @@ function deletePayment(id) {
 }
 
 // ====== 抽屉：编辑账单明细 ======
+function changeUsageMonth(delta, type) {
+  usageMonth += delta;
+  if (usageMonth < 1) { usageMonth = 12; usageYear--; }
+  if (usageMonth > 12) { usageMonth = 1; usageYear++; }
+  if (usageYear < usageStartYear || (usageYear == usageStartYear && usageMonth < usageStartMonth)) {
+    usageYear = usageStartYear;
+    usageMonth = usageStartMonth;
+  }
+  usageEditingKey = '';
+  loadMeterUsage(type);
+}
+function switchUsageBuilding(id, type) {
+  usageBuildingId = id;
+  usageEditingKey = '';
+  loadMeterUsage(type);
+}
+function switchUsageOverviewBuilding(id, type) {
+  usageBuildingId = id;
+  loadMeterUsageOverview(type);
+}
+function fmtUsageNumber(v) {
+  if (v === null || v === undefined || v === '') return '--';
+  var n = Number(v || 0);
+  return Math.abs(n - Math.round(n)) < 0.001 ? String(Math.round(n)) : n.toFixed(1);
+}
+function usageMonthKey() {
+  return usageYear + '-' + String(usageMonth).padStart(2,'0');
+}
+function usageMonthLabel(month) {
+  var parts = String(month || '').split('-');
+  if (parts.length != 2) return month || '';
+  return Number(parts[0]) + '\u5e74' + Number(parts[1]) + '\u6708';
+}
+function usageCardKey(type, meterId) {
+  return type + ':' + usageMonthKey() + ':' + meterId;
+}
+function editUsageCard(type, meterId) {
+  usageEditingKey = usageCardKey(type, meterId);
+  loadMeterUsage(type);
+}
+function cancelUsageEdit(type) {
+  usageEditingKey = '';
+  loadMeterUsage(type);
+}
+function usageStatusTag(row) {
+  if (row.status == 'recorded') return '<span class="tag tag-green">\u5df2\u5f55\u5165</span>';
+  return '<span class="tag tag-orange">\u672a\u5f55\u5165</span>';
+}
+function usagePhotoPreview(photo) {
+  if (!photo) return '<span style="color:var(--text-third)">\u6682\u65e0\u56fe\u7247</span>';
+  return '<img src="'+photo+'" style="max-width:100%;max-height:92px;border-radius:6px;object-fit:contain">';
+}
+function handleUsagePhoto(type, meterId, input) {
+  var file = input.files && input.files[0];
+  if (!file) return;
+  var key = usageCardKey(type, meterId);
+  var reader = new FileReader();
+  reader.onload = async function(e) {
+    var dataUrl = e.target.result;
+    usagePhotoDrafts[key] = dataUrl;
+    var preview = document.getElementById('usage_photo_preview_'+meterId);
+    if (preview) preview.innerHTML = usagePhotoPreview(dataUrl);
+    var status = document.getElementById('usage_ocr_status_'+meterId);
+    if (status) status.textContent = '\u8bc6\u522b\u4e2d...';
+    try {
+      var res = await rental('_ocr','read',{image:dataUrl, meter_type:type=='water'?'\u6c34\u8868':'\u7535\u8868'});
+      if (res && res.numbers && res.numbers.length > 0) {
+        var inputEl = document.getElementById('usage_reading_'+meterId);
+        if (inputEl) inputEl.value = res.numbers[0];
+        if (status) status.textContent = '\u5df2\u8bc6\u522b\uff1a' + res.numbers[0];
+      } else {
+        if (status) status.textContent = (res && res.error) ? res.error : '\u672a\u8bc6\u522b\u5230\u8bfb\u6570';
+      }
+    } catch(e) {
+      if (status) status.textContent = '\u8bc6\u522b\u5931\u8d25';
+    }
+  };
+  reader.readAsDataURL(file);
+}
+async function saveUsageCard(type, meterId) {
+  var inputEl = document.getElementById('usage_reading_'+meterId);
+  if (!inputEl) return;
+  var reading = parseFloat(inputEl.value);
+  if (isNaN(reading)) { alert('\u8bf7\u8f93\u5165\u6709\u6548\u8bfb\u6570'); return; }
+  var row = usageRowsById[meterId] || {};
+  var key = usageCardKey(type, meterId);
+  var photo = usagePhotoDrafts[key] || row.photo || '';
+  var res = await rental('readings','save_monthly',{meter_id:meterId, month:usageMonthKey(), reading:reading, photo:photo, remark:type});
+  if (!res || res.error) { alert((res && res.error) || '\u4fdd\u5b58\u5931\u8d25'); return; }
+  usageEditingKey = '';
+  delete usagePhotoDrafts[key];
+  loadMeterUsage(type);
+}
+async function loadMeterUsageOverview(type) {
+  var isWater = type == 'water';
+  var buildings = await rental('buildings','list') || [];
+  if (buildings.length == 0) {
+    renderMain('<div class="empty-state"><div class="icon">'+(isWater?'&#x1F4A7;':'&#x26A1;')+'</div><div>\u8bf7\u5148\u6dfb\u52a0\u697c\u680b\u548c\u8868\u5177</div></div>');
+    return;
+  }
+  if (!usageBuildingId || !buildings.some(function(b){ return Number(b.id) == Number(usageBuildingId); })) usageBuildingId = buildings[0].id;
+  var data = await rental('readings','overview',{type:type, building_id:usageBuildingId, start_month:'2026-06', end_month:usageMonthKey()}) || {};
+  var months = data.months || [];
+  var rows = data.rows || [];
+  var title = isWater ? '\u6c34\u8868\u7edf\u8ba1\u6982\u89c8' : '\u7535\u8868\u7edf\u8ba1\u6982\u89c8';
+  var h = '';
+  h += '<div class="month-filter"><span class="month-label" style="min-width:180px">'+usageMonthLabel('2026-06')+' - '+usageMonthLabel(usageMonthKey())+'</span>';
+  h += '<button class="month-nav month-nav-overview" onclick="loadMeterUsage(\''+type+'\')" style="margin-left:auto">\u2190</button></div>';
+  h += '<div class="tab-action-row"><div class="building-tabs">';
+  buildings.forEach(function(b){
+    var active = Number(b.id) == Number(usageBuildingId) ? ' active' : '';
+    h += '<button class="building-tab'+active+'" onclick="switchUsageOverviewBuilding('+Number(b.id)+',\''+type+'\')">'+esc(b.name)+'</button>';
+  });
+  h += '</div></div>';
+  if (rows.length == 0) {
+    h += '<div class="empty-state"><div class="icon">'+(isWater?'&#x1F4A7;':'&#x26A1;')+'</div><div>\u5f53\u524d\u697c\u680b\u6682\u65e0\u8868\u5177</div></div>';
+  } else {
+    h += '<div class="page-title" style="font-size:16px;margin-bottom:14px">'+title+'</div>';
+    h += '<div class="table-wrap"><table style="min-width:'+(260 + months.length * 96)+'px"><thead><tr>';
+    h += '<th style="position:sticky;left:0;z-index:2;background:#F8FAFD;width:160px">\u8868\u5177</th><th style="width:88px">\u623f\u95f4</th>';
+    months.forEach(function(month){ h += '<th style="text-align:right">'+esc(month)+'</th>'; });
+    h += '</tr></thead><tbody>';
+    rows.forEach(function(row){
+      h += '<tr><td style="position:sticky;left:0;background:var(--white);z-index:1"><span class="name-link">'+esc(row.meter_no||('\u8868ID '+row.id))+'</span></td><td>'+esc(row.room_number||'')+'</td>';
+      months.forEach(function(month){
+        var val = row.readings ? row.readings[month] : null;
+        h += '<td style="text-align:right;font-weight:'+(val == null ? '400' : '600')+';color:'+(val == null ? 'var(--text-third)' : 'var(--text)')+'">'+fmtUsageNumber(val)+'</td>';
+      });
+      h += '</tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '<div class="list-meta">\u5171 '+rows.length+' \u4e2a\u8868\uff0c'+months.length+' \u4e2a\u6708</div>';
+  renderMain(h);
+}
+async function loadMeterUsage(type) {
+  var isWater = type == 'water';
+  var buildings = await rental('buildings','list') || [];
+  if (buildings.length == 0) {
+    renderMain('<div class="empty-state"><div class="icon">'+(isWater?'&#x1F4A7;':'&#x26A1;')+'</div><div>\u8bf7\u5148\u6dfb\u52a0\u697c\u680b\u548c\u8868\u5177</div></div>');
+    return;
+  }
+  if (!usageBuildingId || !buildings.some(function(b){ return Number(b.id) == Number(usageBuildingId); })) usageBuildingId = buildings[0].id;
+  var rows = await rental('readings','monthly',{type:type, building_id:usageBuildingId, month:usageMonthKey()}) || [];
+  usageRowsById = {};
+  var totalUsage = 0, recordCount = 0;
+  rows.forEach(function(row){
+    usageRowsById[Number(row.id)] = row;
+    if (row.usage !== null && row.usage !== undefined) totalUsage += Number(row.usage || 0);
+    if (row.status == 'recorded') recordCount++;
+  });
+
+  var title = isWater ? '\u6c34\u8868\u7528\u91cf' : '\u7535\u8868\u7528\u91cf';
+  var unit = isWater ? '\u5428' : '\u5ea6';
+  var icon = isWater ? '&#x1F4A7;' : '&#x26A1;';
+  var prevDisabled = (usageYear == usageStartYear && usageMonth == usageStartMonth) ? ' disabled style="opacity:.35;cursor:not-allowed"' : '';
+  var h = '';
+  h += '<div class="month-filter"><button class="month-nav" onclick="changeUsageMonth(-1,\''+type+'\')"'+prevDisabled+'>&#x25C0;</button>';
+  h += '<span class="month-label">'+usageYear+'\u5e74'+usageMonth+'\u6708</span>';
+  h += '<button class="month-nav" onclick="changeUsageMonth(1,\''+type+'\')">&#x25B6;</button><button class="month-nav month-nav-overview" onclick="loadMeterUsageOverview(\''+type+'\')">\u7edf\u8ba1\u6982\u89c8</button></div>';
+  h += '<div class="tab-action-row"><div class="building-tabs">';
+  buildings.forEach(function(b){
+    var active = Number(b.id) == Number(usageBuildingId) ? ' active' : '';
+    h += '<button class="building-tab'+active+'" onclick="switchUsageBuilding('+Number(b.id)+',\''+type+'\')">'+esc(b.name)+'</button>';
+  });
+  h += '</div></div>';
+
+  h += '<div class="summary-row">';
+  h += '<div class="stat-card"><div>'+title+'</div><div class="stat-val" style="color:'+(isWater?'var(--blue)':'var(--orange)')+'">'+fmtUsageNumber(totalUsage)+' '+unit+'</div></div>';
+  h += '<div class="stat-card"><div>\u5df2\u5f55\u5165\u8868\u6570</div><div class="stat-val" style="color:var(--green)">'+recordCount+'</div></div>';
+  h += '<div class="stat-card"><div>\u672a\u5f55\u5165\u8868\u6570</div><div class="stat-val" style="color:var(--red)">'+(rows.length-recordCount)+'</div></div>';
+  h += '</div>';
+
+  if (rows.length == 0) {
+    h += '<div class="empty-state"><div class="icon">'+icon+'</div><div>\u5f53\u524d\u697c\u680b\u6682\u65e0'+title.replace('\u7528\u91cf','')+'</div></div>';
+  } else {
+    h += '<div class="plan-cards">';
+    rows.forEach(function(row){
+      var mid = Number(row.id);
+      var editing = usageEditingKey == usageCardKey(type, mid);
+      var currText = row.reading === null || row.reading === undefined ? '--' : fmtUsageNumber(row.reading);
+      var usageText = row.usage === null || row.usage === undefined ? '--' : fmtUsageNumber(row.usage) + ' ' + unit;
+      h += '<div class="plan-card">';
+      h += '<div class="card-header"><span class="card-tenant">'+esc(row.room_number||'')+'</span><span class="card-room">'+esc(row.meter_no||('\u8868ID '+mid))+'</span></div>';
+      h += '<div class="card-items">';
+      h += '<div class="card-item">\u697c\u680b <span>'+esc(row.building_name||'')+'</span></div>';
+      h += '<div class="card-item">\u697c\u5c42 <span>'+esc(row.floor||'')+'</span></div>';
+      h += '<div class="card-item">\u4e0a\u6708\u8bfb\u6570 <span>'+fmtUsageNumber(row.previous_reading)+'</span></div>';
+      h += '<div class="card-item">\u5f53\u6708\u7ed3\u7b97\u8bfb\u6570 <span>'+currText+'</span></div>';
+      h += '<div class="card-item">\u5f53\u6708\u7528\u91cf <span>'+usageText+'</span></div>';
+      h += '</div>';
+      h += '<div class="card-total"><span>'+usageStatusTag(row)+'</span><span class="amount">'+usageText+'</span></div>';
+      if (editing) {
+        var draftPhoto = usagePhotoDrafts[usageCardKey(type, mid)] || row.photo || '';
+        h += '<div style="margin-top:12px;border-top:1px dashed var(--border-light);padding-top:12px">';
+        h += '<div class="form-group"><label>\u5f53\u6708\u7ed3\u7b97\u8bfb\u6570</label><input class="soft-input" id="usage_reading_'+mid+'" type="number" step="0.1" value="'+esc(row.reading == null ? '' : row.reading)+'" placeholder="\u8bf7\u8f93\u5165\u8bfb\u6570"></div>';
+        h += '<div class="upload-area" style="height:104px;margin-bottom:8px"><input type="file" accept="image/*" onchange="handleUsagePhoto(\''+type+'\','+mid+',this)"><div class="upload-preview" id="usage_photo_preview_'+mid+'">'+usagePhotoPreview(draftPhoto)+'</div></div>';
+        h += '<div id="usage_ocr_status_'+mid+'" style="font-size:12px;color:var(--text-sec);min-height:18px;margin-bottom:8px"></div>';
+        h += '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-outline btn-sm" onclick="cancelUsageEdit(\''+type+'\')">\u53d6\u6d88</button><button class="btn btn-primary btn-sm" onclick="saveUsageCard(\''+type+'\','+mid+')">\u4fdd\u5b58</button></div>';
+        h += '</div>';
+      } else {
+        h += '<div style="height:98px;margin-top:12px;border-top:1px dashed var(--border-light);padding-top:10px;display:flex;align-items:center;justify-content:center;background:#F8FAFD;border-radius:8px">'+usagePhotoPreview(row.photo)+'</div>';
+        h += '<div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn btn-outline btn-sm" onclick="editUsageCard(\''+type+'\','+mid+')">'+(row.status=='recorded'?'\u7f16\u8f91':'\u5f55\u5165')+'</button></div>';
+      }
+      h += '</div>';
+    });
+    h += '</div>';
+  }
+  h += '<div class="list-meta">\u5171 '+rows.length+' \u4e2a\u8868</div>';
+  renderMain(h);
+}
+
 var drawerUploads = {};
 
 async function openPlanDrawer(contractId, tenantId, roomId, billId) {
@@ -1506,11 +1795,11 @@ async function openPlanDrawer(contractId, tenantId, roomId, billId) {
   // 构建抽屉壳子
   var h = '<div class="drawer-header"><span class="drawer-title">'+esc(contract.tenant_name||'')+' · '+esc(contract.room_number||'')+'</span><button class="drawer-close" onclick="closeDrawer()">✕</button></div>';
   h += '<div class="drawer-steps" id="drawer-steps-bar">';
-  h += '<button type="button" class="step '+(curStep>1?'done':curStep==1?'active':'')+'" onclick="switchDrawerStep(1)"><span class="step-num">1</span>录入</button>';
+  h += '<button type="button" class="step step-1 '+(curStep>1?'done':curStep==1?'active':'')+'" onclick="switchDrawerStep(1)"><span class="step-num">1</span>录入</button>';
   h += '<div class="step-line"></div>';
-  h += '<button type="button" class="step '+(curStep>2?'done':curStep==2?'active':'')+'" onclick="switchDrawerStep(2)"><span class="step-num">2</span>生成账单</button>';
+  h += '<button type="button" class="step step-2 '+(curStep>2?'done':curStep==2?'active':'')+'" onclick="switchDrawerStep(2)"><span class="step-num">2</span>生成账单</button>';
   h += '<div class="step-line"></div>';
-  h += '<button type="button" class="step '+(curStep==3?'active':'')+'" onclick="switchDrawerStep(3)"><span class="step-num">3</span>完成收款</button>';
+  h += '<button type="button" class="step step-3 '+(curStep==3?'active':'')+'" id="step-3-btn" onclick="switchDrawerStep(3)"><span class="step-num">3</span>完成收款</button>';
   h += '</div>';
   h += '<div class="drawer-body" id="drawer-body-content"></div>';
   h += '<div class="drawer-footer">';
@@ -1626,14 +1915,15 @@ function renderDrawerStep2() {
   var billNo = (billingMonth.replace('-','')) + roomNumber;
   var today = new Date().toISOString().split('T')[0];
 
+  var actualBillId = d.billId || 0;
   var h = '';
   h += '<div class="drawer-section">';
   h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">';
   h += '<span class="section-label" style="margin-bottom:0">📋 账单预览</span>';
-  h += '<div style="display:flex;gap:4px">';
-  h += '<button class="btn btn-sm" onclick="generateBillImage('+Number(d.contractId)+',0,\'copy\')" style="padding:3px 10px;font-size:12px;color:var(--text-sec);background:var(--bg);border:1px solid var(--border);justify-content:center;border-radius:6px;gap:4px">📋 复制</button>';
-  h += '<button class="btn btn-sm" onclick="generateBillImage('+Number(d.contractId)+',0,\'save\')" style="padding:3px 10px;font-size:12px;color:var(--text-sec);background:var(--bg);border:1px solid var(--border);justify-content:center;border-radius:6px;gap:4px">💾 保存</button>';
-  h += '<button class="btn btn-sm btn-success" onclick="doPayNow('+Number(d.contractId)+','+Number(d.billId)+')" style="padding:3px 12px;font-size:12px;justify-content:center;border-radius:6px;gap:4px">✅ 完成收款</button>';
+  h += '<div style="display:flex;gap:6px">';
+  h += '<button class="btn btn-sm btn-outline" onclick="generateBillImage('+Number(d.contractId)+','+actualBillId+',\'copy\')" style="padding:3px 10px;font-size:11px;border-radius:6px">📋 复制</button>';
+  h += '<button class="btn btn-sm btn-outline" onclick="generateBillImage('+Number(d.contractId)+','+actualBillId+',\'save\')" style="padding:3px 10px;font-size:11px;border-radius:6px">💾 保存</button>';
+  h += '<button class="btn btn-sm btn-primary" onclick="doPayNow('+Number(d.contractId)+','+actualBillId+')" style="padding:3px 12px;font-size:11px;border-radius:6px">完成发送 →</button>';
   h += '</div></div>';
   h += '<div style="border:1px solid var(--border-light);border-radius:8px;padding:16px;background:#FFFEF9;font-size:13px;line-height:1.8">';
   h += '<div style="text-align:center;font-weight:600;font-size:15px;margin-bottom:2px">房租、水、电费（专用）收据</div>';
@@ -1674,12 +1964,6 @@ function renderDrawerStep2() {
     }
   }
   h += '</div>'; // 收据框结束
-  // 收款录入区
-  h += '<div style="margin-top:14px;display:flex;gap:12px;align-items:flex-end">';
-  h += '<div class="form-group" style="margin-bottom:0;flex:1"><label style="font-size:12px">实收金额（元）</label><input class="soft-input" type="number" id="pay_amount" value="'+total.toFixed(2)+'" step="0.01" style="height:36px"></div>';
-  h += '<div class="form-group" style="margin-bottom:0;flex:1"><label style="font-size:12px">收款日期</label><input class="soft-input" type="date" id="pay_date" value="'+today+'" style="height:36px"></div>';
-  h += '<button class="btn btn-success btn-sm" onclick="confirmPayment('+Number(d.contractId)+','+Number(d.billId)+')" style="height:36px;padding:0 16px;white-space:nowrap">确认收款</button>';
-  h += '</div>';
   h += '</div>';
   return h;
 }
@@ -1689,17 +1973,74 @@ function renderDrawerStep3() {
   var d = window._drawerData || {};
   var contract = d.contract || {};
   var curBill = d.curBill || {};
+  var billingMonth = d.billingMonth || '';
+  var waterFee = Number(curBill.water_fee||0);
+  var electricFee = Number(curBill.electric_fee||0);
+  var rentAmount = Number(contract.monthly_rent||0);
+  var otherFee = Number(curBill.other_fee||0);
+  var total = Number(curBill.total_amount||0) || (rentAmount + waterFee + electricFee + otherFee);
+  var waterUnit = Number(contract.water_unit_price||0);
+  var elecUnit = Number(contract.electric_unit_price||0);
+  var tenantName = contract.tenant_name || '';
+  var roomNumber = contract.room_number || '';
+  var billNo = (billingMonth.replace('-','')) + roomNumber;
+  var today = new Date().toISOString().split('T')[0];
+  var isPaid = curBill.status == 'paid';
+
+  // 照片
+  var waterImg = curBill.water_photo || d.waterImg || '';
+  var elecImg = curBill.electric_photo || d.elecImg || '';
+
   var h = '';
-  h += '<div class="drawer-section" style="text-align:center;padding:40px 20px">';
-  if (curBill.status == 'paid') {
-    h += '<div style="font-size:48px;margin-bottom:12px">✅</div>';
-    h += '<div style="font-size:16px;font-weight:600;color:var(--green);margin-bottom:8px">收款完成</div>';
-    h += '<div style="color:var(--text-sec);font-size:13px">该账单已于收款记录中确认</div>';
+  h += '<div class="drawer-section">';
+  h += '<div class="section-label">📋 账单确认</div>';
+  h += '<div style="border:1px solid var(--border-light);border-radius:8px;padding:16px;background:#FFFEF9;font-size:13px;line-height:1.8">';
+  h += '<div style="text-align:center;font-weight:600;font-size:15px;margin-bottom:2px">房租、水、电费（专用）收据</div>';
+  h += '<div style="font-size:11px;color:var(--text-third);margin-bottom:8px">No.'+esc(billNo)+'</div>';
+  h += '<div style="margin-bottom:6px"><span>房间：<b>'+esc(roomNumber)+'</b></span></div>';
+  h += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin:8px 0"><thead><tr style="background:#F5F5F5"><th style="padding:6px;border:1px solid #ddd">项目</th><th style="padding:6px;border:1px solid #ddd">本月读数</th><th style="padding:6px;border:1px solid #ddd">上月读数</th><th style="padding:6px;border:1px solid #ddd">实用量</th><th style="padding:6px;border:1px solid #ddd">单价</th><th style="padding:6px;border:1px solid #ddd">金额</th></tr></thead><tbody>';
+  h += '<tr><td style="padding:6px;border:1px solid #ddd">水费（吨）</td><td style="padding:6px;border:1px solid #ddd">'+(curBill.water_current_reading||'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+(curBill.water_last_reading||'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+(waterUnit>0?(waterFee/waterUnit).toFixed(1)+'吨':'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+waterUnit.toFixed(2)+'</td><td style="padding:6px;border:1px solid #ddd;font-weight:bold">¥'+waterFee.toFixed(2)+'</td></tr>';
+  h += '<tr><td style="padding:6px;border:1px solid #ddd">电费（度）</td><td style="padding:6px;border:1px solid #ddd">'+(curBill.electric_current_reading||'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+(curBill.electric_last_reading||'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+(elecUnit>0?(electricFee/elecUnit).toFixed(0)+'度':'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+elecUnit.toFixed(2)+'</td><td style="padding:6px;border:1px solid #ddd;font-weight:bold">¥'+electricFee.toFixed(2)+'</td></tr>';
+  h += '<tr><td style="padding:6px;border:1px solid #ddd">房租</td><td style="padding:6px;border:1px solid #ddd" colspan="4"></td><td style="padding:6px;border:1px solid #ddd;font-weight:bold">¥'+rentAmount.toFixed(2)+'</td></tr>';
+  if (otherFee > 0) {
+    h += '<tr><td style="padding:6px;border:1px solid #ddd">杂费</td><td style="padding:6px;border:1px solid #ddd" colspan="4"></td><td style="padding:6px;border:1px solid #ddd;font-weight:bold">¥'+otherFee.toFixed(2)+'</td></tr>';
+  }
+  h += '</tbody></table>';
+  h += '<div style="text-align:right;font-weight:700;font-size:15px;margin:8px 0">合计：<span style="color:var(--red);font-size:18px">¥'+total.toFixed(2)+'</span></div>';
+  h += '<div style="text-align:right;font-size:12px;color:var(--text-sec);margin-top:4px;line-height:1.8">';
+  h += '<div>交款人：'+esc(tenantName)+'</div><div>收款人：吴钦腾</div><div>发单日期：'+today+'</div>';
+  h += '</div>';
+  if (waterImg || elecImg) {
+    h += '<hr style="margin:10px 0;border:none;border-top:1px dashed #ddd">';
+    if (waterImg && elecImg) {
+      h += '<div style="display:flex;gap:12px">';
+      h += '<img src="'+waterImg+'" style="width:300px;height:300px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
+      h += '<img src="'+elecImg+'" style="width:300px;height:300px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
+      h += '</div>';
+    } else if (waterImg) {
+      h += '<img src="'+waterImg+'" style="width:260px;height:260px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
+    } else if (elecImg) {
+      h += '<img src="'+elecImg+'" style="width:260px;height:260px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
+    }
+  }
+  h += '</div></div>'; // 收据框结束
+
+  // 收款区域
+  h += '<div class="drawer-section">';
+  if (isPaid) {
+    var payment = d._paymentInfo || {};
+    h += '<div class="section-label" style="color:var(--green)">✅ 已收款</div>';
+    h += '<div style="display:flex;gap:12px">';
+    h += '<div style="flex:1;background:var(--bg);border-radius:8px;padding:10px 14px"><div style="font-size:11px;color:var(--text-third)">实收金额</div><div style="font-size:16px;font-weight:600;color:var(--text)">¥'+(payment.amount||total).toFixed(2)+'</div></div>';
+    h += '<div style="flex:1;background:var(--bg);border-radius:8px;padding:10px 14px"><div style="font-size:11px;color:var(--text-third)">收款日期</div><div style="font-size:16px;font-weight:600;color:var(--text)">'+(payment.date||today)+'</div></div>';
+    h += '</div>';
   } else {
-    h += '<div style="font-size:48px;margin-bottom:12px">💳</div>';
-    h += '<div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px">确认收款</div>';
-    h += '<div style="color:var(--text-sec);font-size:13px;margin-bottom:16px">确认该租客已支付本月全部费用？</div>';
-    h += '<button class="btn btn-success" onclick="markPaid('+Number(d.contractId)+','+Number(d.billId)+','+Number(contract.tenant_id)+','+Number(contract.monthly_rent||0)+','+Number(curBill.water_fee||0)+','+Number(curBill.electric_fee||0)+','+Number(curBill.other_fee||0)+')">✅ 确认已收款</button>';
+    h += '<div class="section-label">💳 确认收款</div>';
+    h += '<div style="display:flex;gap:12px;align-items:flex-end">';
+    h += '<div class="form-group" style="margin-bottom:0;flex:1"><label style="font-size:12px">实收金额（元）</label><input class="soft-input" type="number" id="pay_amount" value="'+total.toFixed(2)+'" step="0.01" style="height:36px"></div>';
+    h += '<div class="form-group" style="margin-bottom:0;flex:1"><label style="font-size:12px">收款日期</label>'+dateField('pay_date', today, 'date')+'</div>';
+    h += '<button class="btn btn-primary btn-sm" id="btn-confirm-pay" onclick="confirmPayment('+Number(d.contractId)+','+Number(d.billId)+')" style="height:36px;padding:0 16px;white-space:nowrap">确认收款</button>';
+    h += '</div>';
   }
   h += '</div>';
   return h;
@@ -1707,6 +2048,11 @@ function renderDrawerStep3() {
 
 // ====== 步骤切换（用 innerHTML 替换 drawer-body） ======
 function switchDrawerStep(step) {
+  var d = window._drawerData || {};
+  var isPaid = (d.curBill && d.curBill.status == 'paid');
+  // 如果已付款，不允许回退步骤
+  if (isPaid) step = 3;
+
   var drawerBody = document.querySelector('.drawer-body');
   if (!drawerBody) return;
   if (step == 1) {
@@ -1721,6 +2067,9 @@ function switchDrawerStep(step) {
     s.classList.remove('active','done');
     if (i+1 < step) s.classList.add('done');
     else if (i+1 == step) s.classList.add('active');
+    // 已付款时步骤条不可点击回退
+    if (isPaid) s.style.pointerEvents = 'none';
+    else s.style.pointerEvents = '';
   });
   // 保存按钮只在步骤1显示
   var saveBtn = document.getElementById('drawer_save_btn');
@@ -1900,10 +2249,15 @@ async function saveDrawer(contractId, billId) {
   }
 
   if (res && !res.error) {
+    var savedBillId = res.id || billId;
+    // 重新加载完整账单数据
+    var fullBill = await rental('bills','get',{id:savedBillId});
     // 更新全局数据
     if (window._drawerData) {
-      window._drawerData.billId = res.id || billId;
-      window._drawerData.curBill = { id: res.id || billId, water_fee: waterFee, electric_fee: electricFee, other_fee: otherFee, status: 'pending' };
+      window._drawerData.billId = savedBillId;
+      window._drawerData.curBill = fullBill || { id: savedBillId, water_fee: waterFee, electric_fee: electricFee, other_fee: otherFee, status: 'pending', water_current_reading: wCurr, water_last_reading: wLast, electric_current_reading: eCurr, electric_last_reading: eLast, water_photo: waterPhoto, electric_photo: elecPhoto };
+      window._drawerData.waterImg = waterPhoto;
+      window._drawerData.elecImg = elecPhoto;
     }
     // 切换到步骤2：账单预览
     switchDrawerStep(2);
@@ -2126,11 +2480,12 @@ function doPayNow(contractId, billId) {
 async function confirmPayment(contractId, billId) {
   if (billId <= 0) { showToast('请先在步骤1保存数据'); return; }
   var amount = parseFloat(document.getElementById('pay_amount').value) || 0;
-  var payDate = document.getElementById('pay_date').value || new Date().toISOString().split('T')[0];
+  var payDate = (document.getElementById('pay_date')||{}).value || new Date().toISOString().split('T')[0];
   if (amount <= 0) { showToast('请填写实收金额'); return; }
   await rental('bills','update_status',{id:billId, status:'paid'});
   await rental('payments','add',{bill_id:billId, amount:amount, pay_date:payDate, pay_method:'微信', remark:'账单预览页确认收款'});
   window._drawerData.curBill.status = 'paid';
+  window._drawerData._paymentInfo = {amount: amount, date: payDate};
   switchDrawerStep(3);
   loadRentPlan();
 }
@@ -2152,6 +2507,7 @@ async function markPaid(contractId, billId, tenantId, rentAmount, waterFee, elec
   await rental('payments','add',{bill_id:billId, amount:total, pay_date:today, pay_method:'微信', remark:'收租计划标记已收'});
   // 更新状态并切换
   window._drawerData.curBill.status = 'paid';
+  window._drawerData._paymentInfo = {amount: total, date: today};
   switchDrawerStep(3);
   loadRentPlan();
 }
@@ -2581,9 +2937,25 @@ document.addEventListener('click', function(e){
     var omp = document.getElementById('ocr_model_picker');
     if (omp) omp.classList.remove('open');
   }
+  // 关闭水表/电表下拉
+  if (!e.target.closest('#meter_picker_water') && !e.target.closest('#meter_picker_electric')) {
+    var mw = document.getElementById('meter_picker_water');
+    var me = document.getElementById('meter_picker_electric');
+    if (mw) mw.classList.remove('open');
+    if (me) me.classList.remove('open');
+  }
+  // 关闭水电表信息页面的房间下拉
+  if (!e.target.closest('#room_picker_wmeter') && !e.target.closest('#room_picker_emeter')) {
+    var rw = document.getElementById('room_picker_wmeter');
+    var re = document.getElementById('room_picker_emeter');
+    if (rw) rw.classList.remove('open');
+    if (re) re.classList.remove('open');
+  }
 });
 initLabels();
 loadBuildings();
 </script>
 </body>
 </html>
+
+

@@ -112,9 +112,16 @@ def init():
         water_unit_price REAL DEFAULT 0,
         electric_unit_price REAL DEFAULT 0,
         deposit REAL DEFAULT 0, contract_file TEXT DEFAULT '',
+        water_meter_id INTEGER, electric_meter_id INTEGER,
         status TEXT DEFAULT 'active',
         created_at TEXT DEFAULT (datetime('now','localtime'))
     )""")
+    try:
+        c.execute("ALTER TABLE contracts ADD COLUMN water_meter_id INTEGER")
+    except: pass
+    try:
+        c.execute("ALTER TABLE contracts ADD COLUMN electric_meter_id INTEGER")
+    except: pass
     c.execute("""CREATE TABLE IF NOT EXISTS meters (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         room_id INTEGER NOT NULL REFERENCES rooms(id),
@@ -339,14 +346,17 @@ def set_tenant_status(tid, status):
 
 def add_contract(tenant_id, room_id, start_date, end_date='',
                  monthly_rent=0, water_price=0, electric_price=0,
-                 deposit=0, contract_file='', status='active'):
+                 deposit=0, contract_file='', status='active',
+                 water_meter_id=None, electric_meter_id=None):
     c = _conn()
     cur = c.execute("""INSERT INTO contracts
         (tenant_id,room_id,start_date,end_date,monthly_rent,
-         water_unit_price,electric_unit_price,deposit,contract_file,status)
-        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+         water_unit_price,electric_unit_price,deposit,contract_file,status,
+         water_meter_id,electric_meter_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
         (tenant_id, room_id, start_date, end_date, monthly_rent,
-         water_price, electric_price, deposit, contract_file, status))
+         water_price, electric_price, deposit, contract_file, status,
+         water_meter_id, electric_meter_id))
     c.commit(); pk = cur.lastrowid; c.close()
     return pk
 
@@ -386,13 +396,15 @@ def get_contract(cid):
 
 def update_contract(cid, tenant_id, room_id, start_date, end_date='',
                     monthly_rent=0, water_price=0, electric_price=0,
-                    deposit=0, contract_file='', status='active'):
+                    deposit=0, contract_file='', status='active',
+                    water_meter_id=None, electric_meter_id=None):
     c = _conn()
     c.execute("""UPDATE contracts SET tenant_id=?,room_id=?,start_date=?,end_date=?,
         monthly_rent=?,water_unit_price=?,electric_unit_price=?,deposit=?,
-        contract_file=?,status=? WHERE id=?""",
+        contract_file=?,status=?,water_meter_id=?,electric_meter_id=? WHERE id=?""",
         (tenant_id, room_id, start_date, end_date, monthly_rent,
-         water_price, electric_price, deposit, contract_file, status, cid))
+         water_price, electric_price, deposit, contract_file, status,
+         water_meter_id, electric_meter_id, cid))
     c.commit(); c.close()
 
 def end_contract(cid):
@@ -464,6 +476,126 @@ def get_latest_reading(meter_id):
     c.close()
     return dict(r) if r else None
 
+def get_monthly_meter_readings(mtype='water', building_id=None, month=''):
+    month = (month or '')[:7]
+    c = _conn()
+    params = [mtype]
+    sql = ("SELECT m.*,r.building_id,r.room_number,r.floor,b.name AS building_name "
+           "FROM meters m JOIN rooms r ON m.room_id=r.id "
+           "JOIN buildings b ON r.building_id=b.id WHERE m.type=?")
+    if building_id:
+        sql += " AND r.building_id=?"
+        params.append(building_id)
+    sql += " ORDER BY b.id,COALESCE(r.floor,1),CAST(r.room_number AS INTEGER),r.room_number,m.id"
+    meters = c.execute(sql, params).fetchall()
+    result = []
+    for m in meters:
+        current = None
+        if month:
+            current = c.execute(
+                "SELECT * FROM meter_readings WHERE meter_id=? AND substr(reading_date,1,7)=? ORDER BY id DESC LIMIT 1",
+                (m["id"], month)
+            ).fetchone()
+        previous = None
+        if month:
+            previous = c.execute(
+                "SELECT * FROM meter_readings WHERE meter_id=? AND substr(reading_date,1,7)<? ORDER BY substr(reading_date,1,7) DESC, reading_date DESC, id DESC LIMIT 1",
+                (m["id"], month)
+            ).fetchone()
+        else:
+            previous = c.execute(
+                "SELECT * FROM meter_readings WHERE meter_id=? ORDER BY reading_date DESC, id DESC LIMIT 1",
+                (m["id"],)
+            ).fetchone()
+        prev_reading = float(previous["reading"]) if previous else float(m["init_reading"] or 0)
+        curr_reading = float(current["reading"]) if current else None
+        usage = None if curr_reading is None else round(max(0, curr_reading - prev_reading), 2)
+        item = dict(m)
+        item.update({
+            "reading_id": current["id"] if current else None,
+            "reading_date": current["reading_date"] if current else month,
+            "reading": curr_reading,
+            "previous_reading": prev_reading,
+            "previous_date": previous["reading_date"] if previous else "",
+            "usage": usage,
+            "photo": current["photo"] if current else "",
+            "remark": current["remark"] if current else "",
+            "status": "recorded" if current else "pending",
+        })
+        result.append(item)
+    c.close()
+    return result
+
+def save_monthly_meter_reading(meter_id, month, reading, photo='', remark=''):
+    month = (month or '')[:7]
+    c = _conn()
+    existing = c.execute(
+        "SELECT id FROM meter_readings WHERE meter_id=? AND substr(reading_date,1,7)=? ORDER BY id DESC LIMIT 1",
+        (meter_id, month)
+    ).fetchone()
+    if existing:
+        c.execute(
+            "UPDATE meter_readings SET reading_date=?,reading=?,photo=?,remark=? WHERE id=?",
+            (month, reading, photo or '', remark or '', existing["id"])
+        )
+        pk = existing["id"]
+    else:
+        cur = c.execute(
+            "INSERT INTO meter_readings (meter_id,reading_date,reading,photo,remark) VALUES (?,?,?,?,?)",
+            (meter_id, month, reading, photo or '', remark or '')
+        )
+        pk = cur.lastrowid
+    c.commit(); c.close()
+    return {"id": pk, "success": True}
+
+def _month_range(start_month, end_month):
+    try:
+        sy, sm = [int(x) for x in (start_month or "2026-06")[:7].split("-")]
+        ey, em = [int(x) for x in (end_month or start_month or "2026-06")[:7].split("-")]
+    except:
+        sy, sm, ey, em = 2026, 6, 2026, 6
+    if (ey, em) < (sy, sm):
+        ey, em = sy, sm
+    months = []
+    y, m = sy, sm
+    while (y, m) <= (ey, em):
+        months.append(f"{y:04d}-{m:02d}")
+        m += 1
+        if m > 12:
+            y += 1
+            m = 1
+    return months
+
+def get_meter_reading_overview(mtype='water', building_id=None, start_month='2026-06', end_month=''):
+    months = _month_range(start_month, end_month or start_month)
+    c = _conn()
+    params = [mtype]
+    sql = ("SELECT m.*,r.building_id,r.room_number,r.floor,b.name AS building_name "
+           "FROM meters m JOIN rooms r ON m.room_id=r.id "
+           "JOIN buildings b ON r.building_id=b.id WHERE m.type=?")
+    if building_id:
+        sql += " AND r.building_id=?"
+        params.append(building_id)
+    sql += " ORDER BY b.id,COALESCE(r.floor,1),CAST(r.room_number AS INTEGER),r.room_number,m.id"
+    meters = c.execute(sql, params).fetchall()
+    rows = []
+    for m in meters:
+        reading_map = {month: None for month in months}
+        if months:
+            readings = c.execute(
+                "SELECT id,substr(reading_date,1,7) AS month,reading FROM meter_readings "
+                "WHERE meter_id=? AND substr(reading_date,1,7)>=? AND substr(reading_date,1,7)<=? "
+                "ORDER BY substr(reading_date,1,7),id",
+                (m["id"], months[0], months[-1])
+            ).fetchall()
+            for r in readings:
+                reading_map[r["month"]] = float(r["reading"])
+        item = dict(m)
+        item["readings"] = reading_map
+        rows.append(item)
+    c.close()
+    return {"months": months, "rows": rows}
+
 def add_bill(contract_id, billing_month, rent_amount, water_fee=0,
              electric_fee=0, other_fee=0, remark='',
              water_last=0, water_curr=0, electric_last=0, electric_curr=0,
@@ -494,7 +626,7 @@ def get_bills(month=None, contract_id=None):
     if contract_id:
         where.append("b.contract_id=?"); params.append(contract_id)
     wh = (" WHERE " + " AND ".join(where)) if where else ''
-    sql = ("SELECT b.*,t.name AS tenant_name,r.room_number,bld.name AS building_name "
+    sql = ("SELECT b.*,t.name AS tenant_name,r.room_number,bld.id AS building_id,bld.name AS building_name "
            "FROM bills b "
            "JOIN contracts c ON b.contract_id=c.id "
            "JOIN tenants t ON c.tenant_id=t.id "
@@ -506,7 +638,7 @@ def get_bills(month=None, contract_id=None):
 
 def get_bill(bid):
     c = _conn()
-    r = c.execute("SELECT b.*,t.name AS tenant_name,r.room_number,bld.name AS building_name "
+    r = c.execute("SELECT b.*,t.name AS tenant_name,r.room_number,bld.id AS building_id,bld.name AS building_name "
                   "FROM bills b "
                   "JOIN contracts c ON b.contract_id=c.id "
                   "JOIN tenants t ON c.tenant_id=t.id "
