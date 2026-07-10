@@ -196,6 +196,7 @@ table a:hover{text-decoration:underline}
 .upload-area input[type="file"]{position:absolute;inset:0;opacity:0;cursor:pointer}
 .upload-area .upload-preview{display:flex;align-items:center;gap:6px}
 .meter-preview-img{height:70px;border-radius:4px;cursor:zoom-in;transition:transform 0.15s}.meter-preview-img:hover{transform:scale(1.05)}
+.meter-list-img{height:40px;border-radius:4px;cursor:zoom-in;transition:transform 0.15s}.meter-list-img:hover{transform:scale(1.1)}
 .drawer .form-group{margin-bottom:14px}
 .drawer .form-group label{font-size:13px}
 .drawer input.soft-input,.drawer select.soft-input{height:36px}
@@ -1196,9 +1197,10 @@ async function showAddContract() {
   h += '</div><button class="btn btn-primary btn-sm" onclick="showAddWaterMeter()">+ 添加水表</button></div>';
   if (ms.length == 0) h += '<div class="empty-state"><div class="icon">&#x1F4A7;</div><div>当前楼栋暂无水表，点击上方按钮添加</div></div>';
   else {
-    h += '<div class="table-wrap"><table><thead><tr><th>表编号</th><th>房间</th><th>初始读数</th></tr></thead><tbody>';
+    h += '<div class="table-wrap"><table><thead><tr><th>照片</th><th>表编号</th><th>房间</th><th>初始读数</th></tr></thead><tbody>';
     ms.forEach(function(m){
-      h += '<tr><td><span class="name-link" onclick="editWaterMeter('+Number(m.id)+')">'+esc(m.meter_no||'')+'</span></td><td>'+esc(m.room_number||'')+'</td><td>'+Number(m.init_reading||0)+'</td></tr>';
+      var imgHtml = m.photo ? '<img src="'+esc(m.photo)+'" class="meter-list-img" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">' : '';
+      h += '<tr><td style="width:60px">'+imgHtml+'</td><td><span class="name-link" onclick="editWaterMeter('+Number(m.id)+')">'+esc(m.meter_no||'')+'</span></td><td>'+esc(m.room_number||'')+'</td><td>'+Number(m.init_reading||0)+'</td></tr>';
     });
     h += '</tbody></table></div>';
   }
@@ -1214,15 +1216,28 @@ async function showAddWaterMeter() {
   h += '<div class="form-group"><label>房间</label>'+roomPicker(rooms, 'wmeter', rooms[0]?rooms[0].id:'')+'</div>';
   h += '<div class="form-group"><label>表编号</label><input class="soft-input" id="f_wmeter_no" placeholder="如：WS-001"></div>';
   h += '<div class="form-group"><label>初始读数</label><input class="soft-input" type="number" id="f_wmeter_reading" placeholder="0"></div>';
+  h += '<div class="form-group"><label>照片</label><input type="file" id="f_wmeter_photo_file" accept="image/*" onchange="previewMeterPhoto(\'wmeter\',this)"><div id="preview_wmeter_photo" style="margin-top:6px"></div></div>';
+  h += '<input type="hidden" id="f_wmeter_photo" value="">';
   h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddWaterMeter()">保存</button></div></div>';
   M(h);
+}
+function previewMeterPhoto(suffix, input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e){
+    document.getElementById('f_'+suffix+'_photo').value = e.target.result;
+    document.getElementById('preview_'+suffix+'_photo').innerHTML = '<img src="'+e.target.result+'" class="meter-preview-img" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">';
+  };
+  reader.readAsDataURL(file);
 }
 function doAddWaterMeter() {
   var data = {
     room_id: document.getElementById('f_wmeter_room').value,
     type: 'water',
     meter_no: document.getElementById('f_wmeter_no').value.trim(),
-    init_reading: parseFloat(document.getElementById('f_wmeter_reading').value) || 0
+    init_reading: parseFloat(document.getElementById('f_wmeter_reading').value) || 0,
+    photo: document.getElementById('f_wmeter_photo').value || ''
   };
   rental('meters','add',data).then(function(res){
     if (!res || res.error) { alert((res && res.error) || '新增失败，请检查后端服务'); return; }
@@ -1234,10 +1249,13 @@ async function editWaterMeter(id) {
   if (!m || m.error) { alert('未找到水表'); return; }
   var bid = currentWaterMeterBuildingId;
   var rooms = await rental('rooms','list',{building_id:bid}) || [];
+  var photoHtml = m.photo ? '<img src="'+esc(m.photo)+'" class="meter-preview-img" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">' : '';
   var h = '<div class="soft-form">';
   h += '<div class="form-group"><label>房间</label>'+roomPicker(rooms, 'wmeter', m.room_id)+'</div>';
   h += '<div class="form-group"><label>表编号</label><input class="soft-input" id="f_wmeter_no" value="'+esc(m.meter_no||'')+'"></div>';
   h += '<div class="form-group"><label>初始读数</label><input class="soft-input" type="number" id="f_wmeter_reading" value="'+Number(m.init_reading||0)+'"></div>';
+  h += '<div class="form-group"><label>照片</label><input type="file" id="f_wmeter_photo_file" accept="image/*" onchange="previewMeterPhoto(\'wmeter\',this)"><div id="preview_wmeter_photo" style="margin-top:6px">'+photoHtml+'</div></div>';
+  h += '<input type="hidden" id="f_wmeter_photo" value="'+esc(m.photo||'')+'">';
   h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doUpdateWaterMeter('+Number(id)+')">保存</button></div></div>';
   M(h);
 }
@@ -1247,7 +1265,8 @@ function doUpdateWaterMeter(id) {
     room_id: document.getElementById('f_wmeter_room').value,
     type: 'water',
     meter_no: document.getElementById('f_wmeter_no').value.trim(),
-    init_reading: parseFloat(document.getElementById('f_wmeter_reading').value) || 0
+    init_reading: parseFloat(document.getElementById('f_wmeter_reading').value) || 0,
+    photo: document.getElementById('f_wmeter_photo').value || ''
   };
   rental('meters','update',data).then(function(res){
     if (!res || res.error) { alert((res && res.error) || '保存失败，请检查后端服务'); return; }
@@ -1272,9 +1291,10 @@ async function loadElectricMeters() {
   h += '</div><button class="btn btn-primary btn-sm" onclick="showAddElectricMeter()">+ 添加电表</button></div>';
   if (ms.length == 0) h += '<div class="empty-state"><div class="icon">&#x26A1;</div><div>当前楼栋暂无电表，点击上方按钮添加</div></div>';
   else {
-    h += '<div class="table-wrap"><table><thead><tr><th>表编号</th><th>房间</th><th>初始读数</th></tr></thead><tbody>';
+    h += '<div class="table-wrap"><table><thead><tr><th>照片</th><th>表编号</th><th>房间</th><th>初始读数</th></tr></thead><tbody>';
     ms.forEach(function(m){
-      h += '<tr><td><span class="name-link" onclick="editElectricMeter('+Number(m.id)+')">'+esc(m.meter_no||'')+'</span></td><td>'+esc(m.room_number||'')+'</td><td>'+Number(m.init_reading||0)+'</td></tr>';
+      var imgHtml = m.photo ? '<img src="'+esc(m.photo)+'" class="meter-list-img" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">' : '';
+      h += '<tr><td style="width:60px">'+imgHtml+'</td><td><span class="name-link" onclick="editElectricMeter('+Number(m.id)+')">'+esc(m.meter_no||'')+'</span></td><td>'+esc(m.room_number||'')+'</td><td>'+Number(m.init_reading||0)+'</td></tr>';
     });
     h += '</tbody></table></div>';
   }
@@ -1290,6 +1310,8 @@ async function showAddElectricMeter() {
   h += '<div class="form-group"><label>房间</label>'+roomPicker(rooms, 'emeter', rooms[0]?rooms[0].id:'')+'</div>';
   h += '<div class="form-group"><label>表编号</label><input class="soft-input" id="f_emeter_no" placeholder="如：ES-001"></div>';
   h += '<div class="form-group"><label>初始读数</label><input class="soft-input" type="number" id="f_emeter_reading" placeholder="0"></div>';
+  h += '<div class="form-group"><label>照片</label><input type="file" id="f_emeter_photo_file" accept="image/*" onchange="previewMeterPhoto(\'emeter\',this)"><div id="preview_emeter_photo" style="margin-top:6px"></div></div>';
+  h += '<input type="hidden" id="f_emeter_photo" value="">';
   h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doAddElectricMeter()">保存</button></div></div>';
   M(h);
 }
@@ -1298,7 +1320,8 @@ function doAddElectricMeter() {
     room_id: document.getElementById('f_emeter_room').value,
     type: 'electric',
     meter_no: document.getElementById('f_emeter_no').value.trim(),
-    init_reading: parseFloat(document.getElementById('f_emeter_reading').value) || 0
+    init_reading: parseFloat(document.getElementById('f_emeter_reading').value) || 0,
+    photo: document.getElementById('f_emeter_photo').value || ''
   };
   rental('meters','add',data).then(function(res){
     if (!res || res.error) { alert((res && res.error) || '新增失败，请检查后端服务'); return; }
@@ -1310,10 +1333,13 @@ async function editElectricMeter(id) {
   if (!m || m.error) { alert('未找到电表'); return; }
   var bid = currentElectricMeterBuildingId;
   var rooms = await rental('rooms','list',{building_id:bid}) || [];
+  var photoHtml = m.photo ? '<img src="'+esc(m.photo)+'" class="meter-preview-img" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">' : '';
   var h = '<div class="soft-form">';
   h += '<div class="form-group"><label>房间</label>'+roomPicker(rooms, 'emeter', m.room_id)+'</div>';
   h += '<div class="form-group"><label>表编号</label><input class="soft-input" id="f_emeter_no" value="'+esc(m.meter_no||'')+'"></div>';
   h += '<div class="form-group"><label>初始读数</label><input class="soft-input" type="number" id="f_emeter_reading" value="'+Number(m.init_reading||0)+'"></div>';
+  h += '<div class="form-group"><label>照片</label><input type="file" id="f_emeter_photo_file" accept="image/*" onchange="previewMeterPhoto(\'emeter\',this)"><div id="preview_emeter_photo" style="margin-top:6px">'+photoHtml+'</div></div>';
+  h += '<input type="hidden" id="f_emeter_photo" value="'+esc(m.photo||'')+'">';
   h += '<div class="modal-actions"><button class="btn btn-outline" onclick="CM()">取消</button><button class="btn btn-primary" onclick="doUpdateElectricMeter('+Number(id)+')">保存</button></div></div>';
   M(h);
 }
@@ -1323,7 +1349,8 @@ function doUpdateElectricMeter(id) {
     room_id: document.getElementById('f_emeter_room').value,
     type: 'electric',
     meter_no: document.getElementById('f_emeter_no').value.trim(),
-    init_reading: parseFloat(document.getElementById('f_emeter_reading').value) || 0
+    init_reading: parseFloat(document.getElementById('f_emeter_reading').value) || 0,
+    photo: document.getElementById('f_emeter_photo').value || ''
   };
   rental('meters','update',data).then(function(res){
     if (!res || res.error) { alert((res && res.error) || '保存失败，请检查后端服务'); return; }
@@ -1766,30 +1793,35 @@ async function openPlanDrawer(contractId, tenantId, roomId, billId) {
   var contract = await rental('contracts','get',{id:contractId});
   if (!contract || contract.error) { alert('未找到合同'); return; }
 
-  // 获取上月账单
-  var lastMonth = planMonth == 1 ? 12 : planMonth - 1;
-  var lastYear = planMonth == 1 ? planYear - 1 : planYear;
-  var lastBilling = lastYear + '-' + String(lastMonth).padStart(2,'0');
-  var lastBills = await rental('bills','list',{month:lastBilling}) || [];
-  var lastBill = lastBills.find(function(b){ return Number(b.contract_id)==Number(contractId); });
-
-  // 获取当月账单
   var billingMonth = planYear + '-' + String(planMonth).padStart(2,'0');
+
+  var waterMeters = [], electricMeters = [];
+  var waterId = contract.water_meter_id || null;
+  var electricId = contract.electric_meter_id || null;
+  var [allWater, allElectric] = await Promise.all([
+    rental('readings','monthly',{type:'water', month:billingMonth}) || [],
+    rental('readings','monthly',{type:'electric', month:billingMonth}) || []
+  ]);
+  waterMeters = (allWater || []).filter(function(r){ return Number(r.id)==Number(waterId); });
+  electricMeters = (allElectric || []).filter(function(r){ return Number(r.id)==Number(electricId); });
+
   var curBills = await rental('bills','list',{month:billingMonth}) || [];
   var curBill = curBills.find(function(b){ return Number(b.contract_id)==Number(contractId); }) || {};
 
   drawerUploads = { water: null, electric: null };
   var curStep = (curBill.id && curBill.status == 'paid') ? 3 : (curBill.id ? 2 : 1);
 
-  // 存储抽屉数据到全局
   window._drawerData = {
     contractId: contractId,
     billId: curBill.id || 0,
     contract: contract,
     curBill: curBill,
-    lastBill: lastBill,
     billingMonth: billingMonth,
-    curStep: curStep
+    curStep: curStep,
+    waterMeters: waterMeters,
+    electricMeters: electricMeters,
+    waterMeterPhotos: {},
+    electricMeterPhotos: {}
   };
 
   // 构建抽屉壳子
@@ -1829,29 +1861,36 @@ function renderDrawerStep1() {
   var d = window._drawerData || {};
   var contract = d.contract || {};
   var curBill = d.curBill || {};
-  var lastBill = d.lastBill;
+  var waterMeters = d.waterMeters || [];
+  var electricMeters = d.electricMeters || [];
   var waterUnit = Number(contract.water_unit_price||0);
   var elecUnit = Number(contract.electric_unit_price||0);
-  var wLast = Number(curBill.water_last_reading||0) || Number(lastBill?lastBill.water_current_reading:0) || 0;
-  var eLast = Number(curBill.electric_last_reading||0) || Number(lastBill?lastBill.electric_current_reading:0) || 0;
-  var wCurr = Number(curBill.water_current_reading||0);
-  var eCurr = Number(curBill.electric_current_reading||0);
-  var waterFee = (wCurr - wLast) * waterUnit; if (waterFee < 0) waterFee = 0;
-  var elecFee = (eCurr - eLast) * elecUnit; if (elecFee < 0) elecFee = 0;
+
+  // 从 waterMeters 取第一个表的读数（兼容旧逻辑）
+  var wm = waterMeters.length > 0 ? waterMeters[0] : {};
+  var em = electricMeters.length > 0 ? electricMeters[0] : {};
+  var wMeterNo = wm.meter_no || '';
+  var eMeterNo = em.meter_no || '';
+  var wLast = Number(wm.previous_reading||0);
+  var eLast = Number(em.previous_reading||0);
+  var wCurr = wm.reading == null || wm.reading === undefined ? '' : Number(wm.reading);
+  var eCurr = em.reading == null || em.reading === undefined ? '' : Number(em.reading);
+  var waterFee = wCurr === '' ? 0 : Math.max(0, (Number(wCurr) - wLast) * waterUnit);
+  var elecFee = eCurr === '' ? 0 : Math.max(0, (Number(eCurr) - eLast) * elecUnit);
   var total = Number(contract.monthly_rent||0) + waterFee + elecFee + Number(curBill.other_fee||0);
 
-  var wPhoto = curBill.water_photo || '';
-  var ePhoto = curBill.electric_photo || '';
+  var wPhoto = (d.waterMeterPhotos||{})[wm.id] || wm.photo || curBill.water_photo || '';
+  var ePhoto = (d.electricMeterPhotos||{})[em.id] || em.photo || curBill.electric_photo || '';
 
   var h = '';
   h += '<div class="drawer-section"><div class="section-label">📋 月租</div>';
   h += '<div class="locked-field">¥'+Number(contract.monthly_rent||0).toFixed(2)+' / 月</div></div>';
 
   // 水费区域
-  h += '<div class="drawer-section"><div class="section-label">💧 水费（单价：¥'+waterUnit.toFixed(2)+'/m³）</div>';
+  h += '<div class="drawer-section"><div class="section-label">💧 水费（单价：¥'+waterUnit.toFixed(2)+'/m³）'+(wMeterNo?' <span class="ms-tag">'+esc(wMeterNo)+'</span>':'')+'</div>';
   h += '<div style="display:flex;gap:8px;margin-bottom:8px">';
   h += '<div style="flex:1"><label style="font-size:11px;color:var(--text-sec)">上月读数（m³）</label><input class="soft-input" type="number" id="draw_water_last" value="'+wLast+'" step="0.1" placeholder="0" oninput="calcDrawerTotal()" style="height:32px"></div>';
-  h += '<div style="flex:1"><label style="font-size:11px;color:var(--text-sec)">本月读数（m³）</label><input class="soft-input" type="number" id="draw_water_curr" value="'+wCurr+'" step="0.1" placeholder="0" oninput="calcDrawerTotal()" style="height:32px"></div>';
+  h += '<div style="flex:1"><label style="font-size:11px;color:var(--text-sec)">当月结算读数（m³）</label><input class="soft-input" type="number" id="draw_water_curr" value="'+wCurr+'" step="0.1" placeholder="请输入读数" oninput="calcDrawerTotal()" style="height:32px"></div>';
   h += '<div style="flex:1"><label style="font-size:11px;color:var(--text-sec)">水费（元）</label><div class="locked-field" id="draw_water_fee_label" style="height:32px">¥'+waterFee.toFixed(2)+'</div></div>';
   h += '</div>';
   h += '<div class="upload-area" id="upload_water" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropFile(event,\'water\')">';
@@ -1860,10 +1899,10 @@ function renderDrawerStep1() {
   h += '</div></div>';
 
   // 电费区域
-  h += '<div class="drawer-section"><div class="section-label">⚡ 电费（单价：¥'+elecUnit.toFixed(2)+'/度）</div>';
+  h += '<div class="drawer-section"><div class="section-label">⚡ 电费（单价：¥'+elecUnit.toFixed(2)+'/度）'+(eMeterNo?' <span class="ms-tag">'+esc(eMeterNo)+'</span>':'')+'</div>';
   h += '<div style="display:flex;gap:8px;margin-bottom:8px">';
   h += '<div style="flex:1"><label style="font-size:11px;color:var(--text-sec)">上月读数（度）</label><input class="soft-input" type="number" id="draw_electric_last" value="'+eLast+'" step="0.1" placeholder="0" oninput="calcDrawerTotal()" style="height:32px"></div>';
-  h += '<div style="flex:1"><label style="font-size:11px;color:var(--text-sec)">本月读数（度）</label><input class="soft-input" type="number" id="draw_electric_curr" value="'+eCurr+'" step="0.1" placeholder="0" oninput="calcDrawerTotal()" style="height:32px"></div>';
+  h += '<div style="flex:1"><label style="font-size:11px;color:var(--text-sec)">当月结算读数（度）</label><input class="soft-input" type="number" id="draw_electric_curr" value="'+eCurr+'" step="0.1" placeholder="请输入读数" oninput="calcDrawerTotal()" style="height:32px"></div>';
   h += '<div style="flex:1"><label style="font-size:11px;color:var(--text-sec)">电费（元）</label><div class="locked-field" id="draw_electric_fee_label" style="height:32px">¥'+elecFee.toFixed(2)+'</div></div>';
   h += '</div>';
   h += '<div class="upload-area" id="upload_electric" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropFile(event,\'electric\')">';
@@ -1881,7 +1920,6 @@ function renderDrawerStep1() {
   h += '<div class="drawer-section"><div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--blue-light);border-radius:8px"><span style="font-weight:500">合计应收</span><span style="font-size:20px;font-weight:700;color:var(--blue)" id="draw_total">¥'+total.toFixed(2)+'</span></div></div>';
   return h;
 }
-
 // ====== 生成步骤2 HTML：账单预览 ======
 function renderDrawerStep2() {
   var d = window._drawerData || {};
@@ -1953,14 +1991,14 @@ function renderDrawerStep2() {
   if (waterImg || elecImg) {
     h += '<hr style="margin:10px 0;border:none;border-top:1px dashed #ddd">';
     if (waterImg && elecImg) {
-      h += '<div style="display:flex;gap:12px">';
-      h += '<img src="'+waterImg+'" style="width:300px;height:300px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
-      h += '<img src="'+elecImg+'" style="width:300px;height:300px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
+      h += '<div style="display:flex;gap:8px">';
+      h += '<img src="'+waterImg+'" class="meter-preview-img" style="width:48%;max-width:200px;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid #ddd" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">';
+      h += '<img src="'+elecImg+'" class="meter-preview-img" style="width:48%;max-width:200px;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid #ddd" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">';
       h += '</div>';
     } else if (waterImg) {
-      h += '<img src="'+waterImg+'" style="width:260px;height:260px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
+      h += '<img src="'+waterImg+'" class="meter-preview-img" style="width:200px;height:200px;object-fit:cover;border-radius:6px;border:1px solid #ddd" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">';
     } else if (elecImg) {
-      h += '<img src="'+elecImg+'" style="width:260px;height:260px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
+      h += '<img src="'+elecImg+'" class="meter-preview-img" style="width:200px;height:200px;object-fit:cover;border-radius:6px;border:1px solid #ddd" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">';
     }
   }
   h += '</div>'; // 收据框结束
@@ -1999,8 +2037,8 @@ function renderDrawerStep3() {
   h += '<div style="font-size:11px;color:var(--text-third);margin-bottom:8px">No.'+esc(billNo)+'</div>';
   h += '<div style="margin-bottom:6px"><span>房间：<b>'+esc(roomNumber)+'</b></span></div>';
   h += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin:8px 0"><thead><tr style="background:#F5F5F5"><th style="padding:6px;border:1px solid #ddd">项目</th><th style="padding:6px;border:1px solid #ddd">本月读数</th><th style="padding:6px;border:1px solid #ddd">上月读数</th><th style="padding:6px;border:1px solid #ddd">实用量</th><th style="padding:6px;border:1px solid #ddd">单价</th><th style="padding:6px;border:1px solid #ddd">金额</th></tr></thead><tbody>';
-  h += '<tr><td style="padding:6px;border:1px solid #ddd">水费（吨）</td><td style="padding:6px;border:1px solid #ddd">'+(curBill.water_current_reading||'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+(curBill.water_last_reading||'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+(waterUnit>0?(waterFee/waterUnit).toFixed(1)+'吨':'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+waterUnit.toFixed(2)+'</td><td style="padding:6px;border:1px solid #ddd;font-weight:bold">¥'+waterFee.toFixed(2)+'</td></tr>';
-  h += '<tr><td style="padding:6px;border:1px solid #ddd">电费（度）</td><td style="padding:6px;border:1px solid #ddd">'+(curBill.electric_current_reading||'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+(curBill.electric_last_reading||'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+(elecUnit>0?(electricFee/elecUnit).toFixed(0)+'度':'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+elecUnit.toFixed(2)+'</td><td style="padding:6px;border:1px solid #ddd;font-weight:bold">¥'+electricFee.toFixed(2)+'</td></tr>';
+  h += '<tr><td style="padding:6px;border:1px solid #ddd">水费（吨）</td><td style="padding:6px;border:1px solid #ddd">'+(curBill.water_current_reading!=null?curBill.water_current_reading:'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+(curBill.water_last_reading!=null?curBill.water_last_reading:'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+(waterUnit>0?(waterFee/waterUnit).toFixed(1)+'吨':'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+waterUnit.toFixed(2)+'</td><td style="padding:6px;border:1px solid #ddd;font-weight:bold">¥'+waterFee.toFixed(2)+'</td></tr>';
+  h += '<tr><td style="padding:6px;border:1px solid #ddd">电费（度）</td><td style="padding:6px;border:1px solid #ddd">'+(curBill.electric_current_reading!=null?curBill.electric_current_reading:'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+(curBill.electric_last_reading!=null?curBill.electric_last_reading:'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+(elecUnit>0?(electricFee/elecUnit).toFixed(0)+'度':'—')+'</td><td style="padding:6px;border:1px solid #ddd">'+elecUnit.toFixed(2)+'</td><td style="padding:6px;border:1px solid #ddd;font-weight:bold">¥'+electricFee.toFixed(2)+'</td></tr>';
   h += '<tr><td style="padding:6px;border:1px solid #ddd">房租</td><td style="padding:6px;border:1px solid #ddd" colspan="4"></td><td style="padding:6px;border:1px solid #ddd;font-weight:bold">¥'+rentAmount.toFixed(2)+'</td></tr>';
   if (otherFee > 0) {
     h += '<tr><td style="padding:6px;border:1px solid #ddd">杂费</td><td style="padding:6px;border:1px solid #ddd" colspan="4"></td><td style="padding:6px;border:1px solid #ddd;font-weight:bold">¥'+otherFee.toFixed(2)+'</td></tr>';
@@ -2013,14 +2051,14 @@ function renderDrawerStep3() {
   if (waterImg || elecImg) {
     h += '<hr style="margin:10px 0;border:none;border-top:1px dashed #ddd">';
     if (waterImg && elecImg) {
-      h += '<div style="display:flex;gap:12px">';
-      h += '<img src="'+waterImg+'" style="width:300px;height:300px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
-      h += '<img src="'+elecImg+'" style="width:300px;height:300px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
+      h += '<div style="display:flex;gap:8px">';
+      h += '<img src="'+waterImg+'" class="meter-preview-img" style="width:48%;max-width:200px;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid #ddd" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">';
+      h += '<img src="'+elecImg+'" class="meter-preview-img" style="width:48%;max-width:200px;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid #ddd" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">';
       h += '</div>';
     } else if (waterImg) {
-      h += '<img src="'+waterImg+'" style="width:260px;height:260px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
+      h += '<img src="'+waterImg+'" class="meter-preview-img" style="width:200px;height:200px;object-fit:cover;border-radius:6px;border:1px solid #ddd" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">';
     } else if (elecImg) {
-      h += '<img src="'+elecImg+'" style="width:260px;height:260px;object-fit:cover;border-radius:6px;border:1px solid #ddd">';
+      h += '<img src="'+elecImg+'" class="meter-preview-img" style="width:200px;height:200px;object-fit:cover;border-radius:6px;border:1px solid #ddd" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">';
     }
   }
   h += '</div></div>'; // 收据框结束
@@ -2098,7 +2136,6 @@ function calcDrawerTotal() {
   var totalEl = document.getElementById('draw_total');
   if (totalEl) totalEl.textContent = '¥'+t.toFixed(2);
 }
-
 function addMiscRow() {
   var tbody = document.querySelector('#misc_table tbody');
   if (!tbody) return;
@@ -2115,6 +2152,7 @@ function removeCheckedMisc() {
   calcDrawerTotal();
 }
 
+// 步骤1上传预览（录入页drawer）
 function previewUpload(type, input) {
   var file = input.files[0];
   if (!file) return;
@@ -2124,7 +2162,18 @@ function previewUpload(type, input) {
   reader.onload = async function(e){
     var dataUrl = e.target.result;
     preview.innerHTML = '<img src="'+dataUrl+'" class="meter-preview-img" onmouseenter="zoomMeterImg(event,this)" onmouseleave="unzoomMeterImg()">';
-    // 调用 AI 识别读数
+    // 存储照片到全局数据
+    var d = window._drawerData || {};
+    if (type === 'water') {
+      if (!d.waterMeterPhotos) d.waterMeterPhotos = {};
+      var wm = d.waterMeterData || {};
+      if (wm.id) d.waterMeterPhotos[wm.id] = dataUrl;
+    } else {
+      if (!d.electricMeterPhotos) d.electricMeterPhotos = {};
+      var em = d.electricMeterData || {};
+      if (em.id) d.electricMeterPhotos[em.id] = dataUrl;
+    }
+    // AI识别读数
     try {
       var res = await rental('_ocr','read',{image:dataUrl, meter_type: type==='water'?'水表':'电表'});
       if (res && res.numbers && res.numbers.length > 0) {
@@ -2162,20 +2211,23 @@ function zoomMeterImg(e, img) {
   var z = document.getElementById('meter_zoom');
   if (!z) {
     z = document.createElement('div'); z.id = 'meter_zoom';
-    z.style.cssText = 'position:fixed;z-index:9999;pointer-events:none;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.3);overflow:hidden;display:none';
+    z.style.cssText = 'position:fixed;z-index:9999;pointer-events:none;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.3);overflow:hidden;display:none;background:#fff';
     document.body.appendChild(z);
   }
   var big = document.createElement('img');
   big.src = img.src;
-  big.style.cssText = 'max-width:500px;max-height:500px;display:block';
+  big.style.cssText = 'max-width:400px;max-height:400px;display:block';
   z.innerHTML = '';
   z.appendChild(big);
   z.style.display = 'block';
   var rect = img.getBoundingClientRect();
-  var x = rect.left + rect.width/2 - 250;
+  var maxW = 400, maxH = 400;
+  var x = rect.left + rect.width/2 - maxW/2;
   var y = rect.bottom + 8;
   if (x < 10) x = 10;
-  if (y + 500 > window.innerHeight) y = rect.top - 508;
+  if (x + maxW > window.innerWidth - 10) x = window.innerWidth - maxW - 10;
+  if (y + maxH > window.innerHeight - 10) y = rect.top - maxH - 8;
+  if (y < 10) y = 10;
   z.style.left = x+'px';
   z.style.top = y+'px';
 }
@@ -2194,21 +2246,41 @@ function closeDrawer() {
 async function saveDrawer(contractId, billId) {
   var d = window._drawerData || {};
   var contract = d.contract || {};
-  var wLast = parseFloat((document.getElementById('draw_water_last')||{}).value)||0;
-  var wCurr = parseFloat((document.getElementById('draw_water_curr')||{}).value)||0;
-  var eLast = parseFloat((document.getElementById('draw_electric_last')||{}).value)||0;
-  var eCurr = parseFloat((document.getElementById('draw_electric_curr')||{}).value)||0;
+  var waterMeters = d.waterMeters || [];
+  var electricMeters = d.electricMeters || [];
   var waterUnit = Number(contract.water_unit_price||0);
   var elecUnit = Number(contract.electric_unit_price||0);
-  var waterFee = (wCurr - wLast) * waterUnit; if (waterFee < 0) waterFee = 0;
-  var electricFee = (eCurr - eLast) * elecUnit; if (electricFee < 0) electricFee = 0;
-
-  // 照片 base64
+  var waterFee = 0, electricFee = 0;
   var waterPhoto = '', elecPhoto = '';
-  var pw = document.getElementById('preview_water');
-  var pe = document.getElementById('preview_electric');
-  if (pw) { var wImg = pw.querySelector('img'); if (wImg) waterPhoto = wImg.src; }
-  if (pe) { var eImg = pe.querySelector('img'); if (eImg) elecPhoto = eImg.src; }
+  var billingMonth = planYear + '-' + String(planMonth).padStart(2,'0');
+
+  // 同步 water meter readings
+  var waterReadings = [];
+  waterMeters.forEach(function(m, idx){
+    var suffix = idx > 0 ? ('_' + idx) : '';
+    var wLast = parseFloat((document.getElementById('draw_water_last' + suffix)||{}).value)||0;
+    var wCurr = parseFloat((document.getElementById('draw_water_curr' + suffix)||{}).value)||0;
+    var fee = Math.max(0, (wCurr - wLast) * waterUnit);
+    waterFee += fee;
+    waterReadings.push({meter_id: Number(m.id), reading: wCurr, billing_month: billingMonth});
+    var previewId = 'preview_water' + suffix;
+    var pw = document.getElementById(previewId);
+    if (pw) { var wImg = pw.querySelector('img'); if (wImg && !waterPhoto) waterPhoto = wImg.src; }
+  });
+
+  // 同步 electric meter readings
+  var electricReadings = [];
+  electricMeters.forEach(function(m, idx){
+    var suffix = idx > 0 ? ('_' + idx) : '';
+    var eLast = parseFloat((document.getElementById('draw_electric_last' + suffix)||{}).value)||0;
+    var eCurr = parseFloat((document.getElementById('draw_electric_curr' + suffix)||{}).value)||0;
+    var fee = Math.max(0, (eCurr - eLast) * elecUnit);
+    electricFee += fee;
+    electricReadings.push({meter_id: Number(m.id), reading: eCurr, billing_month: billingMonth});
+    var previewId = 'preview_electric' + suffix;
+    var pe = document.getElementById(previewId);
+    if (pe) { var eImg = pe.querySelector('img'); if (eImg && !elecPhoto) elecPhoto = eImg.src; }
+  });
 
   // 从杂项表格收集
   var miscItems = [];
@@ -2222,10 +2294,20 @@ async function saveDrawer(contractId, billId) {
   });
 
   var remark = JSON.stringify(miscItems);
-  var billingMonth = planYear + '-' + String(planMonth).padStart(2,'0');
+  var contractData = await rental('contracts','get',{id:contractId});
+  var rentAmount = Number(contractData.monthly_rent||0);
 
-  var contract = await rental('contracts','get',{id:contractId});
-  var rentAmount = Number(contract.monthly_rent||0);
+  // 保存 readings 到 meter_readings 表（实现联动）
+  var allReadings = waterReadings.concat(electricReadings);
+  for (var ri = 0; ri < allReadings.length; ri++) {
+    var rd = allReadings[ri];
+    await rental('readings','save_monthly', {meter_id: rd.meter_id, month: rd.billing_month, reading: rd.reading, photo: '', remark: ''});
+  }
+
+  var wLast = waterMeters.length > 0 ? (Number(waterMeters[0].previous_reading)||0) : 0;
+  var wCurr = waterMeters.length > 0 ? (waterReadings[0].reading||0) : 0;
+  var eLast = electricMeters.length > 0 ? (Number(electricMeters[0].previous_reading)||0) : 0;
+  var eCurr = electricMeters.length > 0 ? (electricReadings[0].reading||0) : 0;
 
   var data = {
     contract_id: contractId,
@@ -2250,16 +2332,18 @@ async function saveDrawer(contractId, billId) {
 
   if (res && !res.error) {
     var savedBillId = res.id || billId;
-    // 重新加载完整账单数据
     var fullBill = await rental('bills','get',{id:savedBillId});
-    // 更新全局数据
     if (window._drawerData) {
       window._drawerData.billId = savedBillId;
       window._drawerData.curBill = fullBill || { id: savedBillId, water_fee: waterFee, electric_fee: electricFee, other_fee: otherFee, status: 'pending', water_current_reading: wCurr, water_last_reading: wLast, electric_current_reading: eCurr, electric_last_reading: eLast, water_photo: waterPhoto, electric_photo: elecPhoto };
       window._drawerData.waterImg = waterPhoto;
       window._drawerData.elecImg = elecPhoto;
+      // 更新 waterMeters / electricMeters 的 reading 字段，返回步骤1时不会丢数据
+      var wms = window._drawerData.waterMeters || [];
+      var ems = window._drawerData.electricMeters || [];
+      if (wms.length > 0) { wms[0].reading = wCurr; wms[0].previous_reading = wLast; }
+      if (ems.length > 0) { ems[0].reading = eCurr; ems[0].previous_reading = eLast; }
     }
-    // 切换到步骤2：账单预览
     switchDrawerStep(2);
     loadRentPlan();
   } else {

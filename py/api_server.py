@@ -141,8 +141,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 elif table=="meters":
                     if action=="list": result = get_meters(data.get("room_id"),data.get("building_id"),data.get("type"))
                     elif action=="get": result = get_meter(data.get("id"))
-                    elif action=="add": result = add_meter(data.get("room_id"),data.get("type","water"),data.get("meter_no",""),data.get("init_reading",0))
-                    elif action=="update": update_meter(data.get("id"),data.get("room_id"),data.get("type","water"),data.get("meter_no",""),data.get("init_reading",0));result={"success":True}
+                    elif action=="add": result = add_meter(data.get("room_id"),data.get("type","water"),data.get("meter_no",""),data.get("init_reading",0),data.get("photo",""))
+                    elif action=="update": update_meter(data.get("id"),data.get("room_id"),data.get("type","water"),data.get("meter_no",""),data.get("init_reading",0),data.get("photo"));result={"success":True}
                 elif table=="readings":
                     if action=="list": result = get_readings(data.get("meter_id"),data.get("limit",50))
                     elif action=="add": result = add_reading(data.get("meter_id"),data.get("reading_date",""),data.get("reading",0),data.get("photo",""),data.get("remark",""))

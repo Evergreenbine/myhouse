@@ -127,8 +127,12 @@ def init():
         room_id INTEGER NOT NULL REFERENCES rooms(id),
         type TEXT NOT NULL CHECK(type IN ('water','electric')),
         meter_no TEXT DEFAULT '', init_reading REAL DEFAULT 0,
+        photo TEXT DEFAULT '',
         created_at TEXT DEFAULT (datetime('now','localtime'))
     )""")
+    try:
+        c.execute("ALTER TABLE meters ADD COLUMN photo TEXT DEFAULT ''")
+    except: pass
     c.execute("""CREATE TABLE IF NOT EXISTS meter_readings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         meter_id INTEGER NOT NULL REFERENCES meters(id),
@@ -412,10 +416,10 @@ def end_contract(cid):
     c.execute("UPDATE contracts SET status='ended' WHERE id=?", (cid,))
     c.commit(); c.close()
 
-def add_meter(room_id, mtype, meter_no='', init_reading=0.0):
+def add_meter(room_id, mtype, meter_no='', init_reading=0.0, photo=''):
     c = _conn()
-    cur = c.execute("INSERT INTO meters (room_id,type,meter_no,init_reading) VALUES (?,?,?,?)",
-              (room_id, mtype, meter_no, init_reading))
+    cur = c.execute("INSERT INTO meters (room_id,type,meter_no,init_reading,photo) VALUES (?,?,?,?,?)",
+              (room_id, mtype, meter_no, init_reading, photo))
     c.commit(); pk = cur.lastrowid; c.close()
     return pk
 
@@ -448,10 +452,14 @@ def get_meter(mid):
     c.close()
     return dict(r) if r else None
 
-def update_meter(mid, room_id, mtype, meter_no='', init_reading=0.0):
+def update_meter(mid, room_id, mtype, meter_no='', init_reading=0.0, photo=None):
     c = _conn()
-    c.execute("UPDATE meters SET room_id=?,type=?,meter_no=?,init_reading=? WHERE id=?",
-              (room_id, mtype, meter_no, init_reading, mid))
+    if photo is not None:
+        c.execute("UPDATE meters SET room_id=?,type=?,meter_no=?,init_reading=?,photo=? WHERE id=?",
+                  (room_id, mtype, meter_no, init_reading, photo, mid))
+    else:
+        c.execute("UPDATE meters SET room_id=?,type=?,meter_no=?,init_reading=? WHERE id=?",
+                  (room_id, mtype, meter_no, init_reading, mid))
     c.commit(); c.close()
 
 def add_reading(meter_id, reading_date, reading, photo='', remark=''):

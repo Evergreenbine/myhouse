@@ -32,3 +32,8 @@ Thumbs.db
 # eletron
 eletron/node_modules/
 eletron/dist/
+
+# eletron-react
+eletron-react/node_modules/
+eletron-react/dist/
+py/house.db

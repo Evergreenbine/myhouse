@@ -20,7 +20,7 @@ function createWindow() {
     icon: path.join(__dirname, 'icon.png'),
   });
 
-  mainWindow.loadFile('renderer/index.html');
+  mainWindow.loadURL('http://localhost:5173');
   mainWindow.setMenuBarVisibility(false);
 
   // 最小化时显示桌面萌宠
