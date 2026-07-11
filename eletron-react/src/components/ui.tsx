@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+﻿import React, { useState, useEffect, useRef } from 'react'
 
 // Modal 弹窗
 export function Modal({ open, onClose, title, children }: {
@@ -130,10 +130,81 @@ export function ToastContainer() {
 }
 
 // DatePicker 组件
-export function DateField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+﻿export function DatePicker({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const [open, setOpen] = useState(false)
+  const [viewYear, setViewYear] = useState(new Date().getFullYear())
+  const [viewMonth, setViewMonth] = useState(new Date().getMonth() + 1)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener("mousedown", handler)
+    return () => document.removeEventListener("mousedown", handler)
+  }, [])
+
+  const daysInMonth = (y: number, m: number) => new Date(y, m, 0).getDate()
+  const firstDayOfWeek = (y: number, m: number) => new Date(y, m - 1, 1).getDay()
+
+  const today = new Date()
+  const todayStr = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0")
+
+  const handlePrevMonth = () => {
+    if (viewMonth === 1) { setViewMonth(12); setViewYear(viewYear - 1) }
+    else setViewMonth(viewMonth - 1)
+  }
+  const handleNextMonth = () => {
+    if (viewMonth === 12) { setViewMonth(1); setViewYear(viewYear + 1) }
+    else setViewMonth(viewMonth + 1)
+  }
+
+  const handleSelect = (day: number) => {
+    const ds = viewYear + "-" + String(viewMonth).padStart(2, "0") + "-" + String(day).padStart(2, "0")
+    onChange(ds)
+    setOpen(false)
+  }
+
+  const displayValue = value || ""
+  const weeks = [
+    "\u4e00", "\u4e8c", "\u4e09", "\u56db", "\u4e94", "\u516d", "\u65e5"
+  ]
+  const days = daysInMonth(viewYear, viewMonth)
+  const fwd = firstDayOfWeek(viewYear, viewMonth)
+  const blanks = fwd === 0 ? 6 : fwd - 1
+
   return (
-    <div className="date-picker-wrap">
-      <input type="date" className="soft-input" value={value} onChange={e => onChange(e.target.value)} />
+    <div ref={ref} className="date-picker-wrap" style={{position:"relative"}}>
+      <div className="date-picker-input" onClick={() => setOpen(!open)}>
+        <span className="date-picker-text" style={displayValue ? {} : {color:"var(--text-third)"}}>
+          {displayValue || placeholder || "\u8bf7\u9009\u62e9\u65e5\u671f"}
+        </span>
+        <span className="date-picker-icon">{String.fromCodePoint(0x1F4C5)}</span>
+      </div>
+      {open && (
+        <div className="date-picker-dropdown" style={{display:"block"}}>
+          <div className="dp-header">
+            <span className="dp-nav" onClick={handlePrevMonth}>{String.fromCodePoint(0x25C0)}</span>
+            <span className="dp-title">{viewYear}年{viewMonth}月</span>
+            <span className="dp-nav" onClick={handleNextMonth}>{String.fromCodePoint(0x25B6)}</span>
+          </div>
+          <div className="dp-week-row">
+            {weeks.map(w => <span key={w}>{w}</span>)}
+          </div>
+          <div className="dp-day-grid">
+            {Array.from({length:blanks},(_,i) => <div key={"b"+i} className="dp-day-cell" />)}
+            {Array.from({length:days},(_,i) => {
+              const day = i + 1
+              const ds = viewYear + "-" + String(viewMonth).padStart(2,"0") + "-" + String(day).padStart(2,"0")
+              let cls = "dp-day-cell"
+              if (ds === value) cls += " active"
+              if (ds === todayStr) cls += " today"
+              return <div key={day} className={cls} onClick={() => handleSelect(day)}>{day}</div>
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+

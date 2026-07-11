@@ -1,6 +1,6 @@
 import React from 'react'
 import { rental } from '../api'
-import { showToast } from '../components/ui'
+import { showToast, DatePicker } from '../components/ui'
 
 interface Contract { id: number; tenant_name: string; tenant_id: number; room_number: string; room_id: number; monthly_rent: number; start_date: string; end_date: string; deposit: number; status: string; water_unit_price: number; electric_unit_price: number; water_meter_id: number | null; electric_meter_id: number | null }
 interface Building { id: number; name: string; rent_day: number }
@@ -300,11 +300,11 @@ export class ContractsPage extends React.Component<{}, State> {
               {/* Row 2: 合同开始 合同结束 收租日 */}
               <div className="form-group">
                 <label>合同开始</label>
-                <input className="soft-input" type="date" value={startDate} onChange={e => this.setState({ startDate: e.target.value })} />
+                <DatePicker value={startDate} onChange={v => this.setState({ startDate: v })} placeholder="合同开始日期" />
               </div>
               <div className="form-group">
                 <label>合同结束</label>
-                <input className="soft-input" type="date" value={endDate} onChange={e => this.setState({ endDate: e.target.value })} />
+                <DatePicker value={endDate} onChange={v => this.setState({ endDate: v })} placeholder="合同结束日期" />
               </div>
               <div className="form-group">
                 <label>收租日（每月几号）</label>
