@@ -30,6 +30,8 @@ interface State {
   eCurr: string
   wPhoto: string
   ePhoto: string
+  paidAmount: string
+  paidDate: string
   waterPreviewOpen: boolean
   electricPreviewOpen: boolean
 }
@@ -52,6 +54,7 @@ export class RentPlanPage extends React.Component<{}, State> {
     electricMeter: null,
     wLast: '', wCurr: '', eLast: '', eCurr: '',
     wPhoto: '', ePhoto: '',
+    paidAmount: '', paidDate: new Date().toISOString().split('T')[0],
     waterPreviewOpen: false, electricPreviewOpen: false,
   }
 
@@ -115,7 +118,7 @@ export class RentPlanPage extends React.Component<{}, State> {
       if (m) em = { id: m.id, meter_no: m.meter_no, reading: null, previous_reading: m.init_reading || 0, photo: '', usage: null, status: m.status || '' }
     }
 
-    const step = bill?.status === 'paid' ? 3 : bill?.id ? 2 : 1
+    const step = bill?.status === 'paid' ? 4 : bill?.status === 'pending_payment' ? 3 : bill?.id ? 2 : 1
 
 
     this.setState({
@@ -201,12 +204,19 @@ export class RentPlanPage extends React.Component<{}, State> {
     } else { showToast('保存失败') }
   }
 
-  confirmPayment = async () => {
+  
+  goToPaymentStep = async () => {
+    if (this.state.drawerBill?.id) {
+      await rental('bills', 'update_status', { id: this.state.drawerBill.id, status: 'pending_payment' })
+    }
+    this.setState({ drawerStep: 3 })
+  }
+confirmPayment = async () => {
     if (!this.state.drawerBill?.id) return
     await rental('bills', 'update_status', { id: this.state.drawerBill.id, status: 'paid' })
     showToast('收款确认')
     this.setState((s: any) => ({
-      drawerStep: 3,
+      drawerStep: 4,
       drawerBill: { ...s.drawerBill, status: 'paid' }
     }))
     if (this.state.curBid) this.loadPlan(this.state.curBid)
@@ -364,16 +374,19 @@ export class RentPlanPage extends React.Component<{}, State> {
             <button className="drawer-close" onClick={this.closeDrawer}>✕</button>
           </div>
 
-          <div className="drawer-steps" style={{display:'flex',padding:14,justifyContent:'center',gap:0,alignItems:'center'}}>
-            <button className={'step step-1' + (drawerStep >= 1 ? ' active' : '') + (drawerStep > 1 ? ' done' : '')}
-              onClick={() => this.setState({ drawerStep: 1 })}><span className="step-num">1</span>录入</button>
-            <div className="step-line" />
-            <button className={'step step-2' + (drawerStep >= 2 ? ' active' : '') + (drawerStep > 2 ? ' done' : '')}
-              onClick={() => drawerStep >= 2 && this.setState({ drawerStep: 2 })}><span className="step-num">2</span>生成账单</button>
-            <div className="step-line" />
-            <button className={'step step-3' + (drawerStep === 3 ? ' active' : '')}
-              onClick={() => drawerStep >= 3 && this.setState({ drawerStep: 3 })}><span className="step-num">3</span>完成收款</button>
-          </div>
+          <div className="drawer-steps" style={{display:'flex',padding:14,justifyContent:'center',gap:0,alignItems:'center',borderBottom:'1px solid var(--border-light)',background:'var(--bg)'}}>
+              <button className={'step step-1' + (drawerStep >= 1 ? ' active' : '') + (drawerStep > 1 ? ' done' : '')}
+                onClick={() => { if (drawerStep < 4) this.setState({ drawerStep: 1 }) }}><span className="step-num">1</span>录入</button>
+              <div className="step-line" />
+              <button className={'step step-2' + (drawerStep >= 2 ? ' active' : '') + (drawerStep > 2 ? ' done' : '')}
+                onClick={() => { if (drawerStep >= 2 && drawerStep < 4) this.setState({ drawerStep: 2 }) }}><span className="step-num">2</span>预览</button>
+              <div className="step-line" />
+              <button className={'step step-3' + (drawerStep >= 3 ? ' active' : '') + (drawerStep > 3 ? ' done' : '')}
+                onClick={() => { if (drawerStep >= 3 && drawerStep < 4) this.setState({ drawerStep: 3 }) }}><span className="step-num">3</span>收款</button>
+              <div className="step-line" />
+              <button className={'step step-4' + (drawerStep === 4 ? ' active' : '')}
+                onClick={() => {}}><span className="step-num">4</span>确认</button>
+            </div>
 
           <div className="drawer-body">
             {drawerStep === 1 && (
@@ -407,12 +420,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                         <span style={{cursor:'pointer'}} onClick={() => document.getElementById('file_water')?.click()}>📷 点击或拖拽上传水表照片</span>
                       )}
                     </div>
-                    {wPhoto && this.state.waterPreviewOpen && (
-                      <div style={{position:'fixed',inset:0,background:'rgba(255,255,255,0.95)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}
-                        onClick={() => this.setState({ waterPreviewOpen: false })}>
-                        <img src={wPhoto} style={{maxWidth:'90vw',maxHeight:'90vh',objectFit:'contain'}} onClick={e => e.stopPropagation()} />
-                      </div>
-                    )}
+                    
                   </div>
                 </div>
 
@@ -440,12 +448,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                         <span style={{cursor:'pointer'}} onClick={() => document.getElementById('file_electric')?.click()}>📷 点击或拖拽上传电表照片</span>
                       )}
                     </div>
-                    {ePhoto && this.state.electricPreviewOpen && (
-                      <div style={{position:'fixed',inset:0,background:'rgba(255,255,255,0.95)',zIndex:2000,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}
-                        onClick={() => this.setState({ electricPreviewOpen: false })}>
-                        <img src={ePhoto} style={{maxWidth:'90vw',maxHeight:'90vh',objectFit:'contain'}} onClick={e => e.stopPropagation()} />
-                      </div>
-                    )}
+                    
                   </div>
                 </div>
               </div>
@@ -459,7 +462,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                     <div style={{display:'flex',gap:6}}>
                       <button className="btn btn-sm btn-outline" onClick={this.copyReceipt} style={{padding:'3px 10px',fontSize:11,borderRadius:6}}>复制</button>
                       <button className="btn btn-sm btn-outline" onClick={this.saveReceipt} style={{padding:'3px 10px',fontSize:11,borderRadius:6}}>保存</button>
-                      <button className="btn btn-sm btn-primary" onClick={this.confirmPayment} style={{padding:'3px 12px',fontSize:11,borderRadius:6}}>完成发送</button>
+                      <button className="btn btn-sm btn-primary" onClick={this.goToPaymentStep} style={{padding:'3px 12px',fontSize:11,borderRadius:6}}>完成发送</button>
                     </div>
                   </div>
                   <div style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'#FFFEF9',fontSize:13}}>
@@ -500,7 +503,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                         {ePhoto && (
                           <>
                             <hr style={{width:'80%',margin:'4px 0',border:'none',borderTop:'1px dashed #DDE3EA'}} />
-                            <img src={ePhoto} className="meter-preview-img" style={{width:'100%',maxWidth:320,aspectRatio:'1',objectFit:'cover',borderRadius:6,border:'1px solid #ddd'}} />
+                            <Zoom><img src={ePhoto} className="meter-preview-img" style={{width:'100%',maxWidth:320,aspectRatio:'1',objectFit:'cover',borderRadius:6,border:'1px solid #ddd'}} /></Zoom>
                           </>
                         )}
                       </div>
@@ -514,93 +517,150 @@ export class RentPlanPage extends React.Component<{}, State> {
             {drawerStep === 3 && drawerBill && (
               <>
                 <div className="drawer-section">
-                  <div className="section-label">📋 账单确认</div>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+                    <span className="section-label" style={{marginBottom:0}}>📋 账单预览</span>
+                  </div>
                   <div style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'#FFFEF9',fontSize:13}}>
                     <div style={{textAlign:'center',fontWeight:600,fontSize:15,marginBottom:2}}>房租、水、电费（专用）收据</div>
                     <div style={{fontSize:11,color:'var(--text-third)',marginBottom:8}}>No.{(this.state.planYear + '-' + String(this.state.planMonth).padStart(2,'0')).replace('-','') + drawerContract.room_number}</div>
                     <div style={{marginBottom:6}}>房间：<b>{drawerContract.room_number}</b></div>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,margin:'8px 0'}}>
-                      <thead><tr style={{background:'#F5F5F5'}}><th style={{padding:6,border:'1px solid #ddd'}}>项目</th><th style={{padding:6,border:'1px solid #ddd'}}>本月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>上月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>实用量</th><th style={{padding:6,border:'1px solid #ddd'}}>单价</th><th style={{padding:6,border:'1px solid #ddd'}}>金额</th></tr></thead>
-                      <tbody>
-                        <tr><td style={{padding:6,border:'1px solid #ddd'}}>水费（吨）</td>
-                          <td style={{padding:6,border:'1px solid #ddd'}}>{drawerBill.water_current_reading != null ? drawerBill.water_current_reading : '—'}</td>
-                          <td style={{padding:6,border:'1px solid #ddd'}}>{drawerBill.water_last_reading != null ? drawerBill.water_last_reading : '—'}</td>
-                          <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.water_unit_price) > 0 ? (waterFee / Number(drawerContract.water_unit_price)).toFixed(1) + '吨' : '—'}</td>
-                          <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.water_unit_price).toFixed(2)}</td>
-                          <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{waterFee.toFixed(2)}</td></tr>
-                        <tr><td style={{padding:6,border:'1px solid #ddd'}}>电费（度）</td>
-                          <td style={{padding:6,border:'1px solid #ddd'}}>{drawerBill.electric_current_reading != null ? drawerBill.electric_current_reading : '—'}</td>
-                          <td style={{padding:6,border:'1px solid #ddd'}}>{drawerBill.electric_last_reading != null ? drawerBill.electric_last_reading : '—'}</td>
-                          <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price) > 0 ? (elecFee / Number(drawerContract.electric_unit_price)).toFixed(0) + '度' : '—'}</td>
-                          <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price).toFixed(2)}</td>
-                          <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{elecFee.toFixed(2)}</td></tr>
-                        <tr><td style={{padding:6,border:'1px solid #ddd'}}>房租</td><td style={{padding:6,border:'1px solid #ddd'}} colSpan={4} /><td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{rentAmount.toFixed(2)}</td></tr>
-                      </tbody>
-                    </table>
-                    <div style={{textAlign:'right',fontWeight:700,fontSize:15}}>合计：<span style={{color:'var(--red)',fontSize:18}}>¥{totalAmount}</span></div>
-                    <div style={{textAlign:'right',fontSize:12,color:'var(--text-sec)',marginTop:4,lineHeight:1.8}}>
-                      <div>交款人：{drawerContract.tenant_name}</div>
-                      <div>收款人：吴钦腾</div>
-                      <div>发单日期：{new Date().toISOString().split('T')[0]}</div>
-                    </div>
-                    {(wPhoto || ePhoto) && (
-                      <>
-                        <hr style={{margin:'10px 0',border:'none',borderTop:'1px dashed #ddd'}} />
-                        <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:10}}>
-                          {wPhoto && (
-                            <Zoom><img src={wPhoto} className="meter-preview-img" style={{maxWidth:'100%',maxHeight:260,borderRadius:6,border:'1px solid #ddd'}} /></Zoom>
-                          )}
-                          {ePhoto && (
-                            <>
-                              <hr style={{width:'80%',margin:'4px 0',border:'none',borderTop:'1px dashed #DDE3EA'}} />
-                              <Zoom><img src={ePhoto} className="meter-preview-img" style={{maxWidth:'100%',maxHeight:260,borderRadius:6,border:'1px solid #ddd'}} /></Zoom>
-                            </>
-                          )}
-                        </div>
-                      </>
-                    )}
+                    <thead><tr style={{background:'#F5F5F5'}}><th style={{padding:6,border:'1px solid #ddd'}}>项目</th><th style={{padding:6,border:'1px solid #ddd'}}>本月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>上月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>实用量</th><th style={{padding:6,border:'1px solid #ddd'}}>单价</th><th style={{padding:6,border:'1px solid #ddd'}}>金额</th></tr></thead>
+                    <tbody>
+                      <tr><td style={{padding:6,border:'1px solid #ddd'}}>水费（吨）</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{wCurr || '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{wLast || '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.water_unit_price) > 0 ? (waterFee / Number(drawerContract.water_unit_price)).toFixed(1) + '吨' : '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.water_unit_price).toFixed(2)}</td>
+                        <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{waterFee.toFixed(2)}</td></tr>
+                      <tr><td style={{padding:6,border:'1px solid #ddd'}}>电费（度）</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{eCurr || '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{eLast || '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price) > 0 ? (elecFee / Number(drawerContract.electric_unit_price)).toFixed(0) + '度' : '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price).toFixed(2)}</td>
+                        <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{elecFee.toFixed(2)}</td></tr>
+                      <tr><td style={{padding:6,border:'1px solid #ddd'}}>房租</td><td style={{padding:6,border:'1px solid #ddd'}} colSpan={4} /><td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{rentAmount.toFixed(2)}</td></tr>
+                    </tbody>
+                  </table>
+                  <div style={{textAlign:'right',fontWeight:700,fontSize:15}}>合计：<span style={{color:'var(--red)',fontSize:18}}>¥{totalAmount}</span></div>
+                  <div style={{textAlign:'right',fontSize:12,color:'var(--text-sec)',marginTop:4,lineHeight:1.8}}>
+                    <div>付款人：{drawerContract.tenant_name}</div>
+                    <div>收款人：吴钦腾</div>
+                    <div>发单日期：{new Date().toISOString().split('T')[0]}</div>
                   </div>
-                </div>
-
-                <div className="drawer-section">
-                  {drawerBill.status === 'paid' ? (
+                  {(wPhoto || ePhoto) && (
                     <>
-                      <div className="section-label" style={{color:'var(--green)'}}>✅ 已收款</div>
-                      <div style={{display:'flex',gap:12}}>
-                        <div style={{flex:1,background:'var(--bg)',borderRadius:8,padding:'10px 14px'}}>
-                          <div style={{fontSize:11,color:'var(--text-third)'}}>实收金额</div>
-                          <div style={{fontSize:16,fontWeight:600,color:'var(--text)'}}>¥{totalAmount}</div>
-                        </div>
-                        <div style={{flex:1,background:'var(--bg)',borderRadius:8,padding:'10px 14px'}}>
-                          <div style={{fontSize:11,color:'var(--text-third)'}}>收款日期</div>
-                          <div style={{fontSize:16,fontWeight:600,color:'var(--text)'}}>{new Date().toISOString().split('T')[0]}</div>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="section-label">💳 确认收款</div>
-                      <div style={{display:'flex',gap:12,alignItems:'flex-end'}}>
-                        <div className="form-group" style={{marginBottom:0,flex:1}}>
-                          <label style={{fontSize:12}}>实收金额（元）</label>
-                          <input className="soft-input" type="number" value={totalAmount} step="0.01" style={{height:36}} readOnly />
-                        </div>
-                        <div className="form-group" style={{marginBottom:0,flex:1}}>
-                          <label style={{fontSize:12}}>收款日期</label>
-                          <input className="soft-input" type="date" defaultValue={new Date().toISOString().split('T')[0]} style={{height:36}} />
-                        </div>
-                        <button className="btn btn-primary btn-sm" onClick={this.confirmPayment} style={{height:36,padding:'0 16px',whiteSpace:'nowrap'}}>确认收款</button>
+                      <hr style={{margin:'10px 0',border:'none',borderTop:'1px dashed #ddd'}} />
+                      <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:10}}>
+                        {wPhoto && (
+                          <Zoom><img src={wPhoto} className="meter-preview-img" style={{maxWidth:'100%',maxHeight:260,borderRadius:6,border:'1px solid #ddd'}} /></Zoom>
+                        )}
+                        {ePhoto && (
+                          <>
+                            <hr style={{width:'80%',margin:'4px 0',border:'none',borderTop:'1px dashed #DDE3EA'}} />
+                            <Zoom><img src={ePhoto} className="meter-preview-img" style={{maxWidth:'100%',maxHeight:260,borderRadius:6,border:'1px solid #ddd'}} /></Zoom>
+                          </>
+                        )}
                       </div>
                     </>
                   )}
                 </div>
+                </div>
+
+                <div className="drawer-section">
+                  <div className="section-label">💳 确认收款</div>
+                  <div style={{display:'flex',gap:12,alignItems:'flex-end'}}>
+                    <div className="form-group" style={{marginBottom:0,flex:1}}>
+                      <label style={{fontSize:12}}>实收金额（元）</label>
+                      <input className="soft-input" type="number" value={this.state.paidAmount} onChange={e => this.setState({ paidAmount: e.target.value })} step="0.01" style={{height:36}} />
+                    </div>
+                    <div className="form-group" style={{marginBottom:0,flex:1}}>
+                      <label style={{fontSize:12}}>收款日期</label>
+                      <input className="soft-input" type="date" value={this.state.paidDate} onChange={e => this.setState({ paidDate: e.target.value })} style={{height:36}} />
+                    </div>
+                    <button className="btn btn-primary btn-sm" onClick={this.confirmPayment} style={{height:36,padding:'0 16px',whiteSpace:'nowrap'}}>确认收款</button>
+                  </div>
+                </div>
               </>
             )}
-          </div>
 
-          <div className="drawer-footer">
-            {drawerStep === 1 && <button className="btn btn-primary" onClick={this.saveDrawer}>保存数据</button>}
+{drawerStep === 4 && drawerBill && (
+              <>
+                <div className="drawer-section">
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+                    <span className="section-label" style={{marginBottom:0}}>📋 账单</span>
+                    <div style={{display:'flex',gap:6}}>
+                      <button className="btn btn-sm btn-outline" onClick={this.copyReceipt} style={{padding:'3px 10px',fontSize:11,borderRadius:6}}>复制</button>
+                      <button className="btn btn-sm btn-outline" onClick={this.saveReceipt} style={{padding:'3px 10px',fontSize:11,borderRadius:6}}>保存</button>
+                    </div>
+                  </div>
+                  <div style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'#FFFEF9',fontSize:13}}>
+                    <div style={{textAlign:'center',fontWeight:600,fontSize:15,marginBottom:2}}>房租、水、电费（专用）收据</div>
+                    <div style={{fontSize:11,color:'var(--text-third)',marginBottom:8}}>No.{(this.state.planYear + '-' + String(this.state.planMonth).padStart(2,'0')).replace('-','') + drawerContract.room_number}</div>
+                    <div style={{marginBottom:6}}>房间：<b>{drawerContract.room_number}</b></div>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,margin:'8px 0'}}>
+                    <thead><tr style={{background:'#F5F5F5'}}><th style={{padding:6,border:'1px solid #ddd'}}>项目</th><th style={{padding:6,border:'1px solid #ddd'}}>本月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>上月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>实用量</th><th style={{padding:6,border:'1px solid #ddd'}}>单价</th><th style={{padding:6,border:'1px solid #ddd'}}>金额</th></tr></thead>
+                    <tbody>
+                      <tr><td style={{padding:6,border:'1px solid #ddd'}}>水费（吨）</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{wCurr || '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{wLast || '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.water_unit_price) > 0 ? (waterFee / Number(drawerContract.water_unit_price)).toFixed(1) + '吨' : '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.water_unit_price).toFixed(2)}</td>
+                        <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{waterFee.toFixed(2)}</td></tr>
+                      <tr><td style={{padding:6,border:'1px solid #ddd'}}>电费（度）</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{eCurr || '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{eLast || '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price) > 0 ? (elecFee / Number(drawerContract.electric_unit_price)).toFixed(0) + '度' : '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price).toFixed(2)}</td>
+                        <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{elecFee.toFixed(2)}</td></tr>
+                      <tr><td style={{padding:6,border:'1px solid #ddd'}}>房租</td><td style={{padding:6,border:'1px solid #ddd'}} colSpan={4} /><td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{rentAmount.toFixed(2)}</td></tr>
+                    </tbody>
+                  </table>
+                  <div style={{textAlign:'right',fontWeight:700,fontSize:15}}>合计：<span style={{color:'var(--red)',fontSize:18}}>¥{totalAmount}</span></div>
+                  <div style={{textAlign:'right',fontSize:12,color:'var(--text-sec)',marginTop:4,lineHeight:1.8}}>
+                    <div>付款人：{drawerContract.tenant_name}</div>
+                    <div>收款人：吴钦腾</div>
+                    <div>发单日期：{new Date().toISOString().split('T')[0]}</div>
+                  </div>
+
+                  {(wPhoto || ePhoto) && (
+                    <>
+                      <hr style={{margin:'10px 0',border:'none',borderTop:'1px dashed #ddd'}} />
+                      <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:10}}>
+                        {wPhoto && (
+                          <Zoom><img src={wPhoto} className="meter-preview-img" style={{maxWidth:'100%',maxHeight:260,borderRadius:6,border:'1px solid #ddd'}} /></Zoom>
+                        )}
+                        {ePhoto && (
+                          <>
+                            <hr style={{width:'80%',margin:'4px 0',border:'none',borderTop:'1px dashed #DDE3EA'}} />
+                            <Zoom><img src={ePhoto} className="meter-preview-img" style={{maxWidth:'100%',maxHeight:260,borderRadius:6,border:'1px solid #ddd'}} /></Zoom>
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+                </div>
+
+                <div className="drawer-section">
+                  <div className="section-label" style={{color:'var(--green)'}}>✅ 已收款</div>
+                  <div style={{display:'flex',gap:12}}>
+                    <div style={{flex:1,background:'var(--bg)',borderRadius:8,padding:'10px 14px'}}>
+                      <div style={{fontSize:11,color:'var(--text-third)'}}>实收金额</div>
+                      <div style={{fontSize:16,fontWeight:600,color:'var(--text)'}}>¥{this.state.paidAmount || totalAmount}</div>
+                    </div>
+                    <div style={{flex:1,background:'var(--bg)',borderRadius:8,padding:'10px 14px'}}>
+                      <div style={{fontSize:11,color:'var(--text-third)'}}>收款日期</div>
+                      <div style={{fontSize:16,fontWeight:600,color:'var(--text)'}}>{this.state.paidDate}</div>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+{drawerStep === 1 && <button className="btn btn-primary" onClick={this.saveDrawer}>保存数据</button>}
             {drawerStep === 2 && <div />}
+            {drawerStep === 3 && <div />}
           </div>
         </div>
       </>
