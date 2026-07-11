@@ -50,9 +50,10 @@ class MeterUsagePage extends React.Component<{ type: string; title: string; icon
   }
 
   loadData = async (bid: number) => {
-    this.setState({ loading: true })
+    const timer = setTimeout(() => this.setState({ loading: true }), 200)
     const { type } = this.props
     const rows = await rental('readings', 'monthly', { type, building_id: bid, month: this.monthKey }) || []
+    clearTimeout(timer)
     this.setState({ rows, loading: false })
   }
 
@@ -94,7 +95,24 @@ class MeterUsagePage extends React.Component<{ type: string; title: string; icon
     const file = e.target.files?.[0]
     if (!file) return
     const reader = new FileReader()
-    reader.onload = () => this.setState({ editPhoto: reader.result as string })
+    reader.onload = async () => {
+      const dataUrl = reader.result as string
+      this.setState({ editPhoto: dataUrl })
+      // AI 识图读数
+      try {
+        const meterType = this.props.type === 'water' ? '水表' : '电表'
+        const res = await rental('_ocr', 'read', { image: dataUrl, meter_type: meterType })
+        if (res?.numbers?.length) {
+          const num = res.numbers[0]
+          this.setState({ editReading: String(num) })
+          showToast('AI 识别读数：' + num)
+        } else {
+          showToast('未识别到数字，请手动输入')
+        }
+      } catch {
+        showToast('识别失败，请手动输入')
+      }
+    }
     reader.readAsDataURL(file)
   }
 
@@ -102,15 +120,7 @@ class MeterUsagePage extends React.Component<{ type: string; title: string; icon
     const { editReading, editPhoto } = this.state
     const val = parseFloat(editReading)
     if (isNaN(val)) { showToast('请输入有效读数'); return }
-    // OCR attempt
-    if (editPhoto && editPhoto !== this.state.rows.find(r => r.id === meterId)?.photo) {
-      try {
-        const res = await rental('_ocr', 'read', { image: editPhoto, meter_type: this.props.type === 'water' ? '水表' : '电表' })
-        if (res?.numbers?.length) {
-          showToast('AI识别读数：' + res.numbers[0])
-        }
-      } catch {}
-    }
+
     await rental('readings', 'save_monthly', { meter_id: meterId, month: this.monthKey, reading: val, photo: editPhoto })
     this.cancelEdit()
     if (this.state.curBid) this.loadData(this.state.curBid)
@@ -133,8 +143,8 @@ class MeterUsagePage extends React.Component<{ type: string; title: string; icon
       return (
         <div>
           <div className="month-filter">
-            <button className="month-nav" onClick={this.backToDetail}>←</button>
             <span className="month-label" style={{minWidth:180}}>2026-06 — {this.monthKey}</span>
+            <button className="month-nav month-nav-overview" style={{width:80}} onClick={this.backToDetail}>←</button>
           </div>
           <div className="tab-action-row">
             <div className="building-tabs">

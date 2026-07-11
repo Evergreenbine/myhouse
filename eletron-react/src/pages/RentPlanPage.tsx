@@ -67,11 +67,12 @@ export class RentPlanPage extends React.Component<{}, State> {
   }
 
   loadPlan = async (bid: number) => {
-    this.setState({ loading: true })
+    const timer = setTimeout(() => this.setState({ loading: true }), 200)
     const [cs, bs] = await Promise.all([
       rental('contracts', 'list', { active_only: true, building_id: bid }),
       rental('bills', 'list', { month: this.billingMonth }),
     ])
+    clearTimeout(timer)
     this.setState({ contracts: cs || [], bills: bs || [], loading: false })
   }
 
@@ -94,6 +95,8 @@ export class RentPlanPage extends React.Component<{}, State> {
 
   openDrawer = async (contract: Contract) => {
     const bill = this.state.bills.find(b => Number(b.contract_id) === Number(contract.id))
+
+    console.log(bill)
     const [allWater, allElectric, waterMetersList, electricMetersList] = await Promise.all([
       rental('readings', 'monthly', { type: 'water', month: this.billingMonth }),
       rental('readings', 'monthly', { type: 'electric', month: this.billingMonth }),
@@ -114,6 +117,7 @@ export class RentPlanPage extends React.Component<{}, State> {
 
     const step = bill?.status === 'paid' ? 3 : bill?.id ? 2 : 1
 
+
     this.setState({
       drawerOpen: true, drawerStep: step,
       drawerContract: contract, drawerBill: bill || null,
@@ -122,8 +126,8 @@ export class RentPlanPage extends React.Component<{}, State> {
       wCurr: wm?.reading != null ? String(wm.reading) : '',
       eLast: String(em?.previous_reading || 0),
       eCurr: em?.reading != null ? String(em.reading) : '',
-      wPhoto: bill?.water_photo || wm?.photo || '',
-      ePhoto: bill?.electric_photo || em?.photo || '',
+      wPhoto: wm?.photo || bill?.water_photo || '',
+      ePhoto: em?.photo || bill?.electric_photo || '',
     })
   }
 
@@ -307,10 +311,10 @@ export class RentPlanPage extends React.Component<{}, State> {
               <div className="plan-cards">
                 {contracts.map(c => {
                   const bill = bills.find(b => Number(b.contract_id) === Number(c.id))
-                  const status = bill ? bill.status : 'unpaid'
-                  const dotClass = status === 'paid' ? 'paid' : status === 'partial' ? 'partial' : 'unpaid'
-                  const statusLabel = status === 'paid' ? '已收' : status === 'partial' ? '部分' : '未收'
-                  const statusCls = status === 'paid' ? 'tag-green' : status === 'partial' ? 'tag-orange' : 'tag-red'
+                  const status = bill ? (bill.status || 'unpaid') : 'empty'
+                  const dotClass = status === 'paid' ? 'paid' : status === 'empty' ? 'empty' : 'unpaid'
+                  const statusLabel = status === 'paid' ? '已收' : status === 'empty' ? '未录入' : '未收'
+                  const statusCls = status === 'paid' ? 'tag-green' : status === 'empty' ? 'tag-gray' : 'tag-red'
                   const waterFee = bill ? Number(bill.water_fee || 0) : 0
                   const electricFee = bill ? Number(bill.electric_fee || 0) : 0
                   const totalAmount = bill ? Number(bill.total_amount || 0) : Number(c.monthly_rent || 0)
