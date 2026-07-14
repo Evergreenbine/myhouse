@@ -16,9 +16,21 @@ function esc(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
+function escAttr(text: string): string {
+  return esc(text).replace(/"/g, "&quot;")
+}
+
+function safeHref(url: string): string {
+  var u = (url || "").trim()
+  if (/^(https?:|mailto:|tel:)/i.test(u) || u.startsWith("/") || u.startsWith("#")) {
+    return escAttr(u)
+  }
+  return "#"
+}
+
 function renderMarkdown(text: string): string {
   if (!text) return ""
-  var t = text
+  var t = esc(text)
   t = t.replace(/```(\w*)\n([\s\S]*?)```/g, "<pre><code>$2</code></pre>")
   t = t.replace(/`([^`]+)`/g, "<code>$1</code>")
   t = t.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
@@ -33,11 +45,20 @@ function renderMarkdown(text: string): string {
     })
     return h + "</table>"
   })
-  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<a href=\"$2\" target=\"_blank\">$1</a>")
+  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, label, url) {
+    return "<a href=\"" + safeHref(url) + "\" target=\"_blank\" rel=\"noreferrer\">" + label + "</a>"
+  })
   t = t.replace(/\n\n/g, "</p><p>")
   t = t.replace(/\n/g, "<br>")
   return "<p>" + t + "</p>"
 }
+
+const QUICK_PROMPTS = [
+  { label: "本月待收", prompt: "本月有哪些房间待收款？请按楼栋、房间、租客、待收金额列出来。" },
+  { label: "账单汇总", prompt: "帮我汇总本月账单：应收、已收、待收，以及各状态户数。" },
+  { label: "录入进度", prompt: "本月哪些房间还未录入或正在录入中？" },
+  { label: "收款异常", prompt: "本月有没有部分收款、待发送、待收款的账单？请分别列出来。" },
+]
 
 export class AIChat extends React.Component<{}, AIChatState> {
   state: AIChatState = {
@@ -97,6 +118,12 @@ export class AIChat extends React.Component<{}, AIChatState> {
     this.loadHistory()
   }
 
+  sendQuick = (prompt: string) => {
+    if (this.state.loading) return
+    if (this.inputRef.current) this.inputRef.current.value = prompt
+    this.send()
+  }
+
   send = async () => {
     var input = this.state.loading ? "" : (this.inputRef.current?.value || "").trim()
     if (!input) return
@@ -107,7 +134,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
     try {
       var res = await api("/api/rental", {
         method: "POST",
-        body: JSON.stringify({ table: "_ai", action: "chat", data: { prompt: input, history: msgs.slice(-10) } })
+        body: JSON.stringify({ table: "_ai", action: "chat", data: { prompt: input, history: this.state.messages.slice(-10) } })
       })
       var reply = (res && res.reply) ? res.reply : "抱歉，AI 服务暂时不可用"
       msgs = [...msgs, { role: "assistant" as const, content: reply }]
@@ -175,7 +202,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
       var chatPrompt = input + ocrResult
       var res = await api("/api/rental", {
         method: "POST",
-        body: JSON.stringify({ table: "_ai", action: "chat", data: { prompt: chatPrompt, history: msgs.slice(-10) } })
+        body: JSON.stringify({ table: "_ai", action: "chat", data: { prompt: chatPrompt, history: this.state.messages.slice(-10) } })
       })
       var reply = (res && res.reply) ? res.reply : "抱歉，AI 服务暂时不可用"
       msgs = [...msgs, { role: "assistant" as const, content: reply }]
@@ -238,7 +265,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
                     className={"ai-history-item" + (isActive ? " active" : "")}
                     onClick={() => this.restoreChat(c.id)}
                   >
-                    <span className="ai-history-title">{esc(title.substring(0, 30))}</span>
+                    <span className="ai-history-title">{title.substring(0, 30)}</span>
                     <button className="ai-history-del"
                       onClick={(e: React.MouseEvent) => { e.stopPropagation(); this.deleteChat(c.id) }}
                       title="删除"
@@ -263,11 +290,18 @@ export class AIChat extends React.Component<{}, AIChatState> {
             </div>
             <div className="ai-chat-body-v2" ref={this.bodyRef}>
               {s.messages.length === 0 && (
-                <div className="ai-welcome">
+                  <div className="ai-welcome">
                   <div className="ai-welcome-icon"><img src="/robot-avatar.jpg" className="ai-bot-avatar" /></div>
                   <h2>你好，我是租房小管家</h2>
                   <p>可以帮你查询租客信息、分析缴费情况、解答租房相关问题</p>
                   <p className="ai-welcome-hint">在下方输入你的问题开始对话</p>
+                  <div className="ai-quick-prompts">
+                    {QUICK_PROMPTS.map(q => (
+                      <button key={q.label} onClick={() => this.sendQuick(q.prompt)} disabled={s.loading}>
+                        {q.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
               {s.messages.map((m, i) => {
@@ -275,7 +309,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
                   return (
                     <div key={i} className="ai-msg-v2 user">
                       <div className="ai-msg-avatar">👤</div>
-                      <div className="ai-msg-bubble user-bubble">{esc(m.content)}</div>
+                      <div className="ai-msg-bubble user-bubble">{m.content}</div>
                     </div>
                   )
                 }

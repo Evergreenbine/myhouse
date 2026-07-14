@@ -78,7 +78,7 @@ SYSTEM_DOCS = r"""
 - 接口: `POST /api/rental`
 - 参数: `{"table":"bills", "action":"list"}` 或 `{"data":{"month":"2026-07"}}`
 - 返回: 账单列表 `[{id, contract_id, billing_month, rent_amount, water_fee, electric_fee, other_fee, total_amount, status}]`
-- status: `unpaid`(未付) / `paid`(已付)
+- status: `draft`(录入中) / `pending`(待发送) / `pending_payment`(待收款) / `unpaid`(未收) / `partial`(部分收款) / `paid`(已收)
 
 ### 添加/更新账单
 - 接口: `POST /api/rental`

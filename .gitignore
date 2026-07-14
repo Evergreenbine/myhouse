@@ -13,6 +13,8 @@ py/build/
 py/data/
 py/chroma_data/
 py/avatars/
+py/_server*.log
+.codex-backups/
 
 # User config (contains credentials & personal data)
 py/user_config.json

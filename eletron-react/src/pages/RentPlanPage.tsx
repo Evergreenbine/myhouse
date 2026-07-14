@@ -37,6 +37,8 @@ interface State {
 }
 
 export class RentPlanPage extends React.Component<{}, State> {
+  private planLoadSeq = 0
+
   state: State = {
     buildings: [],
     contracts: [],
@@ -60,28 +62,34 @@ export class RentPlanPage extends React.Component<{}, State> {
 
   componentDidMount() { this.loadBuildings() }
 
-  get billingMonth() { return this.state.planYear + '-' + String(this.state.planMonth).padStart(2, '0') }
+  formatBillingMonth = (year: number, month: number) => year + '-' + String(month).padStart(2, '0')
+
+  get billingMonth() { return this.formatBillingMonth(this.state.planYear, this.state.planMonth) }
 
   loadBuildings = async () => {
     const data = await rental('buildings', 'list') || []
     const bid = data.length > 0 ? data[0].id : null
-    this.setState({ buildings: data, curBid: bid, firstLoad: false, loading: false })
-    if (bid) this.loadPlan(bid)
+    this.setState({ buildings: data, curBid: bid, firstLoad: false, loading: false }, () => {
+      if (bid) this.loadPlan(bid)
+    })
   }
 
-  loadPlan = async (bid: number) => {
-    const timer = setTimeout(() => this.setState({ loading: true }), 200)
+  loadPlan = async (bid: number, month = this.billingMonth) => {
+    const seq = ++this.planLoadSeq
+    const timer = setTimeout(() => {
+      if (seq === this.planLoadSeq) this.setState({ loading: true })
+    }, 200)
     const [cs, bs] = await Promise.all([
       rental('contracts', 'list', { active_only: true, building_id: bid }),
-      rental('bills', 'list', { month: this.billingMonth }),
+      rental('bills', 'list', { month }),
     ])
     clearTimeout(timer)
+    if (seq !== this.planLoadSeq || this.state.curBid !== bid || this.billingMonth !== month) return
     this.setState({ contracts: cs || [], bills: bs || [], loading: false })
   }
 
   switchBuilding = (id: number) => {
-    this.setState({ curBid: id })
-    this.loadPlan(id)
+    this.setState({ curBid: id }, () => this.loadPlan(id))
   }
 
   changeMonth = (delta: number) => {
@@ -92,8 +100,48 @@ export class RentPlanPage extends React.Component<{}, State> {
     // 不能超过当前月份
     var now = new Date()
     if (planYear > now.getFullYear() || (planYear === now.getFullYear() && planMonth > now.getMonth() + 1)) return
-    this.setState({ planYear, planMonth })
-    if (curBid) this.loadPlan(curBid)
+    const month = this.formatBillingMonth(planYear, planMonth)
+    this.setState({ planYear, planMonth }, () => {
+      if (curBid) this.loadPlan(curBid, month)
+    })
+  }
+
+  getBillStep = (bill?: Bill | null) => {
+    if (!bill?.id) return 1
+    if (bill.status === 'draft') return 1
+    if (bill.status === 'paid') return 3
+    if (bill.status === 'pending_payment') return 3
+    return 2
+  }
+
+  getStepDotClass = (step: number) => {
+    if (step === 1) return 'step-entry'
+    if (step === 2) return 'step-preview'
+    return 'step-payment'
+  }
+
+  getStepLabel = (step: number) => {
+    if (step === 1) return '录入账单'
+    if (step === 2) return '预览账单'
+    return '收款'
+  }
+
+  setDrawerStep = async (step: number) => {
+    const nextStep = Math.max(1, Math.min(3, step))
+    if (nextStep > 1 && !this.state.drawerBill?.id) {
+      showToast('请先保存账单')
+      return
+    }
+    if (nextStep === 1 && this.state.drawerBill?.id && this.state.drawerBill.status !== 'paid') {
+      await rental('bills', 'update_status', { id: this.state.drawerBill.id, status: 'draft' })
+      this.setState((s: State) => ({
+        drawerStep: 1,
+        drawerBill: s.drawerBill ? { ...s.drawerBill, status: 'draft' } : s.drawerBill,
+      }))
+      if (this.state.curBid) this.loadPlan(this.state.curBid)
+      return
+    }
+    this.setState({ drawerStep: nextStep })
   }
 
   openDrawer = async (contract: Contract) => {
@@ -118,7 +166,7 @@ export class RentPlanPage extends React.Component<{}, State> {
       if (m) em = { id: m.id, meter_no: m.meter_no, reading: null, previous_reading: m.init_reading || 0, photo: '', usage: null, status: m.status || '' }
     }
 
-    const step = bill?.status === 'paid' ? 4 : bill?.status === 'pending_payment' ? 3 : bill?.id ? 2 : 1
+    const step = this.getBillStep(bill)
 
 
     this.setState({
@@ -198,6 +246,7 @@ export class RentPlanPage extends React.Component<{}, State> {
 
     if (res && !res.error) {
       const bid = drawerBill?.id || res.id
+      await rental('bills', 'update_status', { id: bid, status: 'pending' })
       showToast('保存成功')
       this.setState({ drawerStep: 2, drawerBill: { ...data, id: bid, total_amount: rentAmount + waterFee + elecFee, status: 'pending' } as any })
       if (this.state.curBid) this.loadPlan(this.state.curBid)
@@ -209,14 +258,19 @@ export class RentPlanPage extends React.Component<{}, State> {
     if (this.state.drawerBill?.id) {
       await rental('bills', 'update_status', { id: this.state.drawerBill.id, status: 'pending_payment' })
     }
-    this.setState({ drawerStep: 3 })
+    this.setState((s: State) => ({
+      drawerStep: 3,
+      drawerBill: s.drawerBill ? { ...s.drawerBill, status: 'pending_payment' } : s.drawerBill,
+    }))
+    if (this.state.curBid) this.loadPlan(this.state.curBid)
   }
-confirmPayment = async () => {
+
+  confirmPayment = async () => {
     if (!this.state.drawerBill?.id) return
     await rental('bills', 'update_status', { id: this.state.drawerBill.id, status: 'paid' })
     showToast('收款确认')
     this.setState((s: any) => ({
-      drawerStep: 4,
+      drawerStep: 3,
       drawerBill: { ...s.drawerBill, status: 'paid' }
     }))
     if (this.state.curBid) this.loadPlan(this.state.curBid)
@@ -322,15 +376,17 @@ confirmPayment = async () => {
                 {contracts.map(c => {
                   const bill = bills.find(b => Number(b.contract_id) === Number(c.id))
                   const status = bill ? (bill.status || 'unpaid') : 'empty'
-                  const dotClass = status === 'paid' ? 'paid' : status === 'empty' ? 'empty' : 'unpaid'
-                  const statusLabel = status === 'paid' ? '已收' : status === 'empty' ? '未录入' : '未收'
-                  const statusCls = status === 'paid' ? 'tag-green' : status === 'empty' ? 'tag-gray' : 'tag-red'
+                  const isDrawerContract = this.state.drawerOpen && this.state.drawerContract && Number(this.state.drawerContract.id) === Number(c.id)
+                  const dotClass = isDrawerContract ? this.getStepDotClass(this.state.drawerStep) : status === 'paid' ? 'paid' : status === 'pending_payment' ? 'step-payment' : status === 'draft' ? 'step-entry' : status === 'empty' ? 'empty' : 'unpaid'
+                  const statusLabel = status === 'paid' ? '已收' : status === 'pending_payment' ? '待收款' : status === 'draft' ? '录入中' : status === 'pending' ? '待发送' : status === 'empty' ? '未录入' : '未收'
+                  const dotLabel = isDrawerContract ? this.getStepLabel(this.state.drawerStep) : statusLabel
+                  const statusCls = status === 'paid' ? 'tag-green' : status === 'pending_payment' ? 'tag-green' : status === 'draft' ? 'tag-blue' : status === 'empty' ? 'tag-red' : 'tag-orange'
                   const waterFee = bill ? Number(bill.water_fee || 0) : 0
                   const electricFee = bill ? Number(bill.electric_fee || 0) : 0
                   const totalAmount = bill ? Number(bill.total_amount || 0) : Number(c.monthly_rent || 0)
                   return (
                     <div key={c.id} className="plan-card" onClick={() => this.openDrawer(c)}>
-                      <div className={'card-dot ' + dotClass} title={statusLabel} onClick={e => e.stopPropagation()} />
+                      <div className={'card-dot ' + dotClass} title={dotLabel} onClick={e => e.stopPropagation()} />
                       <div className="card-header">
                         <span className="card-tenant">{c.tenant_name || ''}</span>
                         <span className="card-room">{c.room_number || ''}</span>
@@ -375,17 +431,14 @@ confirmPayment = async () => {
           </div>
 
           <div className="drawer-steps" style={{display:'flex',padding:14,justifyContent:'center',gap:0,alignItems:'center',borderBottom:'1px solid var(--border-light)',background:'var(--bg)'}}>
-              <button className={'step step-1' + (drawerStep >= 1 ? ' active' : '') + (drawerStep > 1 ? ' done' : '')}
-                onClick={() => { if (drawerStep < 4) this.setState({ drawerStep: 1 }) }}><span className="step-num">1</span>录入</button>
+              <button className={'step step-1' + (drawerStep === 1 ? ' active' : '') + (drawerStep > 1 ? ' done' : '')}
+                onClick={() => this.setDrawerStep(1)}><span className="step-num">1</span>录入</button>
               <div className="step-line" />
-              <button className={'step step-2' + (drawerStep >= 2 ? ' active' : '') + (drawerStep > 2 ? ' done' : '')}
-                onClick={() => { if (drawerStep >= 2 && drawerStep < 4) this.setState({ drawerStep: 2 }) }}><span className="step-num">2</span>预览</button>
+              <button className={'step step-2' + (drawerStep === 2 ? ' active' : '') + (drawerStep > 2 ? ' done' : '')}
+                onClick={() => this.setDrawerStep(2)}><span className="step-num">2</span>预览</button>
               <div className="step-line" />
-              <button className={'step step-3' + (drawerStep >= 3 ? ' active' : '') + (drawerStep > 3 ? ' done' : '')}
-                onClick={() => { if (drawerStep >= 3 && drawerStep < 4) this.setState({ drawerStep: 3 }) }}><span className="step-num">3</span>收款</button>
-              <div className="step-line" />
-              <button className={'step step-4' + (drawerStep === 4 ? ' active' : '')}
-                onClick={() => {}}><span className="step-num">4</span>确认</button>
+              <button className={'step step-3' + (drawerStep === 3 ? ' active' : '')}
+                onClick={() => this.setDrawerStep(3)}><span className="step-num">3</span>收款</button>
             </div>
 
           <div className="drawer-body">
@@ -460,6 +513,7 @@ confirmPayment = async () => {
                   <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
                     <span className="section-label" style={{marginBottom:0}}>📋 账单预览</span>
                     <div style={{display:'flex',gap:6}}>
+                      <button className="btn btn-sm btn-outline" onClick={() => this.setDrawerStep(1)} style={{padding:'3px 10px',fontSize:11,borderRadius:6}}>返回录入</button>
                       <button className="btn btn-sm btn-outline" onClick={this.copyReceipt} style={{padding:'3px 10px',fontSize:11,borderRadius:6}}>复制</button>
                       <button className="btn btn-sm btn-outline" onClick={this.saveReceipt} style={{padding:'3px 10px',fontSize:11,borderRadius:6}}>保存</button>
                       <button className="btn btn-sm btn-primary" onClick={this.goToPaymentStep} style={{padding:'3px 12px',fontSize:11,borderRadius:6}}>完成发送</button>
@@ -514,7 +568,7 @@ confirmPayment = async () => {
               </>
             )}
 
-            {drawerStep === 3 && drawerBill && (
+            {drawerStep === 3 && drawerBill && drawerBill.status !== 'paid' && (
               <>
                 <div className="drawer-section">
                   <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
@@ -584,7 +638,7 @@ confirmPayment = async () => {
               </>
             )}
 
-{drawerStep === 4 && drawerBill && (
+{drawerStep === 3 && drawerBill && drawerBill.status === 'paid' && (
               <>
                 <div className="drawer-section">
                   <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>

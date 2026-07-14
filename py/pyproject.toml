@@ -1,0 +1,16 @@
+[project]
+name = "myhouse-api"
+version = "0.2.0"
+description = "FastAPI backend for the MyHouse rental management app"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "pydantic>=2.7.0",
+    "SQLAlchemy>=2.0.0",
+    "alembic>=1.13.0",
+    "requests>=2.31.0",
+]
+
+[tool.uv]
+package = false

@@ -1,4 +1,4 @@
-const API = 'http://localhost:18520'
+const API = 'http://127.0.0.1:18520'
 
 export async function api(path: string, opts?: RequestInit) {
   try {
