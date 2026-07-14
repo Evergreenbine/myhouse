@@ -18,8 +18,10 @@
     "html2canvas": "^1.4.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "react-markdown": "^10.1.0",
     "react-medium-image-zoom": "^5.4.8",
     "react-router-dom": "^7.18.1",
+    "remark-gfm": "^4.0.1",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

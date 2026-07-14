@@ -2,6 +2,7 @@ import React from 'react'
 import { rental } from '../api'
 import { showToast } from '../components/ui'
 import Zoom from 'react-medium-image-zoom'
+import html2canvas from 'html2canvas'
 
 interface Contract { id: number; tenant_name: string; tenant_id: number; room_number: string; room_id: number; monthly_rent: number; water_unit_price: number; electric_unit_price: number; water_meter_id: number | null; electric_meter_id: number | null; building_id: number; building_name: string }
 interface Bill { id: number; contract_id: number; total_amount: number; status: string; water_fee: number; electric_fee: number; other_fee: number; water_current_reading: number; water_last_reading: number; electric_current_reading: number; electric_last_reading: number; water_photo: string; electric_photo: string }
@@ -191,6 +192,36 @@ export class RentPlanPage extends React.Component<{}, State> {
     return Math.max(0, (parseFloat(eCurr) || 0) - parseFloat(eLast) || 0) * Number(drawerContract?.electric_unit_price || 0)
   }
 
+  hasReading = (value: string) => value.trim() !== ''
+
+  parseOptionalReading = (value: string) => {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    const num = Number(trimmed)
+    return Number.isFinite(num) ? num : null
+  }
+
+  formatReceiptReading = (value: string) => value.trim() === '' ? '' : value
+
+  formatReceiptUsage = (current: string, last: string, fractionDigits: number) => {
+    if (!this.hasReading(current)) return ''
+    const usage = Math.max(0, (parseFloat(current) || 0) - (parseFloat(last) || 0))
+    return usage.toFixed(fractionDigits)
+  }
+
+  waitForReceiptImages = async (el: HTMLElement) => {
+    const images = Array.from(el.querySelectorAll('img'))
+    await Promise.all(images.map(img => {
+      if (img.complete && img.naturalWidth > 0) return Promise.resolve()
+      return new Promise<void>(resolve => {
+        const done = () => resolve()
+        img.addEventListener('load', done, { once: true })
+        img.addEventListener('error', done, { once: true })
+        window.setTimeout(done, 3000)
+      })
+    }))
+  }
+
   handlePhoto = (type: 'water' | 'electric', e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -225,18 +256,21 @@ export class RentPlanPage extends React.Component<{}, State> {
     const elecFee = this.calcElectricFee()
     const rentAmount = Number(contract.monthly_rent || 0)
 
-    if (waterMeter) {
-      await rental('readings', 'save_monthly', { meter_id: waterMeter.id, month: this.billingMonth, reading: parseFloat(wCurr) || 0, photo: wPhoto })
+    const waterCurrReading = this.parseOptionalReading(wCurr)
+    const electricCurrReading = this.parseOptionalReading(eCurr)
+
+    if (waterMeter && waterCurrReading !== null) {
+      await rental('readings', 'save_monthly', { meter_id: waterMeter.id, month: this.billingMonth, reading: waterCurrReading, photo: wPhoto })
     }
-    if (electricMeter) {
-      await rental('readings', 'save_monthly', { meter_id: electricMeter.id, month: this.billingMonth, reading: parseFloat(eCurr) || 0, photo: ePhoto })
+    if (electricMeter && electricCurrReading !== null) {
+      await rental('readings', 'save_monthly', { meter_id: electricMeter.id, month: this.billingMonth, reading: electricCurrReading, photo: ePhoto })
     }
 
     const data = {
       contract_id: contract.id, billing_month: this.billingMonth,
       rent_amount: rentAmount, water_fee: waterFee, electric_fee: elecFee, other_fee: 0, remark: '[]',
-      water_last: parseFloat(wLast) || 0, water_curr: parseFloat(wCurr) || 0,
-      electric_last: parseFloat(eLast) || 0, electric_curr: parseFloat(eCurr) || 0,
+      water_last: parseFloat(wLast) || 0, water_curr: waterCurrReading,
+      electric_last: parseFloat(eLast) || 0, electric_curr: electricCurrReading,
       water_photo: wPhoto, electric_photo: ePhoto,
     }
 
@@ -277,23 +311,42 @@ export class RentPlanPage extends React.Component<{}, State> {
   }
 
   receiptToCanvas = async (): Promise<HTMLCanvasElement | null> => {
-    const el = document.querySelector('.drawer-body') as HTMLElement | null
+    const el = document.querySelector('.receipt-capture') as HTMLElement | null
     if (!el) return null
-    // 动态加载 html2canvas
-    return new Promise((resolve) => {
-      var script = document.createElement('script')
-      script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'
-      script.onload = async () => {
-        var html2canvas = (window as any).html2canvas
-        if (!html2canvas) { resolve(null); return }
-        try {
-          var canvas = await html2canvas(el, { backgroundColor: '#FFFEF9', scale: 2 })
-          resolve(canvas)
-        } catch { resolve(null) }
+    // 只截取收据正文，避免把复制/保存按钮和抽屉操作区带进图片。
+    try {
+      await this.waitForReceiptImages(el)
+      const rect = el.getBoundingClientRect()
+      const wrapper = document.createElement('div')
+      wrapper.style.position = 'fixed'
+      wrapper.style.left = '-10000px'
+      wrapper.style.top = '0'
+      wrapper.style.zIndex = '-1'
+      wrapper.style.pointerEvents = 'none'
+      wrapper.style.overflow = 'visible'
+      wrapper.style.background = '#FFFEF9'
+      wrapper.style.width = Math.ceil(rect.width) + 'px'
+      wrapper.style.minWidth = Math.ceil(rect.width) + 'px'
+
+      const clone = el.cloneNode(true) as HTMLElement
+      clone.style.maxHeight = 'none'
+      clone.style.overflow = 'visible'
+      clone.style.width = '100%'
+
+      wrapper.appendChild(clone)
+      document.body.appendChild(wrapper)
+      try {
+        return await html2canvas(clone, {
+          backgroundColor: '#FFFEF9',
+          scale: 2,
+          useCORS: true,
+          width: clone.scrollWidth,
+          height: clone.scrollHeight,
+        })
+      } finally {
+        document.body.removeChild(wrapper)
       }
-      script.onerror = () => resolve(null)
-      document.head.appendChild(script)
-    })
+    } catch { return null }
   }
 
   copyReceipt = async () => {
@@ -519,23 +572,23 @@ export class RentPlanPage extends React.Component<{}, State> {
                       <button className="btn btn-sm btn-primary" onClick={this.goToPaymentStep} style={{padding:'3px 12px',fontSize:11,borderRadius:6}}>完成发送</button>
                     </div>
                   </div>
-                  <div style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'#FFFEF9',fontSize:13}}>
+                  <div className="receipt-capture" style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'#FFFEF9',fontSize:13}}>
                     <div style={{textAlign:'center',fontWeight:600,fontSize:15,marginBottom:2}}>房租、水、电费（专用）收据</div>
                     <div style={{fontSize:11,color:'var(--text-third)',marginBottom:8}}>No.{(this.state.planYear + '-' + String(this.state.planMonth).padStart(2,'0')).replace('-','') + drawerContract.room_number}</div>
                     <div style={{marginBottom:6}}>房间：<b>{drawerContract.room_number}</b></div>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,margin:'8px 0'}}>
-                    <thead><tr style={{background:'#F5F5F5'}}><th style={{padding:6,border:'1px solid #ddd'}}>项目</th><th style={{padding:6,border:'1px solid #ddd'}}>本月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>上月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>实用量</th><th style={{padding:6,border:'1px solid #ddd'}}>单价</th><th style={{padding:6,border:'1px solid #ddd'}}>金额</th></tr></thead>
+                    <thead><tr style={{background:'#FFFEF9'}}><th style={{padding:6,border:'1px solid #ddd'}}>项目</th><th style={{padding:6,border:'1px solid #ddd'}}>本月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>上月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>实用量</th><th style={{padding:6,border:'1px solid #ddd'}}>单价</th><th style={{padding:6,border:'1px solid #ddd'}}>金额</th></tr></thead>
                     <tbody>
                       <tr><td style={{padding:6,border:'1px solid #ddd'}}>水费（吨）</td>
-                        <td style={{padding:6,border:'1px solid #ddd'}}>{wCurr || '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{this.formatReceiptReading(wCurr)}</td>
                         <td style={{padding:6,border:'1px solid #ddd'}}>{wLast || '—'}</td>
-                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.water_unit_price) > 0 ? (waterFee / Number(drawerContract.water_unit_price)).toFixed(1) + '吨' : '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.water_unit_price) > 0 ? this.formatReceiptUsage(wCurr, wLast, 1) : ''}</td>
                         <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.water_unit_price).toFixed(2)}</td>
                         <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{waterFee.toFixed(2)}</td></tr>
                       <tr><td style={{padding:6,border:'1px solid #ddd'}}>电费（度）</td>
-                        <td style={{padding:6,border:'1px solid #ddd'}}>{eCurr || '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{this.formatReceiptReading(eCurr)}</td>
                         <td style={{padding:6,border:'1px solid #ddd'}}>{eLast || '—'}</td>
-                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price) > 0 ? (elecFee / Number(drawerContract.electric_unit_price)).toFixed(0) + '度' : '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price) > 0 ? this.formatReceiptUsage(eCurr, eLast, 0) : ''}</td>
                         <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price).toFixed(2)}</td>
                         <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{elecFee.toFixed(2)}</td></tr>
                       <tr><td style={{padding:6,border:'1px solid #ddd'}}>房租</td><td style={{padding:6,border:'1px solid #ddd'}} colSpan={4} /><td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{rentAmount.toFixed(2)}</td></tr>
@@ -574,23 +627,23 @@ export class RentPlanPage extends React.Component<{}, State> {
                   <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
                     <span className="section-label" style={{marginBottom:0}}>📋 账单预览</span>
                   </div>
-                  <div style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'#FFFEF9',fontSize:13}}>
+                  <div className="receipt-capture" style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'#FFFEF9',fontSize:13}}>
                     <div style={{textAlign:'center',fontWeight:600,fontSize:15,marginBottom:2}}>房租、水、电费（专用）收据</div>
                     <div style={{fontSize:11,color:'var(--text-third)',marginBottom:8}}>No.{(this.state.planYear + '-' + String(this.state.planMonth).padStart(2,'0')).replace('-','') + drawerContract.room_number}</div>
                     <div style={{marginBottom:6}}>房间：<b>{drawerContract.room_number}</b></div>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,margin:'8px 0'}}>
-                    <thead><tr style={{background:'#F5F5F5'}}><th style={{padding:6,border:'1px solid #ddd'}}>项目</th><th style={{padding:6,border:'1px solid #ddd'}}>本月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>上月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>实用量</th><th style={{padding:6,border:'1px solid #ddd'}}>单价</th><th style={{padding:6,border:'1px solid #ddd'}}>金额</th></tr></thead>
+                    <thead><tr style={{background:'#FFFEF9'}}><th style={{padding:6,border:'1px solid #ddd'}}>项目</th><th style={{padding:6,border:'1px solid #ddd'}}>本月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>上月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>实用量</th><th style={{padding:6,border:'1px solid #ddd'}}>单价</th><th style={{padding:6,border:'1px solid #ddd'}}>金额</th></tr></thead>
                     <tbody>
                       <tr><td style={{padding:6,border:'1px solid #ddd'}}>水费（吨）</td>
-                        <td style={{padding:6,border:'1px solid #ddd'}}>{wCurr || '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{this.formatReceiptReading(wCurr)}</td>
                         <td style={{padding:6,border:'1px solid #ddd'}}>{wLast || '—'}</td>
-                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.water_unit_price) > 0 ? (waterFee / Number(drawerContract.water_unit_price)).toFixed(1) + '吨' : '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.water_unit_price) > 0 ? this.formatReceiptUsage(wCurr, wLast, 1) : ''}</td>
                         <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.water_unit_price).toFixed(2)}</td>
                         <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{waterFee.toFixed(2)}</td></tr>
                       <tr><td style={{padding:6,border:'1px solid #ddd'}}>电费（度）</td>
-                        <td style={{padding:6,border:'1px solid #ddd'}}>{eCurr || '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{this.formatReceiptReading(eCurr)}</td>
                         <td style={{padding:6,border:'1px solid #ddd'}}>{eLast || '—'}</td>
-                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price) > 0 ? (elecFee / Number(drawerContract.electric_unit_price)).toFixed(0) + '度' : '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price) > 0 ? this.formatReceiptUsage(eCurr, eLast, 0) : ''}</td>
                         <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price).toFixed(2)}</td>
                         <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{elecFee.toFixed(2)}</td></tr>
                       <tr><td style={{padding:6,border:'1px solid #ddd'}}>房租</td><td style={{padding:6,border:'1px solid #ddd'}} colSpan={4} /><td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{rentAmount.toFixed(2)}</td></tr>
@@ -648,23 +701,23 @@ export class RentPlanPage extends React.Component<{}, State> {
                       <button className="btn btn-sm btn-outline" onClick={this.saveReceipt} style={{padding:'3px 10px',fontSize:11,borderRadius:6}}>保存</button>
                     </div>
                   </div>
-                  <div style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'#FFFEF9',fontSize:13}}>
+                  <div className="receipt-capture" style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'#FFFEF9',fontSize:13}}>
                     <div style={{textAlign:'center',fontWeight:600,fontSize:15,marginBottom:2}}>房租、水、电费（专用）收据</div>
                     <div style={{fontSize:11,color:'var(--text-third)',marginBottom:8}}>No.{(this.state.planYear + '-' + String(this.state.planMonth).padStart(2,'0')).replace('-','') + drawerContract.room_number}</div>
                     <div style={{marginBottom:6}}>房间：<b>{drawerContract.room_number}</b></div>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,margin:'8px 0'}}>
-                    <thead><tr style={{background:'#F5F5F5'}}><th style={{padding:6,border:'1px solid #ddd'}}>项目</th><th style={{padding:6,border:'1px solid #ddd'}}>本月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>上月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>实用量</th><th style={{padding:6,border:'1px solid #ddd'}}>单价</th><th style={{padding:6,border:'1px solid #ddd'}}>金额</th></tr></thead>
+                    <thead><tr style={{background:'#FFFEF9'}}><th style={{padding:6,border:'1px solid #ddd'}}>项目</th><th style={{padding:6,border:'1px solid #ddd'}}>本月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>上月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>实用量</th><th style={{padding:6,border:'1px solid #ddd'}}>单价</th><th style={{padding:6,border:'1px solid #ddd'}}>金额</th></tr></thead>
                     <tbody>
                       <tr><td style={{padding:6,border:'1px solid #ddd'}}>水费（吨）</td>
-                        <td style={{padding:6,border:'1px solid #ddd'}}>{wCurr || '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{this.formatReceiptReading(wCurr)}</td>
                         <td style={{padding:6,border:'1px solid #ddd'}}>{wLast || '—'}</td>
-                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.water_unit_price) > 0 ? (waterFee / Number(drawerContract.water_unit_price)).toFixed(1) + '吨' : '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.water_unit_price) > 0 ? this.formatReceiptUsage(wCurr, wLast, 1) : ''}</td>
                         <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.water_unit_price).toFixed(2)}</td>
                         <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{waterFee.toFixed(2)}</td></tr>
                       <tr><td style={{padding:6,border:'1px solid #ddd'}}>电费（度）</td>
-                        <td style={{padding:6,border:'1px solid #ddd'}}>{eCurr || '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{this.formatReceiptReading(eCurr)}</td>
                         <td style={{padding:6,border:'1px solid #ddd'}}>{eLast || '—'}</td>
-                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price) > 0 ? (elecFee / Number(drawerContract.electric_unit_price)).toFixed(0) + '度' : '—'}</td>
+                        <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price) > 0 ? this.formatReceiptUsage(eCurr, eLast, 0) : ''}</td>
                         <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price).toFixed(2)}</td>
                         <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{elecFee.toFixed(2)}</td></tr>
                       <tr><td style={{padding:6,border:'1px solid #ddd'}}>房租</td><td style={{padding:6,border:'1px solid #ddd'}} colSpan={4} /><td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{rentAmount.toFixed(2)}</td></tr>

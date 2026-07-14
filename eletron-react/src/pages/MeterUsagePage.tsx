@@ -269,8 +269,9 @@ class MeterUsagePage extends React.Component<{ type: string; title: string; icon
                           <div style={{height:98,marginTop:12,borderTop:'1px dashed var(--border-light)',paddingTop:10,display:'flex',alignItems:'center',justifyContent:'center',background:'#F8FAFD',borderRadius:8,overflow:'hidden'}}>
                             {row.photo ? <img src={row.photo} style={{maxWidth:'100%',maxHeight:80,borderRadius:4}} /> : <span style={{color:'var(--text-third)'}}>暂无照片</span>}
                           </div>
-                          <div style={{display:'flex',justifyContent:'flex-end',marginTop:10}}>
-                            <button className="btn btn-outline btn-sm" onClick={() => this.startEdit(row)}>
+                          <div className="meter-card-actions">
+                            <span className="meter-card-action-hint">{row.status === 'recorded' ? '可修改本月读数' : '等待本月读数'}</span>
+                            <button className={'meter-card-action ' + (row.status === 'recorded' ? 'is-edit' : 'is-entry')} onClick={() => this.startEdit(row)}>
                               {row.status === 'recorded' ? '编辑' : '录入'}
                             </button>
                           </div>

@@ -55,6 +55,15 @@ def chat(data):
         return test_provider(data)
 
     try:
+        from app.services.ai_orchestrator import chat as skill_chat
+
+        result = skill_chat(data)
+        if result and result.get("reply"):
+            return result
+    except Exception:
+        pass
+
+    try:
         prompt = data.get("prompt", "")
         history = data.get("history", [])
         relevant = search_knowledge(prompt, top_k=3)
@@ -71,7 +80,8 @@ def chat(data):
             "请优先根据下面的实时系统数据回答用户问题；不要编造不存在的数据。"
             "如果数据没有录入或上下文没有提供，明确说明缺少数据。"
             "涉及金额时使用人民币并保留两位小数。"
-            "回答简洁实用，支持 Markdown 格式。"
+            "回答简洁实用，首行先给结论，后面用简短分组和紧凑表格。"
+            "不要频繁使用 Markdown 大标题、横线和表情符号；除非确实需要，不要输出 ##、---。"
             "\n\n实时系统数据：\n" + data_context
         )
         if knowledge_text:
@@ -110,5 +120,10 @@ def delete_chat(data):
 
 def init_knowledge():
     init_knowledge_base()
-    return {"success": True}
+    try:
+        from app.services.skill_vector_store import sync_skill_index
 
+        skill_index = sync_skill_index(force=True)
+    except Exception as e:
+        skill_index = {"success": False, "backend": "fallback", "error": str(e)}
+    return {"success": True, "skill_index": skill_index}

@@ -1,56 +1,65 @@
 import React from "react";
+import { CopyOutlined, DownloadOutlined } from "@ant-design/icons";
+import html2canvas from "html2canvas";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { showToast } from "../components/ui";
 import { rental, api } from "../api";
+
+interface BillReceiptItem {
+  name: string
+  current?: number | string | null
+  last?: number | string | null
+  usage?: number | string | null
+  unit_price?: number | string | null
+  amount: number
+}
+
+interface BillReceiptImage {
+  image_type: "bill_receipt"
+  source: string
+  bill_id?: number | null
+  file_name?: string
+  receipt: {
+    title: string
+    no: string
+    month: string
+    room_number: string
+    tenant_name: string
+    collector: string
+    issue_date: string
+    items: BillReceiptItem[]
+    total_amount: number
+    water_photo?: string
+    electric_photo?: string
+  }
+}
+
+interface AIPendingAction {
+  id: string
+  type: string
+  label: string
+  tool: string
+  args: any
+  preview?: any
+}
+
+interface AIMessage {
+  role: "user" | "assistant"
+  content: string
+  billImages?: BillReceiptImage[]
+}
 
 interface AIChatState {
   open: boolean
-  messages: { role: "user" | "assistant"; content: string }[]
+  messages: AIMessage[]
   loading: boolean
   convId: number
   historyChats: any[]
   sidebarCollapsed: boolean
   uploadedImage: string
   imagePreview: string
-}
-
-function esc(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-}
-
-function escAttr(text: string): string {
-  return esc(text).replace(/"/g, "&quot;")
-}
-
-function safeHref(url: string): string {
-  var u = (url || "").trim()
-  if (/^(https?:|mailto:|tel:)/i.test(u) || u.startsWith("/") || u.startsWith("#")) {
-    return escAttr(u)
-  }
-  return "#"
-}
-
-function renderMarkdown(text: string): string {
-  if (!text) return ""
-  var t = esc(text)
-  t = t.replace(/```(\w*)\n([\s\S]*?)```/g, "<pre><code>$2</code></pre>")
-  t = t.replace(/`([^`]+)`/g, "<code>$1</code>")
-  t = t.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
-  t = t.replace(/(\|[^\n]+\|\n\|[-:\|\s]+\|\n((?:\|[^\n]+\|\n?)*))/g, function(m) {
-    var lines = m.trim().split("\n")
-    var h = "<table>"
-    lines.forEach(function(line, i) {
-      if (i === 1) return
-      var cells = line.split("|").filter(function(c) { return c.trim() })
-      var tag = i === 0 ? "th" : "td"
-      h += "<tr>" + cells.map(function(c) { return "<" + tag + ">" + c.trim() + "</" + tag + ">" }).join("") + "</tr>"
-    })
-    return h + "</table>"
-  })
-  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, label, url) {
-    return "<a href=\"" + safeHref(url) + "\" target=\"_blank\" rel=\"noreferrer\">" + label + "</a>"
-  })
-  t = t.replace(/\n\n/g, "</p><p>")
-  t = t.replace(/\n/g, "<br>")
-  return "<p>" + t + "</p>"
+  pendingActions: AIPendingAction[]
 }
 
 const QUICK_PROMPTS = [
@@ -70,11 +79,142 @@ export class AIChat extends React.Component<{}, AIChatState> {
     sidebarCollapsed: false,
     uploadedImage: "",
     imagePreview: "",
+    pendingActions: [],
   }
   private bodyRef = React.createRef<HTMLDivElement>()
   private inputRef = React.createRef<HTMLInputElement>()
   private fileRef = React.createRef<HTMLInputElement>()
   private sidebarRef = React.createRef<HTMLDivElement>()
+
+  formatMoney = (value: any) => {
+    var num = Number(value || 0)
+    return "¥" + num.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
+
+  formatCell = (value: any) => {
+    if (value === null || value === undefined || value === "") return ""
+    return String(value)
+  }
+
+  waitForImages = async (el: HTMLElement) => {
+    const images = Array.from(el.querySelectorAll("img"))
+    await Promise.all(images.map(img => {
+      if (img.complete && img.naturalWidth > 0) return Promise.resolve()
+      return new Promise<void>(resolve => {
+        img.onload = () => resolve()
+        img.onerror = () => resolve()
+        setTimeout(() => resolve(), 1500)
+      })
+    }))
+  }
+
+  billImageToCanvas = async (targetId: string): Promise<HTMLCanvasElement | null> => {
+    const el = document.getElementById(targetId)
+    if (!el) return null
+    try {
+      await this.waitForImages(el)
+      return await html2canvas(el, {
+        backgroundColor: "#FFFEF9",
+        scale: 2,
+        useCORS: true,
+        width: el.scrollWidth,
+        height: el.scrollHeight,
+      })
+    } catch {
+      return null
+    }
+  }
+
+  copyBillImage = async (targetId: string) => {
+    var canvas = await this.billImageToCanvas(targetId)
+    if (!canvas) { showToast("复制失败，请手动截图"); return }
+    canvas.toBlob(async (blob: Blob | null) => {
+      if (!blob) { showToast("复制失败"); return }
+      if (!navigator.clipboard || typeof ClipboardItem === "undefined") {
+        showToast("当前浏览器不支持复制图片")
+        return
+      }
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
+      showToast("已复制账单图片")
+    }, "image/png")
+  }
+
+  saveBillImage = async (targetId: string, fileName?: string) => {
+    var canvas = await this.billImageToCanvas(targetId)
+    if (!canvas) { showToast("保存失败"); return }
+    var a = document.createElement("a")
+    a.href = canvas.toDataURL("image/png")
+    a.download = fileName || "bill_receipt.png"
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    showToast("已保存账单图片")
+  }
+
+  renderBillImage = (image: BillReceiptImage, key: string) => {
+    var receipt = image.receipt
+    var targetId = "ai-bill-receipt-" + key
+    var items = receipt.items || []
+    return (
+      <div className="ai-bill-image-card" key={key}>
+        <div className="ai-bill-image-toolbar">
+          <div className="ai-bill-image-heading">
+            <span>账单图片</span>
+            {image.source === "draft" && <em>草稿未保存</em>}
+          </div>
+          <div className="ai-bill-image-tools">
+            <button type="button" onClick={() => this.copyBillImage(targetId)} title="复制账单图片" aria-label="复制账单图片">
+              <CopyOutlined />
+            </button>
+            <button type="button" onClick={() => this.saveBillImage(targetId, image.file_name)} title="保存账单图片" aria-label="保存账单图片">
+              <DownloadOutlined />
+            </button>
+          </div>
+        </div>
+        <div id={targetId} className="ai-bill-receipt-capture">
+          <div className="ai-bill-title">{receipt.title || "房租、水、电费（专用）收据"}</div>
+          <div className="ai-bill-no">No.{receipt.no}</div>
+          <div className="ai-bill-room">房间：<b>{receipt.room_number}</b></div>
+          <table className="ai-bill-table">
+            <thead>
+              <tr>
+                <th>项目</th>
+                <th>本月读数</th>
+                <th>上月读数</th>
+                <th>实用量</th>
+                <th>单价</th>
+                <th>金额</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, idx) => (
+                <tr key={idx}>
+                  <td>{item.name}</td>
+                  <td>{this.formatCell(item.current)}</td>
+                  <td>{this.formatCell(item.last)}</td>
+                  <td>{this.formatCell(item.usage)}</td>
+                  <td>{item.unit_price === null || item.unit_price === undefined ? "" : Number(item.unit_price).toFixed(2)}</td>
+                  <td><b>{this.formatMoney(item.amount)}</b></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="ai-bill-total">合计：<span>{this.formatMoney(receipt.total_amount)}</span></div>
+          <div className="ai-bill-meta">
+            <div>交款人：{receipt.tenant_name}</div>
+            <div>收款人：{receipt.collector}</div>
+            <div>发单日期：{receipt.issue_date}</div>
+          </div>
+          {(receipt.water_photo || receipt.electric_photo) && (
+            <div className="ai-bill-photos">
+              {receipt.water_photo && <img src={receipt.water_photo} alt="水表照片" />}
+              {receipt.electric_photo && <img src={receipt.electric_photo} alt="电表照片" />}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   toggle = () => {
     this.setState(s => {
@@ -87,7 +227,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
 
   newChat = () => {
     if (this.state.messages.length > 0 && !confirm("确定开始新对话？当前对话将丢失。")) return
-    this.setState({ messages: [], convId: 0 })
+    this.setState({ messages: [], convId: 0, pendingActions: [] })
     setTimeout(() => this.inputRef.current?.focus(), 50)
   }
 
@@ -134,11 +274,11 @@ export class AIChat extends React.Component<{}, AIChatState> {
     try {
       var res = await api("/api/rental", {
         method: "POST",
-        body: JSON.stringify({ table: "_ai", action: "chat", data: { prompt: input, history: this.state.messages.slice(-10) } })
+        body: JSON.stringify({ table: "_ai", action: "chat", data: { prompt: input, history: this.state.messages.slice(-10), pending_actions: this.state.pendingActions } })
       })
       var reply = (res && res.reply) ? res.reply : "抱歉，AI 服务暂时不可用"
-      msgs = [...msgs, { role: "assistant" as const, content: reply }]
-      this.setState({ messages: msgs, loading: false })
+      msgs = [...msgs, { role: "assistant" as const, content: reply, billImages: res?.bill_images || [] }]
+      this.setState({ messages: msgs, loading: false, pendingActions: res?.pending_actions || [] })
       this.scrollBottom()
       var title = input.substring(0, 30)
       var saveRes = await rental("_ai", "save_chat", { id: this.state.convId, title, messages: msgs })
@@ -185,14 +325,17 @@ export class AIChat extends React.Component<{}, AIChatState> {
     try {
       // If image is attached, first do OCR
       var ocrResult = ""
+      var ocrNumber: number | null = null
+      var inferredMeterType = /水表|水费|水\b/.test(input) ? "水表" : "电表"
       if (image) {
         var base64Data = image.includes("base64,") ? image.split("base64,")[1] : image
         var ocrRes = await api("/api/rental", {
           method: "POST",
-          body: JSON.stringify({ table: "_ocr", action: "read", data: { image: base64Data, meter_type: "电表" } })
+          body: JSON.stringify({ table: "_ocr", action: "read", data: { image: base64Data, meter_type: inferredMeterType } })
         })
         if (ocrRes && ocrRes.numbers && ocrRes.numbers.length > 0) {
-          ocrResult = "\n[OCR识别到电表读数: " + ocrRes.numbers.join(", ") + "]"
+          ocrResult = "\n[OCR识别到" + inferredMeterType + "读数: " + ocrRes.numbers.join(", ") + "]"
+          ocrNumber = Number(ocrRes.numbers[0])
         } else {
           ocrResult = "\n[OCR未识别到读数: " + (ocrRes?.error || "未知错误") + "]"
         }
@@ -202,11 +345,22 @@ export class AIChat extends React.Component<{}, AIChatState> {
       var chatPrompt = input + ocrResult
       var res = await api("/api/rental", {
         method: "POST",
-        body: JSON.stringify({ table: "_ai", action: "chat", data: { prompt: chatPrompt, history: this.state.messages.slice(-10) } })
+        body: JSON.stringify({
+          table: "_ai",
+          action: "chat",
+          data: {
+            prompt: chatPrompt,
+            history: this.state.messages.slice(-10),
+            pending_actions: this.state.pendingActions,
+            uploaded_image: image,
+            ocr_number: ocrNumber,
+            ocr_meter_type: inferredMeterType,
+          }
+        })
       })
       var reply = (res && res.reply) ? res.reply : "抱歉，AI 服务暂时不可用"
-      msgs = [...msgs, { role: "assistant" as const, content: reply }]
-      this.setState({ messages: msgs, loading: false })
+      msgs = [...msgs, { role: "assistant" as const, content: reply, billImages: res?.bill_images || [] }]
+      this.setState({ messages: msgs, loading: false, pendingActions: res?.pending_actions || [] })
       this.scrollBottom()
       var title = input.substring(0, 30) || "图片识别"
       var saveRes = await rental("_ai", "save_chat", { id: this.state.convId, title, messages: msgs })
@@ -316,9 +470,12 @@ export class AIChat extends React.Component<{}, AIChatState> {
                 return (
                   <div key={i} className="ai-msg-v2 bot">
                     <div className="ai-msg-avatar"><img src="/robot-avatar.jpg" className="ai-bot-avatar" /></div>
-                    <div className="ai-msg-bubble bot-bubble"
-                      dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }}
-                    />
+                    <div className="ai-msg-bubble bot-bubble">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {m.content}
+                      </ReactMarkdown>
+                      {m.billImages && m.billImages.map((image, j) => this.renderBillImage(image, i + "-" + j))}
+                    </div>
                   </div>
                 )
               })}
