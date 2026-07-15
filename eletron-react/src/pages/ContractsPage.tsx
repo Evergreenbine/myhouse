@@ -9,9 +9,10 @@ interface Tenant { id: number; name: string; room_id: string }
 interface Meter { id: number; meter_no: string; room_number: string }
 
 interface State {
-  contracts: Record<number, Contract[]>
+  contracts: Record<string, Contract[]>
   buildings: Building[]
   curBid: number | null
+  showArchived: boolean
   loading: boolean
   firstLoad: boolean
   modal: boolean
@@ -39,6 +40,8 @@ interface State {
   tenantMenuOpen: boolean
   waterMeterMenuOpen: boolean
   electricMeterMenuOpen: boolean
+  checkoutConfirm: Contract | null
+  checkoutDate: string
 }
 
 export class ContractsPage extends React.Component<{}, State> {
@@ -46,6 +49,7 @@ export class ContractsPage extends React.Component<{}, State> {
     contracts: {},
     buildings: [],
     curBid: null,
+    showArchived: false,
     loading: true,
     firstLoad: true,
     modal: false,
@@ -56,32 +60,78 @@ export class ContractsPage extends React.Component<{}, State> {
     deposit: '', status: 'active',
     modalRooms: [], modalTenants: [], modalWaterMeters: [], modalElectricMeters: [],
     roomMenuOpen: false, tenantMenuOpen: false, waterMeterMenuOpen: false, electricMeterMenuOpen: false,
+    checkoutConfirm: null,
+    checkoutDate: new Date().toISOString().split('T')[0],
   }
 
   componentDidMount() { this.loadBuildings() }
+
+  contractCacheKey = (bid: number, archived = this.state.showArchived) => bid + ':' + (archived ? 'archived' : 'active')
+
+  loadContracts = async (bid: number, archived = this.state.showArchived) => {
+    const data = await rental('contracts', 'list', { active_only: !archived, building_id: bid }) || []
+    const cs = archived ? data.filter((c: Contract) => c.status !== 'active') : data
+    this.setState(s => ({ contracts: { ...s.contracts, [this.contractCacheKey(bid, archived)]: cs } }))
+    return cs
+  }
 
   loadBuildings = async () => {
     const data = await rental('buildings', 'list') || []
     const bid = data.length > 0 ? data[0].id : null
     if (bid) {
-      const cs = await rental('contracts', 'list', { building_id: bid }) || []
-      this.setState({ buildings: data, curBid: bid, contracts: { [bid]: cs }, loading: false, firstLoad: false })
+      const cs = await rental('contracts', 'list', { active_only: true, building_id: bid }) || []
+      this.setState({ buildings: data, curBid: bid, contracts: { [this.contractCacheKey(bid, false)]: cs }, loading: false, firstLoad: false })
     } else {
       this.setState({ buildings: data, loading: false, firstLoad: false })
     }
   }
 
   switchBuilding = async (id: number) => {
-    if (this.state.contracts[id]) { this.setState({ curBid: id }); return }
+    const key = this.contractCacheKey(id)
+    if (this.state.contracts[key]) { this.setState({ curBid: id }); return }
     this.setState({ curBid: id, loading: true })
-    const cs = await rental('contracts', 'list', { building_id: id }) || []
-    this.setState(s => ({ contracts: { ...s.contracts, [id]: cs }, loading: false }))
+    await this.loadContracts(id)
+    this.setState({ loading: false })
   }
 
-  toggleStatus = async (id: number, status: string) => {
-    const newStatus = status === 'active' ? 'ended' : 'active'
-    await rental('contracts', 'update', { id, status: newStatus })
-    if (this.state.curBid) this.switchBuilding(this.state.curBid)
+  switchArchiveView = async (archived: boolean) => {
+    const bid = this.state.curBid
+    this.setState({ showArchived: archived })
+    if (!bid) return
+    const key = this.contractCacheKey(bid, archived)
+    if (this.state.contracts[key]) return
+    this.setState({ loading: true })
+    await this.loadContracts(bid, archived)
+    this.setState({ loading: false })
+  }
+
+  refreshCurrentContracts = async () => {
+    const bid = this.state.curBid
+    if (!bid) return
+    const archived = this.state.showArchived
+    const cs = await rental('contracts', 'list', { active_only: !archived, building_id: bid }) || []
+    this.setState(s => ({
+      contracts: { ...s.contracts, [this.contractCacheKey(bid, archived)]: archived ? cs.filter((c: Contract) => c.status !== 'active') : cs },
+    }))
+  }
+
+  openCheckout = (contract: Contract) => {
+    this.setState({ checkoutConfirm: contract, checkoutDate: new Date().toISOString().split('T')[0] })
+  }
+
+  confirmCheckout = async () => {
+    const contract = this.state.checkoutConfirm
+    if (!contract) return
+    await rental('contracts', 'end', { id: contract.id, end_date: this.state.checkoutDate })
+    this.setState({ checkoutConfirm: null })
+    showToast('退租完成，房间已设为闲置')
+    this.refreshCurrentContracts()
+  }
+
+  restoreContract = async (contract: Contract) => {
+    await rental('contracts', 'update', { id: contract.id, status: 'active' })
+    showToast('合同已恢复')
+    this.refreshCurrentContracts()
   }
 
   openAdd = async () => {
@@ -155,8 +205,8 @@ export class ContractsPage extends React.Component<{}, State> {
     if (res && !res.error) {
       this.setState({ modal: false })
       if (curBid) {
-        const cs = await rental('contracts', 'list', { building_id: curBid }) || []
-        this.setState(s => ({ contracts: { ...s.contracts, [curBid]: cs } }))
+        const cs = await rental('contracts', 'list', { active_only: !this.state.showArchived, building_id: curBid }) || []
+        this.setState(s => ({ contracts: { ...s.contracts, [this.contractCacheKey(curBid)]: this.state.showArchived ? cs.filter((c: Contract) => c.status !== 'active') : cs } }))
       }
       showToast(editId ? '保存成功' : '新签成功')
     } else { showToast('保存失败') }
@@ -174,7 +224,7 @@ export class ContractsPage extends React.Component<{}, State> {
       </div>
     )
 
-    const curContracts: Contract[] = curBid ? (this.state.contracts[curBid] || []) : []
+    const curContracts: Contract[] = curBid ? (this.state.contracts[this.contractCacheKey(curBid)] || []) : []
 
     return (
       <div>
@@ -186,16 +236,22 @@ export class ContractsPage extends React.Component<{}, State> {
                 onClick={() => this.switchBuilding(b.id)}>{b.name}</button>
             ))}
           </div>
-          <button className="btn btn-primary btn-sm" onClick={this.openAdd}>+ 新签合同</button>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            <div className="contract-status-tabs">
+              <button className={!this.state.showArchived ? 'active' : ''} onClick={() => this.switchArchiveView(false)}>在租</button>
+              <button className={this.state.showArchived ? 'active' : ''} onClick={() => this.switchArchiveView(true)}>已退租</button>
+            </div>
+            <button className="btn btn-primary btn-sm contract-new-btn" onClick={this.openAdd}>+ 新签合同</button>
+          </div>
         </div>
 
         {loading ? <div style={{padding:40,textAlign:'center',color:'var(--text-third)'}}>加载中...</div> :
           curContracts.length === 0 ? (
-            <div className="empty-state"><div className="icon">📄</div><div>当前楼栋暂无合同，点击上方按钮新签</div></div>
+            <div className="empty-state"><div className="icon">📄</div><div>{this.state.showArchived ? '当前楼栋暂无已退租合同' : '当前楼栋暂无合同，点击上方按钮新签'}</div></div>
           ) : (
             <div className="table-wrap">
               <table>
-                <thead><tr><th>租客</th><th>房间</th><th>月租</th><th>合同期</th><th>保证金</th><th className="status-cell">状态</th></tr></thead>
+                <thead><tr><th>租客</th><th>房间</th><th>月租</th><th>合同期</th><th>保证金</th><th className="status-cell">状态</th><th>操作</th></tr></thead>
                 <tbody>
                   {curContracts.map(c => (
                     <tr key={c.id}>
@@ -206,8 +262,14 @@ export class ContractsPage extends React.Component<{}, State> {
                       <td>¥{Number(c.deposit || 0).toFixed(2)}</td>
                       <td className="status-cell">
                         <span className={'status-dot ' + (c.status === 'active' ? 'rented' : 'idle')}
-                          onClick={e => { e.stopPropagation(); this.toggleStatus(c.id, c.status) }}
-                          title={c.status === 'active' ? '生效中，点击解除' : '已解除，点击生效'} />
+                          title={c.status === 'active' ? '生效中' : '已退租'} />
+                      </td>
+                      <td>
+                        {c.status === 'active' ? (
+                          <button className="contract-action-btn end" onClick={() => this.openCheckout(c)}>退租</button>
+                        ) : (
+                          <button className="contract-action-btn restore" onClick={() => this.restoreContract(c)}>恢复</button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -219,6 +281,33 @@ export class ContractsPage extends React.Component<{}, State> {
         <div className="list-meta">共 {curContracts.length} 份合同</div>
 
         {this.renderModal()}
+        {this.renderCheckoutConfirm()}
+      </div>
+    )
+  }
+
+  renderCheckoutConfirm() {
+    const contract = this.state.checkoutConfirm
+    if (!contract) return null
+    return (
+      <div className="modal-overlay" onClick={() => this.setState({ checkoutConfirm: null })}>
+        <div className="modal contract-checkout-modal" onClick={e => e.stopPropagation()}>
+          <div className="modal-title">办理退租</div>
+          <div className="checkout-summary">
+            <div><span>租客</span><b>{contract.tenant_name}</b></div>
+            <div><span>房间</span><b>{contract.room_number}</b></div>
+            <div><span>月租</span><b>¥{Number(contract.monthly_rent || 0).toFixed(2)}</b></div>
+          </div>
+          <div className="form-group">
+            <label>退租日期</label>
+            <DatePicker value={this.state.checkoutDate} onChange={v => this.setState({ checkoutDate: v })} placeholder="选择退租日期" />
+          </div>
+          <div className="checkout-note">确认后合同会归档，房间状态会同步改为闲置。</div>
+          <div className="modal-actions">
+            <button className="btn btn-outline" onClick={() => this.setState({ checkoutConfirm: null })}>取消</button>
+            <button className="btn btn-danger" onClick={this.confirmCheckout}>确认退租</button>
+          </div>
+        </div>
       </div>
     )
   }

@@ -1,5 +1,5 @@
 import React from "react";
-import { CopyOutlined, DownloadOutlined } from "@ant-design/icons";
+import { CloseOutlined, CopyOutlined, DeleteOutlined, DownloadOutlined, InboxOutlined, LoadingOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PaperClipOutlined, RedoOutlined, RollbackOutlined, SearchOutlined } from "@ant-design/icons";
 import html2canvas from "html2canvas";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -44,6 +44,16 @@ interface AIPendingAction {
   preview?: any
 }
 
+interface AIImageAttachment {
+  id: string
+  dataUrl: string
+  fileName: string
+  meterType: "水表" | "电表"
+  status: "reading" | "done" | "error"
+  ocrNumber: number | null
+  error?: string
+}
+
 interface AIMessage {
   role: "user" | "assistant"
   content: string
@@ -56,9 +66,14 @@ interface AIChatState {
   loading: boolean
   convId: number
   historyChats: any[]
+  historySearch: string
+  historyArchived: boolean
+  historyRemovingIds: number[]
+  deleteConfirmId: number
   sidebarCollapsed: boolean
-  uploadedImage: string
-  imagePreview: string
+  attachments: AIImageAttachment[]
+  hoverPreviewImage: string
+  activePreviewImage: string
   pendingActions: AIPendingAction[]
 }
 
@@ -76,9 +91,14 @@ export class AIChat extends React.Component<{}, AIChatState> {
     loading: false,
     convId: 0,
     historyChats: [],
+    historySearch: "",
+    historyArchived: false,
+    historyRemovingIds: [],
+    deleteConfirmId: 0,
     sidebarCollapsed: false,
-    uploadedImage: "",
-    imagePreview: "",
+    attachments: [],
+    hoverPreviewImage: "",
+    activePreviewImage: "",
     pendingActions: [],
   }
   private bodyRef = React.createRef<HTMLDivElement>()
@@ -233,14 +253,20 @@ export class AIChat extends React.Component<{}, AIChatState> {
 
   loadHistory = async () => {
     try {
-      var chats = await rental("_ai", "list_chats") || []
+      var chats = await rental("_ai", "list_chats", {
+        keyword: this.state.historySearch,
+        archived: this.state.historyArchived,
+      }) || []
       this.setState({ historyChats: chats })
     } catch { /* ignore */ }
   }
 
   restoreChat = async (id: number) => {
     try {
-      var chats = await rental("_ai", "list_chats") || []
+      var chats = await rental("_ai", "list_chats", {
+        keyword: this.state.historySearch,
+        archived: this.state.historyArchived,
+      }) || []
       var chat = chats.find(function(c: any) { return c.id === id })
       if (!chat) return
       this.setState({ messages: chat.messages || [], convId: id, sidebarCollapsed: false })
@@ -249,13 +275,55 @@ export class AIChat extends React.Component<{}, AIChatState> {
     } catch { /* ignore */ }
   }
 
-  deleteChat = async (id: number) => {
-    if (!confirm("确定删除该对话？")) return
-    await rental("_ai", "delete_chat", { id })
-    if (this.state.convId === id) {
-      this.setState({ messages: [], convId: 0 })
-    }
-    this.loadHistory()
+  runHistoryRemoval = (id: number, action: () => Promise<void>) => {
+    this.setState(s => ({ historyRemovingIds: Array.from(new Set([...s.historyRemovingIds, id])) }))
+    setTimeout(async () => {
+      await action()
+      this.setState(s => ({ historyRemovingIds: s.historyRemovingIds.filter(x => x !== id) }))
+      this.loadHistory()
+    }, 180)
+  }
+
+  askDeleteChat = (id: number) => {
+    this.setState({ deleteConfirmId: id })
+  }
+
+  confirmDeleteChat = () => {
+    var id = this.state.deleteConfirmId
+    if (!id) return
+    this.setState({ deleteConfirmId: 0 })
+    this.runHistoryRemoval(id, async () => {
+      await rental("_ai", "delete_chat", { id })
+      if (this.state.convId === id) {
+        this.setState({ messages: [], convId: 0, pendingActions: [] })
+      }
+      showToast("已删除")
+    })
+  }
+
+  archiveChat = async (id: number) => {
+    this.runHistoryRemoval(id, async () => {
+      await rental("_ai", "archive_chat", { id })
+      if (this.state.convId === id) {
+        this.setState({ messages: [], convId: 0, pendingActions: [] })
+      }
+      showToast("已归档")
+    })
+  }
+
+  restoreArchivedChat = async (id: number) => {
+    this.runHistoryRemoval(id, async () => {
+      await rental("_ai", "restore_chat", { id })
+      showToast("已恢复")
+    })
+  }
+
+  setHistorySearch = (keyword: string) => {
+    this.setState({ historySearch: keyword }, () => this.loadHistory())
+  }
+
+  setHistoryArchived = (archived: boolean) => {
+    this.setState({ historyArchived: archived }, () => this.loadHistory())
   }
 
   sendQuick = (prompt: string) => {
@@ -294,54 +362,134 @@ export class AIChat extends React.Component<{}, AIChatState> {
   }
 
 
-  handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    var file = e.target.files?.[0]
-    if (!file) return
-    var reader = new FileReader()
-    reader.onload = () => {
-      var base64 = reader.result as string
-      this.setState({ uploadedImage: base64, imagePreview: base64 })
+  inferMeterType = () => {
+    var input = this.inputRef.current?.value || ""
+    return /水表|水费|用水|水读数/.test(input) ? "水表" as const : "电表" as const
+  }
+
+  inferMeterTypeForFile = (file: File, index: number, total: number) => {
+    var input = this.inputRef.current?.value || ""
+    var name = file.name || ""
+    if (/水表|水费|用水|水读数|水/.test(name)) return "水表" as const
+    if (/电表|电费|用电|电读数|电/.test(name)) return "电表" as const
+    var hasWater = /水表|水费|用水|水读数/.test(input)
+    var hasElectric = /电表|电费|用电|电读数/.test(input)
+    if (hasWater && !hasElectric) return "水表" as const
+    if (hasElectric && !hasWater) return "电表" as const
+    if (total >= 2) return index % 2 === 0 ? "水表" as const : "电表" as const
+    return this.inferMeterType()
+  }
+
+  readFileAsDataUrl = (file: File) => {
+    return new Promise<string>(resolve => {
+      var reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.readAsDataURL(file)
+    })
+  }
+
+  recognizeAttachment = async (id: string, dataUrl: string, meterType: "水表" | "电表") => {
+    this.setState(s => ({
+      attachments: s.attachments.map(a => a.id === id ? { ...a, meterType, status: "reading", error: undefined } : a)
+    }))
+    try {
+      var base64Data = dataUrl.includes("base64,") ? dataUrl.split("base64,")[1] : dataUrl
+      var ocrRes = await api("/api/rental", {
+        method: "POST",
+        body: JSON.stringify({ table: "_ocr", action: "read", data: { image: base64Data, meter_type: meterType } })
+      })
+      var num = ocrRes?.numbers?.length ? Number(ocrRes.numbers[0]) : null
+      this.setState(s => ({
+        attachments: s.attachments.map(a => a.id === id
+          ? { ...a, status: num !== null ? "done" : "error", ocrNumber: num, error: num === null ? (ocrRes?.error || "未识别") : undefined }
+          : a)
+      }))
+    } catch {
+      this.setState(s => ({
+        attachments: s.attachments.map(a => a.id === id ? { ...a, status: "error", ocrNumber: null, error: "识别失败" } : a)
+      }))
     }
-    reader.readAsDataURL(file)
   }
 
-  removeImage = () => {
-    this.setState({ uploadedImage: "", imagePreview: "" })
+  handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    var files = Array.from(e.target.files || [])
+    if (!files.length) return
+    var newItems: AIImageAttachment[] = []
+    for (var i = 0; i < files.length; i++) {
+      var file = files[i]
+      var dataUrl = await this.readFileAsDataUrl(file)
+      var meterType = this.inferMeterTypeForFile(file, i, files.length)
+      newItems.push({
+        id: Date.now() + "_" + Math.random().toString(16).slice(2),
+        dataUrl,
+        fileName: file.name,
+        meterType,
+        status: "reading",
+        ocrNumber: null,
+      })
+    }
+    this.setState(s => ({ attachments: [...s.attachments, ...newItems] }))
+    newItems.forEach(item => this.recognizeAttachment(item.id, item.dataUrl, item.meterType))
+    if (this.fileRef.current) this.fileRef.current.value = ""
   }
 
-  sendWithImage = async () => {
+  removeAttachment = (id: string) => {
+    this.setState(s => {
+      var removed = s.attachments.find(a => a.id === id)
+      var removedUrl = removed?.dataUrl || ""
+      return {
+        attachments: s.attachments.filter(a => a.id !== id),
+        hoverPreviewImage: s.hoverPreviewImage === removedUrl ? "" : s.hoverPreviewImage,
+        activePreviewImage: s.activePreviewImage === removedUrl ? "" : s.activePreviewImage,
+      }
+    })
+  }
+
+  setAttachmentMeterType = (id: string, meterType: "水表" | "电表") => {
+    var item = this.state.attachments.find(a => a.id === id)
+    if (!item) return
+    this.recognizeAttachment(id, item.dataUrl, meterType)
+  }
+
+  updateAttachmentReading = (id: string, value: string) => {
+    var parsed = value.trim() === "" ? null : Number(value)
+    this.setState(s => ({
+      attachments: s.attachments.map(a => a.id === id
+        ? { ...a, ocrNumber: Number.isFinite(parsed as number) ? parsed : null, status: value.trim() === "" ? "error" : "done", error: value.trim() === "" ? "请填写读数" : undefined }
+        : a)
+    }))
+  }
+
+  retryAttachmentOCR = (id: string) => {
+    var item = this.state.attachments.find(a => a.id === id)
+    if (!item) return
+    this.recognizeAttachment(id, item.dataUrl, item.meterType)
+  }
+
+  sendWithImages = async () => {
     var input = (this.inputRef.current?.value || "").trim()
-    var image = this.state.uploadedImage
-    if (!input && !image) return
+    var attachments = this.state.attachments
+    if (!input && attachments.length === 0) return
+    if (attachments.some(a => a.status === "reading")) {
+      showToast("图片还在识别中，请稍等")
+      return
+    }
     
     if (this.inputRef.current) this.inputRef.current.value = ""
     
     // Show user message (possibly with image context)
-    var userMsg = input || "请识别这张电表图片"
+    var userMsg = input || "请识别这几张水电表图片"
+    if (attachments.length) userMsg += "（已上传" + attachments.length + "张图片）"
     var msgs = [...this.state.messages, { role: "user" as const, content: userMsg }]
-    this.setState({ messages: msgs, loading: true, imagePreview: "", uploadedImage: "" })
+    this.setState({ messages: msgs, loading: true, attachments: [] })
     this.scrollBottom()
 
     try {
-      // If image is attached, first do OCR
-      var ocrResult = ""
-      var ocrNumber: number | null = null
-      var inferredMeterType = /水表|水费|水\b/.test(input) ? "水表" : "电表"
-      if (image) {
-        var base64Data = image.includes("base64,") ? image.split("base64,")[1] : image
-        var ocrRes = await api("/api/rental", {
-          method: "POST",
-          body: JSON.stringify({ table: "_ocr", action: "read", data: { image: base64Data, meter_type: inferredMeterType } })
-        })
-        if (ocrRes && ocrRes.numbers && ocrRes.numbers.length > 0) {
-          ocrResult = "\n[OCR识别到" + inferredMeterType + "读数: " + ocrRes.numbers.join(", ") + "]"
-          ocrNumber = Number(ocrRes.numbers[0])
-        } else {
-          ocrResult = "\n[OCR未识别到读数: " + (ocrRes?.error || "未知错误") + "]"
-        }
-      }
-
       // Send to chat AI with OCR result
+      var ocrResult = attachments.map((item, index) => {
+        if (item.ocrNumber !== null) return "\n[图片" + (index + 1) + " OCR识别到" + item.meterType + "读数: " + item.ocrNumber + "]"
+        return "\n[图片" + (index + 1) + " OCR未识别到读数: " + (item.error || "未知错误") + "]"
+      }).join("")
       var chatPrompt = input + ocrResult
       var res = await api("/api/rental", {
         method: "POST",
@@ -352,9 +500,13 @@ export class AIChat extends React.Component<{}, AIChatState> {
             prompt: chatPrompt,
             history: this.state.messages.slice(-10),
             pending_actions: this.state.pendingActions,
-            uploaded_image: image,
-            ocr_number: ocrNumber,
-            ocr_meter_type: inferredMeterType,
+            uploaded_images: attachments.map((item, index) => ({
+              image_index: index,
+              image: item.dataUrl,
+              file_name: item.fileName,
+              ocr_number: item.ocrNumber,
+              ocr_meter_type: item.meterType,
+            })),
           }
         })
       })
@@ -401,29 +553,53 @@ export class AIChat extends React.Component<{}, AIChatState> {
             <div className="ai-sidebar-header">
               <span className="ai-sidebar-title">对话记录</span>
               <button className="ai-sidebar-collapse" onClick={() => this.setState({ sidebarCollapsed: !s.sidebarCollapsed })} title="收起侧栏">
-                {s.sidebarCollapsed ? "☰" : "◀"}
+                {s.sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
               </button>
             </div>
             <div className="ai-sidebar-body">
               <button className="ai-new-chat-btn" onClick={this.newChat}>
                 ＋ 新对话
               </button>
+              <div className="ai-history-search-box">
+                <SearchOutlined />
+                <input
+                  value={s.historySearch}
+                  onChange={e => this.setHistorySearch(e.target.value)}
+                  placeholder={s.historyArchived ? "搜索归档对话" : "搜索对话记录"}
+                />
+              </div>
+              <div className="ai-history-tabs">
+                <button className={!s.historyArchived ? "active" : ""} onClick={() => this.setHistoryArchived(false)}>对话</button>
+                <button className={s.historyArchived ? "active" : ""} onClick={() => this.setHistoryArchived(true)}>归档</button>
+              </div>
               {!hasHistory && (
-                <div className="ai-sidebar-empty">暂无对话记录</div>
+                <div className="ai-sidebar-empty">{s.historySearch ? "没有匹配的对话" : (s.historyArchived ? "暂无归档对话" : "暂无对话记录")}</div>
               )}
               {hasHistory && s.historyChats.map((c: any) => {
                 var title = c.title || "对话 " + c.id
                 var isActive = c.id === s.convId
+                var isRemoving = s.historyRemovingIds.includes(c.id)
                 return (
                   <div key={c.id}
-                    className={"ai-history-item" + (isActive ? " active" : "")}
+                    className={"ai-history-item" + (isActive ? " active" : "") + (isRemoving ? " removing" : "")}
                     onClick={() => this.restoreChat(c.id)}
                   >
                     <span className="ai-history-title">{title.substring(0, 30)}</span>
-                    <button className="ai-history-del"
-                      onClick={(e: React.MouseEvent) => { e.stopPropagation(); this.deleteChat(c.id) }}
-                      title="删除"
-                    >🗑</button>
+                    <div className="ai-history-actions">
+                      <button
+                        onClick={(e: React.MouseEvent) => { e.stopPropagation(); s.historyArchived ? this.restoreArchivedChat(c.id) : this.archiveChat(c.id) }}
+                        title={s.historyArchived ? "恢复对话" : "归档对话"}
+                      >
+                        {s.historyArchived ? <RollbackOutlined /> : <InboxOutlined />}
+                      </button>
+                      <button
+                        className="danger"
+                        onClick={(e: React.MouseEvent) => { e.stopPropagation(); this.askDeleteChat(c.id) }}
+                        title="删除"
+                      >
+                        <DeleteOutlined />
+                      </button>
+                    </div>
                   </div>
                 )
               })}
@@ -435,7 +611,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
             <div className="ai-chat-topbar">
               <button className="ai-toggle-sidebar" onClick={() => this.setState({ sidebarCollapsed: !s.sidebarCollapsed })}
                 title={s.sidebarCollapsed ? "展开侧栏" : "收起侧栏"}>
-                ☰
+                {s.sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
               </button>
               <span className="ai-chat-topbar-title">
                 {s.convId ? "对话 " + s.convId : "新对话"}
@@ -488,28 +664,69 @@ export class AIChat extends React.Component<{}, AIChatState> {
                 </div>
               )}
             </div>
-            <div className="ai-chat-toolbar">
-              <button className="ai-tool-btn" onClick={() => this.fileRef.current?.click()} title="上传图片">＋</button>
-              <span className="ai-tool-hint">上传电表/水表图片自动识别</span>
-            </div>
             <div className="ai-chat-footer-v2">
-              {s.imagePreview && (
-                <div className="ai-image-preview">
-                  <img src={s.imagePreview} alt="预览" />
-                  <button className="ai-remove-img" onClick={this.removeImage} title="移除图片">✕</button>
+              {s.attachments.length > 0 && (
+                <div className="ai-attachment-strip">
+                  {s.attachments.map(item => (
+                    <div className="ai-attachment-card" key={item.id}
+                      onMouseEnter={() => this.setState({ hoverPreviewImage: item.dataUrl })}
+                      onMouseLeave={() => this.setState({ hoverPreviewImage: "" })}>
+                      <img src={item.dataUrl} alt={item.fileName} onClick={() => this.setState({ activePreviewImage: item.dataUrl })} />
+                      <button className="ai-attachment-remove" onClick={(e: React.MouseEvent) => { e.stopPropagation(); this.removeAttachment(item.id) }} title="移除图片" type="button">
+                        <CloseOutlined />
+                      </button>
+                      <div className="ai-attachment-type">
+                        <button type="button" className={item.meterType === "水表" ? "active" : ""} onClick={() => this.setAttachmentMeterType(item.id, "水表")}>水</button>
+                        <button type="button" className={item.meterType === "电表" ? "active" : ""} onClick={() => this.setAttachmentMeterType(item.id, "电表")}>电</button>
+                      </div>
+                      <div className={"ai-attachment-status " + item.status}>
+                        {item.status === "reading" && <><LoadingOutlined /> 识别中</>}
+                        {item.status === "done" && (
+                          <input
+                            type="number"
+                            value={item.ocrNumber ?? ""}
+                            onChange={e => this.updateAttachmentReading(item.id, e.target.value)}
+                            title="可手动修改识别读数"
+                          />
+                        )}
+                        {item.status === "error" && (
+                          <div className="ai-attachment-error-row">
+                            <input
+                              type="number"
+                              value={item.ocrNumber ?? ""}
+                              placeholder="读数"
+                              onChange={e => this.updateAttachmentReading(item.id, e.target.value)}
+                              title={item.error || "可手动输入读数"}
+                            />
+                            <button type="button" onClick={() => this.retryAttachmentOCR(item.id)} title={item.error || "重新识别"}>
+                              <RedoOutlined />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {s.hoverPreviewImage && (
+                <div className="ai-image-hover-preview">
+                  <img src={s.hoverPreviewImage} alt="图片预览" />
                 </div>
               )}
               <div className="ai-input-wrap">
-                <input type="file" ref={this.fileRef} accept="image/*" style={{display:"none"}}
+                <button className="ai-attach-btn" onClick={() => this.fileRef.current?.click()} title="上传水电表图片" type="button">
+                  <PaperClipOutlined />
+                </button>
+                <input type="file" ref={this.fileRef} accept="image/*" multiple style={{display:"none"}}
                   onChange={this.handleImageUpload} />
                 
                 <input
                   ref={this.inputRef}
-                  placeholder={s.uploadedImage ? "描述这张图片（如：7月302房电表）..." : "输入你的问题，按 Enter 发送..."}
-                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); (s.uploadedImage ? this.sendWithImage : this.send)() } }}
+                  placeholder={s.attachments.length ? "描述图片（如：7月302房水表和电表，准备录入）..." : "输入你的问题，按 Enter 发送..."}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); (s.attachments.length ? this.sendWithImages : this.send)() } }}
                   disabled={s.loading}
                 />
-                <button onClick={s.uploadedImage ? this.sendWithImage : this.send}
+                <button onClick={s.attachments.length ? this.sendWithImages : this.send}
                   disabled={s.loading} className="ai-send-btn">
                   {s.loading ? "..." : "发送"}
                 </button>
@@ -517,6 +734,26 @@ export class AIChat extends React.Component<{}, AIChatState> {
               <div className="ai-footer-hint">支持上传电表/水表图片自动识别读数 · 按 Enter 发送</div>
             </div>          </div>
         </div>
+        {s.activePreviewImage && (
+          <div className="ai-image-lightbox" onClick={() => this.setState({ activePreviewImage: "" })}>
+            <button className="ai-image-lightbox-close" type="button" title="关闭" onClick={() => this.setState({ activePreviewImage: "" })}>
+              <CloseOutlined />
+            </button>
+            <img src={s.activePreviewImage} alt="大图预览" onClick={(e: React.MouseEvent) => e.stopPropagation()} />
+          </div>
+        )}
+        {s.deleteConfirmId > 0 && (
+          <div className="ai-confirm-overlay" onClick={() => this.setState({ deleteConfirmId: 0 })}>
+            <div className="ai-confirm-dialog" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+              <div className="ai-confirm-title">删除这条对话？</div>
+              <div className="ai-confirm-text">删除后无法恢复。只是暂时不想看到的话，可以选择归档。</div>
+              <div className="ai-confirm-actions">
+                <button type="button" onClick={() => this.setState({ deleteConfirmId: 0 })}>取消</button>
+                <button type="button" className="danger" onClick={this.confirmDeleteChat}>删除</button>
+              </div>
+            </div>
+          </div>
+        )}
       </>
     )
   }

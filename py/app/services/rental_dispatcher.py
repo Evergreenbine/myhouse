@@ -90,7 +90,7 @@ def dispatch(table, action, data):
             db.update_contract(data.get("id"), **payload)
             return {"success": True}
         if action == "end":
-            db.end_contract(data.get("id"))
+            db.end_contract(data.get("id"), data.get("end_date", ""))
             return {"success": True}
 
     if table == "meters":
@@ -176,9 +176,13 @@ def dispatch(table, action, data):
         if action == "save_chat":
             return ai_chat.save_chat(data)
         if action == "list_chats":
-            return ai_chat.list_chats()
+            return ai_chat.list_chats(data)
         if action == "delete_chat":
             return ai_chat.delete_chat(data)
+        if action == "archive_chat":
+            return ai_chat.archive_chat(data)
+        if action == "restore_chat":
+            return ai_chat.restore_chat(data)
         if action == "init_knowledge":
             return ai_chat.init_knowledge()
 
@@ -192,4 +196,3 @@ def dispatch(table, action, data):
             return {"numbers": [], "source": "ai", "error": err or "AI识别失败"}
 
     return {"error": "unknown table or action"}
-

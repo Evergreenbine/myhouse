@@ -4,7 +4,7 @@ import { showToast } from '../components/ui'
 import Zoom from 'react-medium-image-zoom'
 import html2canvas from 'html2canvas'
 
-interface Contract { id: number; tenant_name: string; tenant_id: number; room_number: string; room_id: number; monthly_rent: number; water_unit_price: number; electric_unit_price: number; water_meter_id: number | null; electric_meter_id: number | null; building_id: number; building_name: string }
+interface Contract { id: number; tenant_name: string; tenant_id: number; room_number: string; room_id: number; monthly_rent: number; water_unit_price: number; electric_unit_price: number; water_meter_id: number | null; electric_meter_id: number | null; building_id: number; building_name: string; status?: string }
 interface Bill { id: number; contract_id: number; total_amount: number; status: string; water_fee: number; electric_fee: number; other_fee: number; water_current_reading: number; water_last_reading: number; electric_current_reading: number; electric_last_reading: number; water_photo: string; electric_photo: string }
 interface MeterReading { id: number; meter_no: string; room_number: string; reading: number | null; previous_reading: number; usage: number | null; photo: string; status: string }
 interface Building { id: number; name: string; rent_day: number }
@@ -80,13 +80,17 @@ export class RentPlanPage extends React.Component<{}, State> {
     const timer = setTimeout(() => {
       if (seq === this.planLoadSeq) this.setState({ loading: true })
     }, 200)
-    const [cs, bs] = await Promise.all([
-      rental('contracts', 'list', { active_only: true, building_id: bid }),
+    const [allContracts, bs] = await Promise.all([
+      rental('contracts', 'list', { active_only: false, building_id: bid }),
       rental('bills', 'list', { month }),
     ])
     clearTimeout(timer)
     if (seq !== this.planLoadSeq || this.state.curBid !== bid || this.billingMonth !== month) return
-    this.setState({ contracts: cs || [], bills: bs || [], loading: false })
+    const billContractIds = new Set((bs || []).map((b: Bill) => Number(b.contract_id)))
+    const visibleContracts = (allContracts || []).filter((c: Contract) =>
+      c.status === 'active' || billContractIds.has(Number(c.id))
+    )
+    this.setState({ contracts: visibleContracts, bills: bs || [], loading: false })
   }
 
   switchBuilding = (id: number) => {

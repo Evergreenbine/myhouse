@@ -1178,6 +1178,7 @@ TOOL_SCHEMAS = [
         "meter_type": METER_TYPE_PROP,
         "month": MONTH_PROP,
         "reading": {"type": "number", "description": "识别到的表读数"},
+        "image_index": {"type": "integer", "description": "上传图片序号，从 0 开始；多图时用于选择对应照片"},
         "photo": {"type": "string", "description": "表照片 data URL，可选"},
         "building_id": BUILDING_PROP,
         "overwrite": {"type": "boolean", "description": "是否覆盖已有读数，默认 false"},

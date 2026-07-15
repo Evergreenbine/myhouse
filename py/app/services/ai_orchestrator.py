@@ -140,6 +140,24 @@ def _collect_bill_images(tool_results: List[Dict[str, Any]]) -> List[Dict[str, A
 
 def _image_context_from_data(data: Dict[str, Any]) -> str:
     parts = []
+    uploaded_images = data.get("uploaded_images")
+    if isinstance(uploaded_images, list) and uploaded_images:
+        for idx, item in enumerate(uploaded_images):
+            if not isinstance(item, dict):
+                continue
+            desc = "图片{idx}: 类型 {meter_type}".format(
+                idx=idx + 1,
+                meter_type=item.get("ocr_meter_type") or item.get("meter_type") or "未知",
+            )
+            if item.get("ocr_number") is not None:
+                desc += "，OCR识别读数 " + str(item.get("ocr_number"))
+            else:
+                desc += "，OCR未识别到有效读数"
+            desc += "。调用读数录入工具时可传 image_index=" + str(idx)
+            parts.append(desc)
+        parts.append("已上传多张表具照片，可在保存读数时按 image_index 写入对应 photo。")
+        return "\n".join(parts)
+
     if data.get("ocr_number") is not None:
         parts.append("OCR识别读数: " + str(data.get("ocr_number")))
     if data.get("ocr_meter_type"):
@@ -178,13 +196,44 @@ def _tool_args_with_upload(name: str, raw_args: Any, data: Dict[str, Any]) -> An
         except Exception:
             return raw_args
     if name == "meter_reading_save_from_ai":
-        if data.get("ocr_number") is not None and args.get("reading") in {None, ""}:
-            args["reading"] = data.get("ocr_number")
-        if data.get("uploaded_image") and not args.get("photo"):
-            args["photo"] = data.get("uploaded_image")
-        if data.get("ocr_meter_type") and not args.get("meter_type"):
-            meter_type = str(data.get("ocr_meter_type"))
-            args["meter_type"] = "water" if "水" in meter_type else "electric"
+        uploaded_images = data.get("uploaded_images")
+        selected = None
+        if isinstance(uploaded_images, list) and uploaded_images:
+            image_index = args.get("image_index")
+            try:
+                idx = int(image_index)
+            except Exception:
+                idx = -1
+            if 0 <= idx < len(uploaded_images) and isinstance(uploaded_images[idx], dict):
+                selected = uploaded_images[idx]
+            else:
+                wanted = str(args.get("meter_type") or "")
+                for item in uploaded_images:
+                    if not isinstance(item, dict):
+                        continue
+                    item_type = "water" if "水" in str(item.get("ocr_meter_type") or item.get("meter_type") or "") else "electric"
+                    if wanted and item_type == wanted:
+                        selected = item
+                        break
+                if selected is None:
+                    selected = uploaded_images[0] if isinstance(uploaded_images[0], dict) else None
+
+        if selected:
+            if selected.get("ocr_number") is not None and args.get("reading") in {None, ""}:
+                args["reading"] = selected.get("ocr_number")
+            if selected.get("image") and not args.get("photo"):
+                args["photo"] = selected.get("image")
+            if selected.get("ocr_meter_type") and not args.get("meter_type"):
+                meter_type = str(selected.get("ocr_meter_type"))
+                args["meter_type"] = "water" if "水" in meter_type else "electric"
+        else:
+            if data.get("ocr_number") is not None and args.get("reading") in {None, ""}:
+                args["reading"] = data.get("ocr_number")
+            if data.get("uploaded_image") and not args.get("photo"):
+                args["photo"] = data.get("uploaded_image")
+            if data.get("ocr_meter_type") and not args.get("meter_type"):
+                meter_type = str(data.get("ocr_meter_type"))
+                args["meter_type"] = "water" if "水" in meter_type else "electric"
     return args
 
 

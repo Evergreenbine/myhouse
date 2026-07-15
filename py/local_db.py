@@ -224,15 +224,31 @@ def load_app_user() -> dict:
 
 
 
-def load_chats():
+def load_chats(search='', archived=False):
     c = _conn()
-    rows = c.execute("SELECT id, title, messages, created_at, archived FROM chat_history ORDER BY created_at DESC LIMIT 50").fetchall()
+    wh = ["archived=?"]
+    params = [1 if archived else 0]
+    if search:
+        wh.append("(title LIKE ? OR messages LIKE ?)")
+        like = "%" + str(search) + "%"
+        params.extend([like, like])
+    rows = c.execute(
+        "SELECT id, title, messages, created_at, archived FROM chat_history "
+        "WHERE " + " AND ".join(wh) + " ORDER BY created_at DESC LIMIT 80",
+        params,
+    ).fetchall()
     c.close()
     return [{"id": r["id"], "title": r["title"], "messages": json.loads(r["messages"]), "time": r["created_at"], "archived": bool(r["archived"])} for r in rows]
 
 def delete_chat(conv_id):
     c = _conn()
     c.execute("DELETE FROM chat_history WHERE id=?", (conv_id,))
+    c.commit()
+    c.close()
+
+def set_chat_archived(conv_id, archived=True):
+    c = _conn()
+    c.execute("UPDATE chat_history SET archived=? WHERE id=?", (1 if archived else 0, conv_id))
     c.commit()
     c.close()
 
@@ -409,11 +425,19 @@ def update_contract(cid, tenant_id, room_id, start_date, end_date='',
         (tenant_id, room_id, start_date, end_date, monthly_rent,
          water_price, electric_price, deposit, contract_file, status,
          water_meter_id, electric_meter_id, cid))
+    if room_id:
+        c.execute("UPDATE rooms SET status=? WHERE id=?", ("rented" if status == "active" else "idle", room_id))
     c.commit(); c.close()
 
-def end_contract(cid):
+def end_contract(cid, end_date=''):
     c = _conn()
-    c.execute("UPDATE contracts SET status='ended' WHERE id=?", (cid,))
+    row = c.execute("SELECT room_id FROM contracts WHERE id=?", (cid,)).fetchone()
+    if end_date:
+        c.execute("UPDATE contracts SET status='ended',end_date=? WHERE id=?", (end_date, cid))
+    else:
+        c.execute("UPDATE contracts SET status='ended' WHERE id=?", (cid,))
+    if row and row["room_id"]:
+        c.execute("UPDATE rooms SET status='idle' WHERE id=?", (row["room_id"],))
     c.commit(); c.close()
 
 def add_meter(room_id, mtype, meter_no='', init_reading=0.0, photo=''):

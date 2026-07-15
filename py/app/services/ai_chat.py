@@ -109,12 +109,23 @@ def save_chat(data):
     return {"id": db.save_chat(title, messages)}
 
 
-def list_chats():
-    return db.load_chats()
+def list_chats(data=None):
+    data = data or {}
+    return db.load_chats(data.get("keyword", ""), bool(data.get("archived", False)))
 
 
 def delete_chat(data):
     db.delete_chat(data.get("id", 0))
+    return {"success": True}
+
+
+def archive_chat(data):
+    db.set_chat_archived(data.get("id", 0), True)
+    return {"success": True}
+
+
+def restore_chat(data):
+    db.set_chat_archived(data.get("id", 0), False)
     return {"success": True}
 
 
