@@ -255,8 +255,8 @@ class MeterUsagePage extends React.Component<{ type: string; title: string; icon
                   return (
                     <div key={mid} className="plan-card">
                       <div className="card-header">
-                        <span className="card-tenant">{row.room_number || ''}</span>
-                        <span className="card-room">{row.meter_no || ('表ID ' + mid)}</span>
+                        <span className="card-room">{row.room_number || ''}</span>
+                        <span className="card-tenant">{row.meter_no || ('表ID ' + mid)}</span>
                       </div>
                       <div className="card-items">
                         <div className="card-item">楼栋 <span>{row.building_name || ''}</span></div>

@@ -1,7 +1,9 @@
 import React from 'react'
+import { DeleteOutlined, UploadOutlined } from '@ant-design/icons'
 import { rental } from '../api'
 import { showToast } from '../components/ui'
 import { resolveBuildingId, useUIStore } from '../store'
+import Zoom from 'react-medium-image-zoom'
 
 interface Meter { id: number; meter_no: string; room_number: string; room_id: number; init_reading: number; photo: string; building_id: number }
 interface Building { id: number; name: string; rent_day?: number }
@@ -86,9 +88,17 @@ class MeterPage extends React.Component<{ type: string; title: string; icon: str
   handlePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    const input = e.currentTarget
     const reader = new FileReader()
-    reader.onload = () => this.setState({ photo: reader.result as string })
+    reader.onload = () => {
+      this.setState({ photo: reader.result as string })
+      input.value = ''
+    }
     reader.readAsDataURL(file)
+  }
+
+  removePhoto = () => {
+    this.setState({ photo: '', zoomImg: null })
   }
 
   save = async () => {
@@ -173,6 +183,7 @@ class MeterPage extends React.Component<{ type: string; title: string; icon: str
     const { modal, editId, roomId, meterNo, initReading, photo, modalRooms, roomMenuOpen } = this.state
     if (!modal) return null
     const selRoom = modalRooms.find(r => String(r.id) === roomId)
+    const photoInputId = 'meter_photo_' + this.props.type
 
     return (
       <div className="modal-overlay" onClick={() => this.setState({ modal: false })}>
@@ -205,14 +216,30 @@ class MeterPage extends React.Component<{ type: string; title: string; icon: str
             </div>
             <div className="form-group">
               <label>照片</label>
-              <input type="file" accept="image/*" onChange={this.handlePhoto} />
-              {photo && (
-                <div style={{marginTop:6}}>
-                  <img src={photo} className="meter-preview-img"
-                    onMouseEnter={() => this.setState({ zoomImg: photo })}
-                    onMouseLeave={() => this.setState({ zoomImg: null })} />
+              <div className={'upload-area meter-config-upload' + (photo ? ' has-image' : '')}>
+                <input id={photoInputId} type="file" accept="image/*" onChange={this.handlePhoto} style={{display:'none'}} />
+                <div className="upload-preview" style={{flexDirection:'column',gap:6}}>
+                  {photo ? (
+                    <div className="meter-photo-preview">
+                      <Zoom><img src={photo} className="meter-preview-img" title="点击放大预览" /></Zoom>
+                      <div className="meter-photo-actions">
+                        <button type="button" className="meter-photo-action" onClick={() => document.getElementById(photoInputId)?.click()}>
+                          <UploadOutlined /> 更换
+                        </button>
+                        <button type="button" className="meter-photo-action delete" onClick={this.removePhoto}>
+                          <DeleteOutlined /> 删除
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button type="button" className="meter-upload-empty" onClick={() => document.getElementById(photoInputId)?.click()}>
+                      <UploadOutlined />
+                      <span>上传表具照片</span>
+                      <small>支持 JPG、PNG 等图片</small>
+                    </button>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
             <div className="modal-actions">
               <button className="btn btn-outline" onClick={() => this.setState({ modal: false })}>取消</button>

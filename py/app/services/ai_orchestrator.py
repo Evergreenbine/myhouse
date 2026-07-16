@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from typing import Any, Dict, List
+from typing import Any, Dict, List, TypedDict
 
 from ai_service import ai_svc
 
@@ -19,8 +19,57 @@ from app.services.skill_executor import execute_tool, get_tool_schemas
 from app.services.skill_registry import format_skill_hits
 from app.services.skill_vector_store import search_skills
 
+try:
+    from langgraph.graph import END, START, StateGraph
+except Exception:  # pragma: no cover - dependency may be installed only in deployed env
+    END = START = None
+    StateGraph = None
+
+
+class AIChatGraphState(TypedDict, total=False):
+    data: Dict[str, Any]
+    prompt: str
+    history: List[Dict[str, Any]]
+    pending_action_command: str
+    messages: List[Dict[str, Any]]
+    tools: List[Dict[str, Any]]
+    model_response: Dict[str, Any]
+    last_tool_results: List[Dict[str, Any]]
+    skill_hits: List[Dict[str, Any]]
+    tool_round: int
+    result: Dict[str, Any]
+
+
+_CHAT_GRAPH = None
+
 
 PENDING_ACTION_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "ai_suggest_actions",
+            "description": "给用户展示可点击的建议方案按钮。只用于建议、下一步选择或非破坏性流程分支；需要写入数据时仍应使用待确认操作。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "actions": {
+                        "type": "array",
+                        "description": "建议方案列表，通常 2 到 4 个。",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {"type": "string", "description": "按钮文案，尽量短，例如：覆盖旧账单。"},
+                                "prompt": {"type": "string", "description": "点击后发送给助手的完整用户意图。"},
+                                "description": {"type": "string", "description": "可选的简短说明，说明该方案会做什么。"},
+                            },
+                            "required": ["label", "prompt"],
+                        },
+                    }
+                },
+                "required": ["actions"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -125,7 +174,7 @@ def _extract_tool_call(call: Dict[str, Any]) -> Dict[str, Any]:
 
 def _build_system_prompt(prompt: str, skill_context: str, data_context: str, image_context: str = "") -> str:
     return (
-        "你是租房管理系统助手，名叫“租房小管家”。"
+        "你是哈基米助手，名叫“哈基米”，你对用户的称呼是“大王”。"
         "你需要用中文回答，简洁、准确、可执行。"
         "优先使用工具查询实时业务数据；工具结果比推测更可靠。"
         "不要编造房间、租客、账单、读数、收款记录。"
@@ -134,6 +183,9 @@ def _build_system_prompt(prompt: str, skill_context: str, data_context: str, ima
         "如果数据没有录入或上下文没有提供，要明确说明缺少什么。"
         "涉及金额时使用人民币并保留两位小数。"
         "读数只返回数字，不附带单位。"
+        "识别或处理机械式电表读数时，黑色数字窗口从左到右是整数位，可能是4位、5位或更多，不能截断；标0.1/0.01、红色数字、红框小窗或白底小窗通常是小数位。"
+        "租房抄表默认忽略小数位，只录整数；例如黑色整数位2088、右侧0.1小数位9，应按2088处理，不要按20889处理。"
+        "识别或处理机械式水表时，优先读取长方形数字窗整数位，忽略下方小圆盘小数位，并去掉前导零；例如00712按712处理。"
         "展示格式要适合聊天窗口：首行先给结论，后面用简短分组和紧凑表格。"
         "不要频繁使用 Markdown 大标题、横线和表情符号；除非确实需要，不要输出 ##、---。"
         "当用户要求输出、生成、查看、复制账单图片或收据图片时，优先调用 bill_get_receipt_image_data。"
@@ -144,9 +196,14 @@ def _build_system_prompt(prompt: str, skill_context: str, data_context: str, ima
         "涉及图片识别、录入读数或保存账单时，先返回待确认操作，不能因为用户上传图片就直接写入数据库。"
         "当用户继续要求生成账单时，在读数保存成功后调用 bill_create_from_ai。"
         "用户要求添加网费、卫生费等其他费用时，调用 bill_create_from_ai 并通过 other_fee_details 按项目名称和金额逐项传递，不能只传其他费用汇总。"
+        "用户要求删除、去掉或取消网费、卫生费等某项其他费用时，调用 bill_create_from_ai，设置 overwrite=true，并通过 remove_other_fee_names 传入要删除的项目名称；用户要求清空全部其他费用时设置 clear_other_fees=true。"
+        "删除或修改某个租户账单的其他费用时，如果用户只说租户姓名，没有说房间号，可以把姓名作为 tenant_name 传给 bill_create_from_ai。"
+        "删除或清空其他费用也必须先返回待确认操作卡片，确认后再覆盖账单和账单图片。"
         "用户明确要求修改、替换或覆盖已有账单及账单图片时，调用 bill_create_from_ai 并设置 overwrite=true；仍需先返回覆盖确认事项，确认后再更新账单和图片。"
         "如果缺少房间号、月份或水表/电表类型，不要猜测，先请用户补充。"
+        "当用户查询合同详情、某租户住哪、某房间当前合同、有效合同列表或合同绑定表具时，优先调用 contract_tenant_get_contract_detail、contract_tenant_list_active_contracts、contract_tenant_get_room_tenant 或 contract_tenant_get_contract_meter_binding。"
         "当用户要求修改现有合同的月租、水电单价、保证金、合同日期或水电表绑定时，调用 contract_update_from_ai。"
+        "用户只说租户姓名时，可以把姓名作为 tenant_name 传给合同查询和合同修改工具；如果匹配到多个合同，要让用户补充楼栋或房间。"
         "合同修改必须先返回待确认操作；如果同一房间号存在于多个楼栋，要先请用户明确楼栋。"
         "退租、恢复合同、变更租客或更换房间不是普通合同字段修改，不能调用 contract_update_from_ai，需明确告诉用户应使用对应业务流程。"
         "当用户要求确认收款、登记收款或标记某房间已经交租时，调用 payment_confirm_from_ai。"
@@ -154,6 +211,8 @@ def _build_system_prompt(prompt: str, skill_context: str, data_context: str, ima
         "账单仍在录入中或待发送、账单已收完、金额超过待收，或房间和楼栋不明确时，不能直接收款，要向用户说明需要先处理或补充什么。"
         "如果存在待确认操作，且用户通过文字表示确认、可以、录入、保存、执行，就调用 ai_confirm_pending_action；界面按钮会通过同一待确认协议直接执行。"
         "如果用户要求取消待确认操作，就调用 ai_cancel_pending_action。"
+        "当你要给用户多个建议、处理方案、下一步选择或“是否继续”的普通选项时，调用 ai_suggest_actions 返回可点击按钮；按钮 label 要短，prompt 要写成点击后可直接执行的完整意图。"
+        "如果某个选择会直接写入、覆盖、确认收款或修改合同，要优先生成待确认操作卡片，不能只给建议按钮。"
         "除 meter_reading_save_from_ai、bill_create_from_ai、contract_update_from_ai 和 payment_confirm_from_ai 这四个待确认工具外，不能声称已经写入、发送账单、确认收款、修改合同或覆盖读数。"
         "保存读数或生成账单后，要根据工具结果明确说明是否成功；如果工具提示需要确认、已有读数或已有账单，要如实提醒用户。"
         "如果只是生成账单草稿，必须明确说明草稿未保存，需要用户确认后再操作。"
@@ -446,15 +505,34 @@ def _merge_pending_actions(existing: List[Dict[str, Any]], tool_results: List[Di
     return list(by_id.values())
 
 
-def chat(data: Dict[str, Any]) -> Dict[str, Any]:
-    prompt = str(data.get("prompt") or "").strip()
-    history = data.get("history") or []
-    pending_action_command = str(data.get("pending_action_command") or "").strip().lower()
-    if pending_action_command in {"confirm", "cancel"}:
-        return _pending_action_command_response(data, pending_action_command)
-    if not prompt:
-        return {"reply": "请先输入你想查询的问题。"}
+def _collect_suggested_actions(tool_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    suggestions: List[Dict[str, Any]] = []
+    seen = set()
+    for result in tool_results:
+        data = result.get("data") if isinstance(result, dict) else None
+        if not isinstance(data, dict):
+            continue
+        for item in data.get("suggested_actions") or []:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip()
+            prompt = str(item.get("prompt") or "").strip()
+            if not label or not prompt:
+                continue
+            key = (label, prompt)
+            if key in seen:
+                continue
+            seen.add(key)
+            suggestions.append({
+                "id": str(item.get("id") or ""),
+                "label": label,
+                "prompt": prompt,
+                "description": str(item.get("description") or "").strip(),
+            })
+    return suggestions
 
+
+def _prepare_chat_context(data: Dict[str, Any], prompt: str, history: List[Dict[str, Any]]) -> Dict[str, Any]:
     skill_hits = search_skills(prompt, top_k=5)
     skill_context = format_skill_hits(skill_hits)
     data_context = build_rental_ai_context(prompt)
@@ -470,42 +548,65 @@ def chat(data: Dict[str, Any]) -> Dict[str, Any]:
     messages.append({"role": "user", "content": prompt})
 
     tools = get_tool_schemas() + PENDING_ACTION_TOOLS
-    last_tool_results: List[Dict[str, Any]] = []
-    resp = ai_svc.call_with_tools(messages, tools=tools, max_tokens=1200, temperature=0.2)
+    return {
+        "messages": messages,
+        "tools": tools,
+        "skill_hits": skill_hits,
+    }
 
-    for _ in range(2):
-        tool_calls = resp.get("tool_calls") or []
-        if not tool_calls:
-            break
 
-        messages.append({
-            "role": "assistant",
-            "content": resp.get("content") or "",
-            "tool_calls": tool_calls,
+def _execute_ai_tool_call(raw_call: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, Any]:
+    call = _extract_tool_call(raw_call)
+    if call["name"] == "ai_suggest_actions":
+        args = _parse_tool_args(call["arguments"])
+        return {"ok": True, "tool": call["name"], "data": {"suggested_actions": args.get("actions") or []}}
+    if call["name"] == "ai_confirm_pending_action":
+        return {"ok": True, "tool": call["name"], "data": _confirm_pending_action(call["arguments"], data)}
+    if call["name"] == "ai_cancel_pending_action":
+        return {"ok": True, "tool": call["name"], "data": _cancel_pending_action(call["arguments"], data)}
+    tool_args = _tool_args_with_upload(call["name"], call["arguments"], data)
+    return execute_tool(call["name"], tool_args)
+
+
+def _append_tool_round(
+    messages: List[Dict[str, Any]],
+    resp: Dict[str, Any],
+    data: Dict[str, Any],
+) -> Dict[str, Any]:
+    tool_calls = resp.get("tool_calls") or []
+    next_messages = list(messages)
+    next_messages.append({
+        "role": "assistant",
+        "content": resp.get("content") or "",
+        "tool_calls": tool_calls,
+    })
+    results: List[Dict[str, Any]] = []
+    for raw_call in tool_calls:
+        call = _extract_tool_call(raw_call)
+        result = _execute_ai_tool_call(raw_call, data)
+        results.append(result)
+        next_messages.append({
+            "role": "tool",
+            "tool_call_id": call["id"],
+            "name": call["name"],
+            "content": _json_for_tool(result),
         })
+    return {"messages": next_messages, "tool_results": results}
 
-        for raw_call in tool_calls:
-            call = _extract_tool_call(raw_call)
-            if call["name"] == "ai_confirm_pending_action":
-                result = {"ok": True, "tool": call["name"], "data": _confirm_pending_action(call["arguments"], data)}
-            elif call["name"] == "ai_cancel_pending_action":
-                result = {"ok": True, "tool": call["name"], "data": _cancel_pending_action(call["arguments"], data)}
-            else:
-                tool_args = _tool_args_with_upload(call["name"], call["arguments"], data)
-                result = execute_tool(call["name"], tool_args)
-            last_tool_results.append(result)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": call["id"],
-                "name": call["name"],
-                "content": _json_for_tool(result),
-            })
 
-        resp = ai_svc.call_with_tools(messages, tools=tools, max_tokens=1200, temperature=0.2)
-
-    reply = resp.get("content") or ""
+def _finalize_chat_response(
+    reply: str,
+    data: Dict[str, Any],
+    last_tool_results: List[Dict[str, Any]],
+    skill_hits: List[Dict[str, Any]],
+) -> Dict[str, Any]:
     bill_images = _collect_bill_images(last_tool_results)
     pending_actions = _merge_pending_actions(data.get("pending_actions") or [], last_tool_results)
+    suggested_actions = _collect_suggested_actions(last_tool_results)
+    has_bill_confirmation = any(
+        isinstance(action, dict) and action.get("type") == "create_bill"
+        for action in pending_actions
+    )
     has_contract_update = any(
         isinstance(action, dict) and action.get("type") == "update_contract"
         for action in pending_actions
@@ -517,6 +618,8 @@ def chat(data: Dict[str, Any]) -> Dict[str, Any]:
 
     if _has_internal_tool_failure(last_tool_results) or _looks_like_technical_failure(reply):
         reply = GUIDED_HELP_REPLY
+    elif has_bill_confirmation:
+        reply = "账单草稿已准备，请核对金额和旧账单信息，并使用卡片按钮确认或取消。"
     elif has_contract_update:
         reply = "合同修改内容已准备，请核对下方的变更前后信息，并使用卡片按钮确认或取消。"
     elif has_payment_confirmation:
@@ -534,7 +637,8 @@ def chat(data: Dict[str, Any]) -> Dict[str, Any]:
         "reply": reply,
         "bill_images": bill_images,
         "pending_actions": pending_actions,
-        "response": {"type": "assistant_message", "content": reply, "pending_actions": pending_actions, "bill_images": bill_images},
+        "suggested_actions": suggested_actions,
+        "response": {"type": "assistant_message", "content": reply, "pending_actions": pending_actions, "bill_images": bill_images, "suggested_actions": suggested_actions},
         "skill_hits": [{
             "skill": hit.get("skill"),
             "title": hit.get("title"),
@@ -542,3 +646,173 @@ def chat(data: Dict[str, Any]) -> Dict[str, Any]:
             "score": hit.get("score"),
         } for hit in skill_hits],
     }
+
+
+def _chat_linear(data: Dict[str, Any]) -> Dict[str, Any]:
+    prompt = str(data.get("prompt") or "").strip()
+    history = data.get("history") or []
+    pending_action_command = str(data.get("pending_action_command") or "").strip().lower()
+    if pending_action_command in {"confirm", "cancel"}:
+        return _pending_action_command_response(data, pending_action_command)
+    if not prompt:
+        return {"reply": "请先输入你想查询的问题。"}
+
+    context = _prepare_chat_context(data, prompt, history)
+    messages = context["messages"]
+    tools = context["tools"]
+    skill_hits = context["skill_hits"]
+    last_tool_results: List[Dict[str, Any]] = []
+    resp = ai_svc.call_with_tools(messages, tools=tools, max_tokens=1200, temperature=0.2)
+
+    for _ in range(2):
+        tool_calls = resp.get("tool_calls") or []
+        if not tool_calls:
+            break
+        round_result = _append_tool_round(messages, resp, data)
+        messages = round_result["messages"]
+        last_tool_results.extend(round_result["tool_results"])
+        resp = ai_svc.call_with_tools(messages, tools=tools, max_tokens=1200, temperature=0.2)
+
+    return _finalize_chat_response(resp.get("content") or "", data, last_tool_results, skill_hits)
+
+
+def _graph_route(state: AIChatGraphState) -> str:
+    command = str(state.get("pending_action_command") or "").strip().lower()
+    if command in {"confirm", "cancel"}:
+        return "pending_command"
+    if not str(state.get("prompt") or "").strip():
+        return "empty_prompt"
+    return "normal_chat"
+
+
+def _graph_pending_command_node(state: AIChatGraphState) -> AIChatGraphState:
+    return {
+        "result": _pending_action_command_response(
+            state.get("data") or {},
+            str(state.get("pending_action_command") or "").strip().lower(),
+        )
+    }
+
+
+def _graph_empty_prompt_node(state: AIChatGraphState) -> AIChatGraphState:
+    return {"result": {"reply": "请先输入你想查询的问题。"}}
+
+
+def _graph_prepare_context_node(state: AIChatGraphState) -> AIChatGraphState:
+    context = _prepare_chat_context(
+        state.get("data") or {},
+        str(state.get("prompt") or "").strip(),
+        state.get("history") or [],
+    )
+    return {
+        "messages": context["messages"],
+        "tools": context["tools"],
+        "skill_hits": context["skill_hits"],
+        "last_tool_results": [],
+        "tool_round": 0,
+    }
+
+
+def _graph_call_model_node(state: AIChatGraphState) -> AIChatGraphState:
+    resp = ai_svc.call_with_tools(
+        state.get("messages") or [],
+        tools=state.get("tools") or [],
+        max_tokens=1200,
+        temperature=0.2,
+    )
+    return {"model_response": resp}
+
+
+def _graph_should_run_tools(state: AIChatGraphState) -> str:
+    resp = state.get("model_response") or {}
+    tool_calls = resp.get("tool_calls") or []
+    tool_round = int(state.get("tool_round") or 0)
+    if tool_calls and tool_round < 2:
+        return "run_tools"
+    return "finalize"
+
+
+def _graph_run_tools_node(state: AIChatGraphState) -> AIChatGraphState:
+    round_result = _append_tool_round(
+        state.get("messages") or [],
+        state.get("model_response") or {},
+        state.get("data") or {},
+    )
+    return {
+        "messages": round_result["messages"],
+        "last_tool_results": (state.get("last_tool_results") or []) + round_result["tool_results"],
+        "tool_round": int(state.get("tool_round") or 0) + 1,
+    }
+
+
+def _graph_finalize_node(state: AIChatGraphState) -> AIChatGraphState:
+    resp = state.get("model_response") or {}
+    return {
+        "result": _finalize_chat_response(
+            resp.get("content") or "",
+            state.get("data") or {},
+            state.get("last_tool_results") or [],
+            state.get("skill_hits") or [],
+        )
+    }
+
+
+def _get_chat_graph() -> Any:
+    global _CHAT_GRAPH
+    if StateGraph is None or START is None or END is None:
+        return None
+    if _CHAT_GRAPH is not None:
+        return _CHAT_GRAPH
+
+    graph = StateGraph(AIChatGraphState)
+    graph.add_node("route", lambda state: {})
+    graph.add_node("pending_command", _graph_pending_command_node)
+    graph.add_node("empty_prompt", _graph_empty_prompt_node)
+    graph.add_node("prepare_context", _graph_prepare_context_node)
+    graph.add_node("call_model", _graph_call_model_node)
+    graph.add_node("run_tools", _graph_run_tools_node)
+    graph.add_node("finalize", _graph_finalize_node)
+
+    graph.add_edge(START, "route")
+    graph.add_conditional_edges(
+        "route",
+        _graph_route,
+        {
+            "pending_command": "pending_command",
+            "empty_prompt": "empty_prompt",
+            "normal_chat": "prepare_context",
+        },
+    )
+    graph.add_edge("pending_command", END)
+    graph.add_edge("empty_prompt", END)
+    graph.add_edge("prepare_context", "call_model")
+    graph.add_conditional_edges(
+        "call_model",
+        _graph_should_run_tools,
+        {
+            "run_tools": "run_tools",
+            "finalize": "finalize",
+        },
+    )
+    graph.add_edge("run_tools", "call_model")
+    graph.add_edge("finalize", END)
+    _CHAT_GRAPH = graph.compile()
+    return _CHAT_GRAPH
+
+
+def _chat_graph(data: Dict[str, Any]) -> Dict[str, Any]:
+    graph = _get_chat_graph()
+    if graph is None:
+        return _chat_linear(data)
+    result = graph.invoke({
+        "data": data,
+        "prompt": str(data.get("prompt") or "").strip(),
+        "history": data.get("history") or [],
+        "pending_action_command": str(data.get("pending_action_command") or "").strip().lower(),
+    })
+    graph_result = result.get("result") if isinstance(result, dict) else None
+    return graph_result if isinstance(graph_result, dict) else _chat_linear(data)
+
+
+def chat(data: Dict[str, Any]) -> Dict[str, Any]:
+    return _chat_graph(data)

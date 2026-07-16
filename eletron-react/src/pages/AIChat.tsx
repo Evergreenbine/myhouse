@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckOutlined, CloseOutlined, CopyOutlined, DeleteOutlined, DownloadOutlined, InboxOutlined, LoadingOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PaperClipOutlined, RedoOutlined, RollbackOutlined, SearchOutlined } from "@ant-design/icons";
+import { CheckOutlined, CloseOutlined, CopyOutlined, DeleteOutlined, DownloadOutlined, InboxOutlined, LoadingOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PaperClipOutlined, RedoOutlined, RightOutlined, RollbackOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
 import html2canvas from "html2canvas";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -46,6 +46,13 @@ interface AIPendingAction {
   preview?: any
   status?: "pending" | "confirmed" | "cancelled" | "failed"
   statusMessage?: string
+}
+
+interface AISuggestedAction {
+  id?: string
+  label: string
+  prompt: string
+  description?: string
 }
 
 interface AIImageAttachment {
@@ -101,6 +108,7 @@ interface AIMessage {
   billImages?: BillReceiptImage[]
   images?: AIMessageImage[]
   pendingActions?: AIPendingAction[]
+  suggestedActions?: AISuggestedAction[]
 }
 
 interface AIChatState {
@@ -115,6 +123,8 @@ interface AIChatState {
   deleteConfirmId: number
   sidebarCollapsed: boolean
   attachments: AIImageAttachment[]
+  attachmentPanelOpen: boolean
+  attachmentDragActive: boolean
   hoverPreviewImage: string
   activePreviewImage: string
   pendingActions: AIPendingAction[]
@@ -152,6 +162,8 @@ export class AIChat extends React.Component<{}, AIChatState> {
     deleteConfirmId: 0,
     sidebarCollapsed: false,
     attachments: [],
+    attachmentPanelOpen: false,
+    attachmentDragActive: false,
     hoverPreviewImage: "",
     activePreviewImage: "",
     pendingActions: [],
@@ -163,6 +175,8 @@ export class AIChat extends React.Component<{}, AIChatState> {
   private inputRef = React.createRef<HTMLInputElement>()
   private fileRef = React.createRef<HTMLInputElement>()
   private sidebarRef = React.createRef<HTMLDivElement>()
+  private skipNextHistoryAutoRestore = false
+  private deletedChatIds = new Set<number>()
 
   formatMoney = (value: any) => {
     var num = Number(value || 0)
@@ -322,25 +336,57 @@ export class AIChat extends React.Component<{}, AIChatState> {
   toggle = () => {
     this.setState(s => {
       if (!s.open) {
-        setTimeout(() => { this.inputRef.current?.focus(); this.loadHistory() }, 50)
+        this.skipNextHistoryAutoRestore = false
+        setTimeout(() => { this.inputRef.current?.focus(); this.loadHistory({ restoreLatest: true }) }, 50)
       }
       return { open: !s.open }
     })
   }
 
   newChat = () => {
-    if (this.state.messages.length > 0 && !confirm("确定开始新对话？当前对话将丢失。")) return
-    this.setState({ messages: [], convId: 0, pendingActions: [], pendingActionLoadingId: "" })
+    this.skipNextHistoryAutoRestore = true
+    this.setState({ messages: [], convId: 0, pendingActions: [], pendingActionLoadingId: "", attachments: [], attachmentPanelOpen: false, attachmentDragActive: false })
     setTimeout(() => this.inputRef.current?.focus(), 50)
   }
 
-  loadHistory = async () => {
+  getRestoredChatState = (chat: any) => {
+    var restoredMessages: AIMessage[] = chat.messages || []
+    var restoredPending = restoredMessages
+      .flatMap(message => message.pendingActions || [])
+      .filter(action => !action.status || action.status === "pending" || action.status === "failed")
+      .filter((action, index, actions) => actions.findIndex(item => item.id === action.id) === index)
+    return {
+      messages: restoredMessages,
+      convId: Number(chat.id || 0),
+      sidebarCollapsed: false,
+      pendingActions: restoredPending,
+      pendingActionLoadingId: "",
+    }
+  }
+
+  loadHistory = async (options?: { restoreLatest?: boolean }) => {
     try {
       var chats = await rental("_ai", "list_chats", {
         keyword: this.state.historySearch,
         archived: this.state.historyArchived,
       }) || []
-      this.setState({ historyChats: chats })
+      var shouldRestoreLatest = Boolean(
+        options?.restoreLatest
+        && !this.skipNextHistoryAutoRestore
+        && !this.state.convId
+        && this.state.messages.length === 0
+        && !this.state.historyArchived
+        && !this.state.historySearch.trim()
+        && chats.length > 0
+      )
+      if (shouldRestoreLatest) {
+        this.setState({ historyChats: chats, ...this.getRestoredChatState(chats[0]) }, () => {
+          this.scrollBottom()
+          setTimeout(() => this.inputRef.current?.focus(), 50)
+        })
+      } else {
+        this.setState({ historyChats: chats })
+      }
     } catch { /* ignore */ }
   }
 
@@ -352,12 +398,8 @@ export class AIChat extends React.Component<{}, AIChatState> {
       }) || []
       var chat = chats.find(function(c: any) { return c.id === id })
       if (!chat) return
-      var restoredMessages: AIMessage[] = chat.messages || []
-      var restoredPending = restoredMessages
-        .flatMap(message => message.pendingActions || [])
-        .filter(action => !action.status || action.status === "pending" || action.status === "failed")
-        .filter((action, index, actions) => actions.findIndex(item => item.id === action.id) === index)
-      this.setState({ messages: restoredMessages, convId: id, sidebarCollapsed: false, pendingActions: restoredPending, pendingActionLoadingId: "" })
+      this.skipNextHistoryAutoRestore = false
+      this.setState(this.getRestoredChatState(chat))
       this.scrollBottom()
       setTimeout(() => this.inputRef.current?.focus(), 50)
     } catch { /* ignore */ }
@@ -366,9 +408,17 @@ export class AIChat extends React.Component<{}, AIChatState> {
   runHistoryRemoval = (id: number, action: () => Promise<void>) => {
     this.setState(s => ({ historyRemovingIds: Array.from(new Set([...s.historyRemovingIds, id])) }))
     setTimeout(async () => {
-      await action()
-      this.setState(s => ({ historyRemovingIds: s.historyRemovingIds.filter(x => x !== id) }))
-      this.loadHistory()
+      try {
+        await action()
+        this.setState(s => ({
+          historyChats: s.historyChats.filter((chat: any) => chat.id !== id),
+          historyRemovingIds: s.historyRemovingIds.filter(x => x !== id),
+        }))
+        this.loadHistory()
+      } catch {
+        this.setState(s => ({ historyRemovingIds: s.historyRemovingIds.filter(x => x !== id) }))
+        showToast("操作失败，请稍后重试")
+      }
     }, 180)
   }
 
@@ -379,11 +429,18 @@ export class AIChat extends React.Component<{}, AIChatState> {
   confirmDeleteChat = () => {
     var id = this.state.deleteConfirmId
     if (!id) return
+    this.deletedChatIds.add(id)
     this.setState({ deleteConfirmId: 0 })
     this.runHistoryRemoval(id, async () => {
-      await rental("_ai", "delete_chat", { id })
+      try {
+        await rental("_ai", "delete_chat", { id })
+      } catch (err) {
+        this.deletedChatIds.delete(id)
+        throw err
+      }
       if (this.state.convId === id) {
-        this.setState({ messages: [], convId: 0, pendingActions: [] })
+        this.skipNextHistoryAutoRestore = true
+        this.setState({ messages: [], convId: 0, pendingActions: [], pendingActionLoadingId: "", attachments: [], attachmentPanelOpen: false, attachmentDragActive: false, loading: false })
       }
       showToast("已删除")
     })
@@ -420,9 +477,17 @@ export class AIChat extends React.Component<{}, AIChatState> {
     this.send()
   }
 
+  runSuggestedAction = (action: AISuggestedAction) => {
+    if (this.state.loading) return
+    if (!action.prompt) return
+    if (this.inputRef.current) this.inputRef.current.value = action.prompt
+    this.send()
+  }
+
   send = async () => {
     var input = this.state.loading ? "" : (this.inputRef.current?.value || "").trim()
     if (!input) return
+    var convIdAtStart = this.state.convId
     if (this.inputRef.current) this.inputRef.current.value = ""
     var msgs = [...this.state.messages, { role: "user" as const, content: input }]
     this.setState({ messages: msgs, loading: true })
@@ -435,16 +500,20 @@ export class AIChat extends React.Component<{}, AIChatState> {
       var reply = safeAssistantReply(res?.response?.content || res?.reply)
       var nextPendingActions = res?.response?.pending_actions || res?.pending_actions || []
       var responseBillImages = res?.response?.bill_images || res?.bill_images || []
-      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions }]
+      var suggestedActions = res?.response?.suggested_actions || res?.suggested_actions || []
+      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions, suggestedActions }]
+      if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
       this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions })
       this.scrollBottom()
       var title = input.substring(0, 30)
+      if (this.state.convId > 0 && this.deletedChatIds.has(this.state.convId)) return
       var saveRes = await rental("_ai", "save_chat", { id: this.state.convId, title, messages: msgs })
       if (saveRes && saveRes.id) {
         this.setState({ convId: saveRes.id })
         this.loadHistory()
       }
     } catch {
+      if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
       msgs = [...msgs, { role: "assistant" as const, content: AI_GUIDED_HELP_REPLY }]
       this.setState({ messages: msgs, loading: false })
       this.scrollBottom()
@@ -452,6 +521,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
   }
 
   persistMessages = async (messages: AIMessage[], title: string) => {
+    if (this.state.convId > 0 && this.deletedChatIds.has(this.state.convId)) return
     var saveRes = await rental("_ai", "save_chat", { id: this.state.convId, title, messages })
     if (saveRes && saveRes.id) {
       this.setState({ convId: saveRes.id })
@@ -463,6 +533,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
     if (this.state.loading) return
     var pendingActions = this.state.pendingActions
     if (!pendingActions.some(item => item.id === action.id)) return
+    var convIdAtStart = this.state.convId
     this.setState({ loading: true, pendingActionLoadingId: action.id })
     try {
       var res = await api("/api/rental", {
@@ -486,6 +557,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
       var actionRemains = remainingActions.some((item: AIPendingAction) => item.id === action.id)
       var actionSucceeded = typeof actionResult.success === "boolean" ? actionResult.success : !actionRemains
       var actionStatus: AIPendingAction["status"] = actionSucceeded ? (command === "cancel" ? "cancelled" : "confirmed") : "failed"
+      if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
       var firstActionMessageIndex = this.state.messages.findIndex(message => message.pendingActions?.some(item => item.id === action.id))
       var updatedMessages = this.replaceExistingBillImages(this.state.messages, responseBillImages).map((message, messageIndex) => {
         var containsAction = message.pendingActions?.some(item => item.id === action.id)
@@ -513,6 +585,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
       this.setState({ messages, loading: false, pendingActionLoadingId: "", pendingActions: remainingActions })
       await this.persistMessages(messages, action.label || "AI 操作")
     } catch {
+      if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
       var fallbackMessages = this.state.messages.map(message => ({
         ...message,
         pendingActions: message.pendingActions?.map(item => item.id === action.id ? {
@@ -538,6 +611,8 @@ export class AIChat extends React.Component<{}, AIChatState> {
       ["上月读数", preview.previous_reading],
       ["用量", preview.usage],
       ["照片", preview.photo_saved ? "已包含" : undefined],
+      ["旧账单", preview.existing_total_amount === undefined || preview.existing_total_amount === null ? undefined : this.formatMoney(preview.existing_total_amount)],
+      ["旧状态", preview.existing_status],
       ["合计", preview.total_amount === undefined ? undefined : this.formatMoney(preview.total_amount)],
       ["应收", preview.receivable === undefined ? undefined : this.formatMoney(preview.receivable)],
       ["已收", preview.paid_amount === undefined ? undefined : this.formatMoney(preview.paid_amount)],
@@ -613,6 +688,30 @@ export class AIChat extends React.Component<{}, AIChatState> {
     return <div className="ai-pending-action-list">{actions.map(action => this.renderPendingAction(action))}</div>
   }
 
+  renderSuggestedActions = (actions: AISuggestedAction[]) => {
+    var validActions = (actions || []).filter(action => action && action.label && action.prompt)
+    if (!validActions.length) return null
+    return (
+      <div className="ai-suggested-actions">
+        {validActions.map((action, index) => (
+          <button
+            type="button"
+            key={action.id || action.label + index}
+            onClick={() => this.runSuggestedAction(action)}
+            disabled={this.state.loading}
+          >
+            <span className="ai-suggested-action-index">{index + 1}</span>
+            <span className="ai-suggested-action-text">
+              <strong>{action.label}</strong>
+              {action.description && <em>{action.description}</em>}
+            </span>
+            <RightOutlined />
+          </button>
+        ))}
+      </div>
+    )
+  }
+
 
   inferMeterType = () => {
     var input = this.inputRef.current?.value || ""
@@ -640,6 +739,10 @@ export class AIChat extends React.Component<{}, AIChatState> {
       reader.onload = () => resolve(reader.result as string)
       reader.readAsDataURL(file)
     })
+  }
+
+  isImageFile = (file: File) => {
+    return file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|heic|heif)$/i.test(file.name || "")
   }
 
   loadMeterOptions = async () => {
@@ -728,15 +831,18 @@ export class AIChat extends React.Component<{}, AIChatState> {
     }
   }
 
-  handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    var files = Array.from(e.target.files || [])
-    if (!files.length) return
+  handleImageFiles = async (files: File[]) => {
+    var imageFiles = files.filter(file => this.isImageFile(file))
+    if (!imageFiles.length) {
+      showToast("请上传图片文件")
+      return
+    }
     await this.loadMeterOptions()
     var newItems: AIImageAttachment[] = []
-    for (var i = 0; i < files.length; i++) {
-      var file = files[i]
+    for (var i = 0; i < imageFiles.length; i++) {
+      var file = imageFiles[i]
       var dataUrl = await this.readFileAsDataUrl(file)
-      var meterType = this.inferMeterTypeForFile(file, i, files.length)
+      var meterType = this.inferMeterTypeForFile(file, i, imageFiles.length)
       newItems.push({
         id: Date.now() + "_" + Math.random().toString(16).slice(2),
         dataUrl,
@@ -748,7 +854,40 @@ export class AIChat extends React.Component<{}, AIChatState> {
     }
     this.setState(s => ({ attachments: [...s.attachments, ...newItems] }))
     newItems.forEach(item => this.recognizeAttachment(item.id, item.dataUrl, item.meterType))
+    if (imageFiles.length !== files.length) showToast("已忽略非图片文件")
     if (this.fileRef.current) this.fileRef.current.value = ""
+  }
+
+  handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    await this.handleImageFiles(Array.from(e.target.files || []))
+  }
+
+  handleAttachmentDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!this.state.loading) this.setState({ attachmentDragActive: true })
+  }
+
+  handleAttachmentDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!this.state.loading && !this.state.attachmentDragActive) this.setState({ attachmentDragActive: true })
+  }
+
+  handleAttachmentDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    var nextTarget = e.relatedTarget as Node | null
+    if (nextTarget && e.currentTarget.contains(nextTarget)) return
+    this.setState({ attachmentDragActive: false })
+  }
+
+  handleAttachmentDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (this.state.loading) return
+    this.setState({ attachmentDragActive: false, attachmentPanelOpen: true })
+    await this.handleImageFiles(Array.from(e.dataTransfer.files || []))
   }
 
   removeAttachment = (id: string) => {
@@ -823,6 +962,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
       showToast("图片还在识别中，请稍等")
       return
     }
+    var convIdAtStart = this.state.convId
     
     if (this.inputRef.current) this.inputRef.current.value = ""
     
@@ -843,7 +983,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
       meterNumber: item.meterNumber,
     }))
     var msgs = [...this.state.messages, { role: "user" as const, content: userMsg, images: messageImages }]
-    this.setState({ messages: msgs, loading: true, attachments: [] })
+    this.setState({ messages: msgs, loading: true, attachments: [], attachmentPanelOpen: false, attachmentDragActive: false })
     this.scrollBottom()
 
     try {
@@ -883,16 +1023,20 @@ export class AIChat extends React.Component<{}, AIChatState> {
       var reply = safeAssistantReply(res?.response?.content || res?.reply)
       var nextPendingActions = res?.response?.pending_actions || res?.pending_actions || []
       var responseBillImages = res?.response?.bill_images || res?.bill_images || []
-      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions }]
+      var suggestedActions = res?.response?.suggested_actions || res?.suggested_actions || []
+      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions, suggestedActions }]
+      if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
       this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions })
       this.scrollBottom()
       var title = input.substring(0, 30) || "图片识别"
+      if (this.state.convId > 0 && this.deletedChatIds.has(this.state.convId)) return
       var saveRes = await rental("_ai", "save_chat", { id: this.state.convId, title, messages: msgs })
       if (saveRes && saveRes.id) {
         this.setState({ convId: saveRes.id })
         this.loadHistory()
       }
     } catch {
+      if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
       msgs = [...msgs, { role: "assistant" as const, content: AI_GUIDED_HELP_REPLY }]
       this.setState({ messages: msgs, loading: false })
       this.scrollBottom()
@@ -911,7 +1055,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
 
     return (
       <>
-        <button id="ai-float-btn" onClick={this.toggle} title="AI 助手">
+        <button id="ai-float-btn" className={s.loading && !s.open ? "running" : ""} onClick={this.toggle} title={s.loading && !s.open ? "AI 正在处理" : "AI 助手"}>
           <span style={{fontSize:24}}><img src="/robot-avatar.jpg" className="ai-bot-avatar" /></span>
         </button>
 
@@ -994,7 +1138,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
               {s.messages.length === 0 && (
                   <div className="ai-welcome">
                   <div className="ai-welcome-icon"><img src="/robot-avatar.jpg" className="ai-bot-avatar" /></div>
-                  <h2>你好，我是租房小管家</h2>
+                  <h2>你好，大王，我是哈基米</h2>
                   <p>可以帮你查询租客信息、分析缴费情况、解答租房相关问题</p>
                   <p className="ai-welcome-hint">在下方输入你的问题开始对话</p>
                   <div className="ai-quick-prompts">
@@ -1041,6 +1185,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
                       </ReactMarkdown>
                       {m.billImages && m.billImages.map((image, j) => this.renderBillImage(image, i + "-" + j))}
                       {this.renderPendingActions(m.pendingActions || [])}
+                      {this.renderSuggestedActions(m.suggestedActions || [])}
                     </div>
                   </div>
                 )
@@ -1055,6 +1200,26 @@ export class AIChat extends React.Component<{}, AIChatState> {
               )}
             </div>
             <div className="ai-chat-footer-v2">
+              {s.attachmentPanelOpen && (
+                <div
+                  className="ai-attachment-panel"
+                  onDragEnter={this.handleAttachmentDragEnter}
+                  onDragOver={this.handleAttachmentDragOver}
+                  onDragLeave={this.handleAttachmentDragLeave}
+                  onDrop={this.handleAttachmentDrop}
+                >
+                  <div className={"ai-attachment-dropzone" + (s.attachmentDragActive ? " active" : "")}>
+                    <div className="ai-attachment-drop-icon"><UploadOutlined /></div>
+                    <div className="ai-attachment-drop-copy">
+                      <strong>{s.attachmentDragActive ? "松开上传图片" : "拖拽图片到这里"}</strong>
+                      <span>{s.attachments.length ? "已添加 " + s.attachments.length + " 张图片" : "支持一次拖入多张图片"}</span>
+                    </div>
+                    <button type="button" onClick={() => this.fileRef.current?.click()} disabled={s.loading}>
+                      选择图片
+                    </button>
+                  </div>
+                </div>
+              )}
               {s.attachments.length > 0 && (
                 <div className="ai-attachment-strip">
                   {s.attachments.map(item => (
@@ -1118,6 +1283,14 @@ export class AIChat extends React.Component<{}, AIChatState> {
               <div className="ai-input-wrap">
                 <button className="ai-attach-btn" onClick={() => this.fileRef.current?.click()} title="上传水电表图片" type="button">
                   <PaperClipOutlined />
+                </button>
+                <button
+                  className={"ai-attach-btn ai-attach-panel-toggle" + (s.attachmentPanelOpen ? " active" : "")}
+                  onClick={() => this.setState({ attachmentPanelOpen: !s.attachmentPanelOpen, attachmentDragActive: false })}
+                  title={s.attachmentPanelOpen ? "收起上传面板" : "展开上传面板"}
+                  type="button"
+                >
+                  <UploadOutlined />
                 </button>
                 <input type="file" ref={this.fileRef} accept="image/*" multiple style={{display:"none"}}
                   onChange={this.handleImageUpload} />

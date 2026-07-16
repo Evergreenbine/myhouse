@@ -419,6 +419,11 @@ class AIService:
         user_prompt = (
             "请识别这张" + hint + "照片。只识别表盘当前读数、表具类型、表号、图片中明确出现的楼栋名和房间号。"
             "不要把表号当成读数，不要把上月读数当成本月读数，不要读取单位。"
+            "机械式电表读数规则：黑色数字窗口从左到右全部作为整数位，可能是4位、5位或更多，不能因为超过4位就截断。"
+            "标注为0.1、0.01的小数位、红色数字、红框小窗或白底小窗通常是小数位；租房抄表默认忽略小数位，只返回整数读数。"
+            "例如黑色整数位为2088，右侧0.1小数位为9时，reading应返回2088，不要返回20889；如确需保留小数才返回2088.9。"
+            "机械式水表读数规则：优先读取长方形数字窗的整数立方米读数，忽略下方小圆盘指针小数位；去掉前导零。"
+            "例如数字窗显示00712时，reading应返回712，不要返回字符串00712，也不要把小圆盘指针拼进读数。"
             "返回固定字段："
             "{\"meter_type\":\"water|electric|unknown\","
             "\"reading\":number|null,\"meter_number\":string|null,"
@@ -487,6 +492,8 @@ class AIService:
             if isinstance(raw_reading, str):
                 match = re.search(r"-?\d+(?:\.\d+)?", raw_reading.replace(",", ""))
                 raw_reading = match.group(0) if match else None
+                if normalized_type == "water" and raw_reading and re.fullmatch(r"0+\d+", raw_reading):
+                    raw_reading = str(int(raw_reading))
             try:
                 reading = float(raw_reading) if raw_reading is not None else None
             except (TypeError, ValueError):

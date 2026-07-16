@@ -99,6 +99,54 @@ def _normalize_other_fee_details(value: Any, fallback_amount: Any = 0) -> List[D
     return details
 
 
+def _normalize_other_fee_names(value: Any) -> List[str]:
+    if value is None or value == "":
+        return []
+    parsed = value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value) if value.strip().startswith(("[", "{")) else value
+        except Exception:
+            parsed = value
+    if isinstance(parsed, dict):
+        parsed = [parsed]
+    elif not isinstance(parsed, list):
+        parsed = re.split(r"[,，、\s]+", str(parsed))
+
+    names: List[str] = []
+    for item in parsed:
+        if isinstance(item, dict):
+            raw = item.get("name") or item.get("project_name") or item.get("label") or ""
+        else:
+            raw = item
+        name = str(raw or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _fee_name_key(value: Any) -> str:
+    return re.sub(r"\s+", "", str(value or "").strip()).lower()
+
+
+def _is_clear_other_fee_request(names: List[str], clear_flag: Any) -> bool:
+    if _bool(clear_flag):
+        return True
+    clear_words = {"全部", "所有", "清空", "全部删除", "全删", "全部其它费用", "全部其他费用", "其他费用", "其它费用"}
+    clear_keys = {_fee_name_key(word) for word in clear_words}
+    return bool(names) and all(_fee_name_key(name) in clear_keys for name in names)
+
+
+def _matches_other_fee_name(fee_name: Any, remove_name: Any) -> bool:
+    fee_key = _fee_name_key(fee_name)
+    remove_key = _fee_name_key(remove_name)
+    if not fee_key or not remove_key:
+        return False
+    if fee_key == remove_key:
+        return True
+    return len(remove_key) >= 2 and (remove_key in fee_key or fee_key in remove_key)
+
+
 def _float_or_none(value: Any) -> Optional[float]:
     try:
         if value is None or value == "":
@@ -196,6 +244,7 @@ def _find_active_contract(
     room_number: Any = None,
     contract_id: Any = None,
     building_id: Any = None,
+    tenant_name: Any = None,
 ) -> Optional[Dict[str, Any]]:
     cid = _int_or_none(contract_id)
     if cid:
@@ -205,9 +254,15 @@ def _find_active_contract(
         return None
 
     room_text = str(room_number or "").strip()
+    tenant_text = str(tenant_name or "").strip()
     contracts = db.get_contracts(True, _int_or_none(building_id)) or []
-    if not room_text:
+    if not room_text and not tenant_text:
         return contracts[0] if len(contracts) == 1 else None
+
+    if tenant_text:
+        exact_tenant = [c for c in contracts if str(c.get("tenant_name", "")).strip() == tenant_text]
+        if exact_tenant:
+            return exact_tenant[0]
 
     exact = [c for c in contracts if str(c.get("room_number", "")).strip() == room_text]
     if exact:
@@ -220,9 +275,50 @@ def _find_active_contract(
             contract.get("room_number", ""),
             contract.get("tenant_name", ""),
         )
-        if room_text in haystack:
+        if room_text and room_text in haystack:
+            fuzzy.append(contract)
+        elif tenant_text and tenant_text in haystack:
             fuzzy.append(contract)
     return fuzzy[0] if fuzzy else None
+
+
+def _resolve_active_contract(
+    contract_id: Any = None,
+    room_number: Any = None,
+    tenant_name: Any = None,
+    building_id: Any = None,
+) -> tuple[Optional[Dict[str, Any]], str]:
+    cid = _int_or_none(contract_id)
+    if cid:
+        contract = db.get_contract(cid)
+        if not contract:
+            return None, "未找到该合同"
+        if contract.get("status") != "active":
+            return None, "该合同不是有效合同"
+        return contract, ""
+
+    room_text = str(room_number or "").strip()
+    tenant_text = str(tenant_name or "").strip()
+    if not room_text and not tenant_text:
+        return None, "请提供合同 ID，或说明楼栋、房间号、租户姓名"
+
+    contracts = db.get_contracts(True, _int_or_none(building_id)) or []
+    matches = contracts
+    if room_text:
+        matches = [item for item in matches if str(item.get("room_number") or "").strip() == room_text]
+    if tenant_text:
+        exact = [item for item in matches if str(item.get("tenant_name") or "").strip() == tenant_text]
+        matches = exact or [item for item in matches if tenant_text in str(item.get("tenant_name") or "")]
+
+    if len(matches) == 1:
+        return matches[0], ""
+    if len(matches) > 1:
+        rooms = "、".join(
+            "{}{}".format(str(item.get("building_name") or ""), str(item.get("room_number") or ""))
+            for item in matches[:8]
+        )
+        return None, "匹配到多个有效合同，请补充楼栋或房间号：" + rooms
+    return None, "未找到匹配的有效合同"
 
 
 def _bill_for_contract(contract_id: Any, month: str) -> Optional[Dict[str, Any]]:
@@ -944,32 +1040,26 @@ def bill_create_from_ai(
     contract_id: Any = None,
     month: Any = None,
     building_id: Any = None,
+    tenant_name: Any = None,
     overwrite: Any = False,
     rent_amount: Any = None,
     water_fee: Any = None,
     electric_fee: Any = None,
     other_fee: Any = None,
     other_fee_details: Any = None,
+    remove_other_fee_names: Any = None,
+    clear_other_fees: Any = False,
     water_curr: Any = None,
     electric_curr: Any = None,
     water_last: Any = None,
     electric_last: Any = None,
 ) -> Dict[str, Any]:
     month = _normalize_month(month)
-    contract = _find_active_contract(room_number=room_number, contract_id=contract_id, building_id=building_id)
+    contract = _find_active_contract(room_number=room_number, contract_id=contract_id, building_id=building_id, tenant_name=tenant_name)
     if not contract:
         return {"success": False, "month": month, "message": "未找到有效合同，无法生成账单"}
 
     existing = _bill_for_contract(contract.get("id"), month)
-    if existing and not _bool(overwrite):
-        return {
-            "success": False,
-            "already_exists": True,
-            "message": "该房间本月已经有账单，默认不重复生成。",
-            "bill": existing,
-            "receipt_image": _receipt_payload_from_bill(existing),
-        }
-
     draft_payload = bill_generate_draft(contract_id=contract.get("id"), month=month)
     if not draft_payload.get("success"):
         return draft_payload
@@ -987,11 +1077,13 @@ def bill_create_from_ai(
         if value is not None and value != "":
             draft[key] = _num(value)
 
+    remove_fee_names = _normalize_other_fee_names(remove_other_fee_names)
+    clear_other_fee_requested = _is_clear_other_fee_request(remove_fee_names, clear_other_fees)
     if other_fee_details is not None:
         normalized_other_fees = _normalize_other_fee_details(other_fee_details)
     elif other_fee is not None and other_fee != "":
         normalized_other_fees = _normalize_other_fee_details([], other_fee)
-    elif existing and _bool(overwrite):
+    elif existing and (_bool(overwrite) or remove_fee_names or clear_other_fee_requested):
         normalized_other_fees = _normalize_other_fee_details(
             existing.get("other_fee_details"),
             existing.get("other_fee"),
@@ -1001,6 +1093,23 @@ def bill_create_from_ai(
             draft.get("other_fee_details"),
             draft.get("other_fee"),
         )
+    if clear_other_fee_requested:
+        normalized_other_fees = []
+    elif remove_fee_names:
+        before_remove = normalized_other_fees
+        normalized_other_fees = [
+            item for item in normalized_other_fees
+            if not any(_matches_other_fee_name(item.get("name"), name) for name in remove_fee_names)
+        ]
+        if len(normalized_other_fees) == len(before_remove):
+            existing_names = [str(item.get("name") or "") for item in before_remove if item.get("name")]
+            return {
+                "success": False,
+                "message": "未在其它费用中找到要删除的项目，请确认项目名称。",
+                "remove_other_fee_names": remove_fee_names,
+                "existing_other_fee_names": existing_names,
+                "existing_other_fee_details": before_remove,
+            }
     draft["other_fee_details"] = normalized_other_fees
     draft["other_fee"] = round(sum(_num(item.get("amount")) for item in normalized_other_fees), 2)
     draft["total_amount"] = round(
@@ -1024,18 +1133,30 @@ def bill_create_from_ai(
             "draft": draft_payload,
         }
 
-    receipt_image = _receipt_payload_from_draft(draft_payload)
+    adjusted_draft_payload = {
+        **draft_payload,
+        "draft": draft,
+    }
+    receipt_image = _receipt_payload_from_draft(adjusted_draft_payload)
+    overwrite_existing = bool(existing)
+    should_overwrite = overwrite_existing or _bool(overwrite) or bool(remove_fee_names) or clear_other_fee_requested
     action_args = {
         "existing_bill_id": existing.get("id") if existing else None,
         "contract_id": contract.get("id"),
         "month": month,
-        "overwrite": _bool(overwrite),
+        "overwrite": should_overwrite,
         "draft": draft,
     }
-    overwrite_existing = bool(existing and _bool(overwrite))
+    action_label_prefix = "覆盖"
+    if clear_other_fee_requested:
+        action_label_prefix = "清空其他费用并覆盖"
+    elif remove_fee_names:
+        action_label_prefix = "删除" + "、".join(remove_fee_names) + "并覆盖"
+    elif not overwrite_existing:
+        action_label_prefix = "保存"
     action = _pending_action(
         "create_bill",
-        f"{'覆盖' if overwrite_existing else '保存'}{contract.get('room_number')} {month} 账单，合计 {_money(draft.get('total_amount'))}",
+        f"{action_label_prefix}{contract.get('room_number')} {month} 账单，合计 {_money(draft.get('total_amount'))}",
         "confirm_create_bill",
         action_args,
         {
@@ -1044,7 +1165,11 @@ def bill_create_from_ai(
             "month": month,
             "total_amount": _num(draft.get("total_amount")),
             "other_fee_details": normalized_other_fees,
-            "overwrite": overwrite_existing,
+            "overwrite": should_overwrite,
+            "existing_total_amount": _num(existing.get("receivable")) if existing else None,
+            "existing_status": existing.get("status") if existing else None,
+            "remove_other_fee_names": remove_fee_names,
+            "clear_other_fees": clear_other_fee_requested,
         },
     )
     return {
@@ -1052,10 +1177,18 @@ def bill_create_from_ai(
         "requires_confirmation": True,
         "action": "bill_prepared",
         "month": month,
-        "draft": draft_payload,
+        "draft": adjusted_draft_payload,
+        "existing_bill": existing if existing else None,
         "pending_action": action,
         "receipt_image": receipt_image,
-        "message": "账单草稿已准备，请用户确认后再保存。",
+        "suggested_actions": [
+            {
+                "id": "keep_existing_bill",
+                "label": "保留旧账单",
+                "prompt": "取消覆盖，保留现有账单。",
+            }
+        ] if overwrite_existing else [],
+        "message": "检测到已有账单，新账单草稿已准备，请用户确认是否覆盖。" if overwrite_existing else "账单草稿已准备，请用户确认后再保存。",
     }
 
 
@@ -1126,23 +1259,9 @@ def _resolve_contract_for_update(
     contract_id: Any = None,
     room_number: Any = None,
     building_id: Any = None,
+    tenant_name: Any = None,
 ) -> tuple[Optional[Dict[str, Any]], str]:
-    cid = _int_or_none(contract_id)
-    if cid:
-        contract = db.get_contract(cid)
-        return (contract, "") if contract else (None, "未找到该合同")
-
-    room_text = str(room_number or "").strip()
-    if not room_text:
-        return None, "请提供合同 ID，或说明楼栋和房间号"
-
-    contracts = db.get_contracts(True, _int_or_none(building_id)) or []
-    matches = [item for item in contracts if str(item.get("room_number") or "").strip() == room_text]
-    if len(matches) == 1:
-        return matches[0], ""
-    if len(matches) > 1:
-        return None, "多个楼栋都有该房间号，请补充楼栋名称"
-    return None, "未找到该房间的有效合同"
+    return _resolve_active_contract(contract_id, room_number, tenant_name, building_id)
 
 
 def _normalize_contract_date(value: Any, allow_empty: bool = False) -> tuple[Optional[str], str]:
@@ -1221,6 +1340,7 @@ def contract_update_from_ai(
     contract_id: Any = None,
     room_number: Any = None,
     building_id: Any = None,
+    tenant_name: Any = None,
     start_date: Any = _UNSET,
     end_date: Any = _UNSET,
     monthly_rent: Any = _UNSET,
@@ -1230,7 +1350,7 @@ def contract_update_from_ai(
     water_meter_id: Any = _UNSET,
     electric_meter_id: Any = _UNSET,
 ) -> Dict[str, Any]:
-    contract, error = _resolve_contract_for_update(contract_id, room_number, building_id)
+    contract, error = _resolve_contract_for_update(contract_id, room_number, building_id, tenant_name)
     if not contract:
         return {"success": False, "message": error}
 
@@ -1336,21 +1456,82 @@ def confirm_update_contract(contract_id: Any, changes: Any = None) -> Dict[str, 
     }
 
 
-def contract_tenant_get_room_tenant(room_number: Any, building_id: Any = None) -> Dict[str, Any]:
-    contract = _find_active_contract(room_number=room_number, building_id=building_id)
-    if not contract:
-        return {"found": False, "message": "该房间当前没有有效合同或未找到房间"}
-    return {"found": True, "contract": contract}
+def _contract_summary(contract: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "contract_id": contract.get("id"),
+        "building_name": contract.get("building_name"),
+        "room_number": contract.get("room_number"),
+        "tenant_name": contract.get("tenant_name"),
+        "tenant_phone": contract.get("tenant_phone"),
+        "start_date": contract.get("start_date"),
+        "end_date": contract.get("end_date"),
+        "monthly_rent": contract.get("monthly_rent"),
+        "deposit": contract.get("deposit"),
+        "water_unit_price": contract.get("water_unit_price"),
+        "electric_unit_price": contract.get("electric_unit_price"),
+        "water_meter_id": contract.get("water_meter_id"),
+        "electric_meter_id": contract.get("electric_meter_id"),
+        "status": contract.get("status"),
+    }
 
 
-def contract_tenant_get_contract_meter_binding(room_number: Any, building_id: Any = None) -> Dict[str, Any]:
-    contract = _find_active_contract(room_number=room_number, building_id=building_id)
+def contract_tenant_get_contract_detail(
+    contract_id: Any = None,
+    room_number: Any = None,
+    tenant_name: Any = None,
+    building_id: Any = None,
+) -> Dict[str, Any]:
+    contract, error = _resolve_active_contract(contract_id, room_number, tenant_name, building_id)
     if not contract:
-        return {"found": False, "message": "该房间当前没有有效合同或未找到房间"}
+        return {"found": False, "message": error}
     meters = db.get_meters(contract.get("room_id")) or []
     return {
         "found": True,
-        "contract": contract,
+        "contract": _contract_summary(contract),
+        "raw_contract": contract,
+        "meters": meters,
+    }
+
+
+def contract_tenant_list_active_contracts(
+    building_id: Any = None,
+    tenant_name: Any = None,
+    room_number: Any = None,
+) -> Dict[str, Any]:
+    rows = db.get_contracts(True, _int_or_none(building_id)) or []
+    tenant_text = str(tenant_name or "").strip()
+    room_text = str(room_number or "").strip()
+    if tenant_text:
+        rows = [item for item in rows if tenant_text in str(item.get("tenant_name") or "")]
+    if room_text:
+        rows = [item for item in rows if room_text in str(item.get("room_number") or "")]
+    return {
+        "count": len(rows),
+        "rows": [_contract_summary(item) for item in rows[:100]],
+    }
+
+
+def contract_tenant_get_room_tenant(room_number: Any = None, building_id: Any = None, tenant_name: Any = None) -> Dict[str, Any]:
+    contract, error = _resolve_active_contract(room_number=room_number, tenant_name=tenant_name, building_id=building_id)
+    if not contract:
+        return {"found": False, "message": error or "该房间当前没有有效合同或未找到房间"}
+    return {"found": True, "contract": _contract_summary(contract), "raw_contract": contract}
+
+
+def contract_tenant_get_contract_meter_binding(
+    room_number: Any = None,
+    building_id: Any = None,
+    tenant_name: Any = None,
+    contract_id: Any = None,
+) -> Dict[str, Any]:
+    contract, error = _resolve_active_contract(contract_id=contract_id, room_number=room_number, tenant_name=tenant_name, building_id=building_id)
+    if not contract:
+        return {"found": False, "message": error or "该房间当前没有有效合同或未找到房间"}
+    meters = db.get_meters(contract.get("room_id")) or []
+    return {
+        "found": True,
+        "contract": _contract_summary(contract),
+        "raw_contract": contract,
         "meters": meters,
         "binding": {
             "water_meter_id": contract.get("water_meter_id"),
@@ -1670,6 +1851,7 @@ def _tool_schema(name: str, description: str, properties: Dict[str, Any], requir
 MONTH_PROP = {"type": "string", "description": "账期，格式 YYYY-MM；不传默认本月"}
 BUILDING_PROP = {"type": "integer", "description": "楼栋 ID，可选"}
 ROOM_PROP = {"type": "string", "description": "房间号，例如 101"}
+TENANT_PROP = {"type": "string", "description": "租户/租客姓名；用户只提到租户时可用"}
 BILL_ID_PROP = {"type": "integer", "description": "账单 ID"}
 CONTRACT_ID_PROP = {"type": "integer", "description": "合同 ID"}
 METER_TYPE_PROP = {"type": "string", "enum": ["water", "electric"], "description": "水表 water，电表 electric；不传表示全部"}
@@ -1698,8 +1880,9 @@ TOOL_SCHEMAS = [
     _tool_schema("bill_generate_draft", "生成账单草稿数据但不保存。", {"contract_id": CONTRACT_ID_PROP, "room_number": ROOM_PROP, "month": MONTH_PROP, "building_id": BUILDING_PROP}),
     _tool_schema("bill_validate_preview", "检查已保存账单或账单草稿预览数据。", {"bill_id": BILL_ID_PROP, "contract_id": CONTRACT_ID_PROP, "room_number": ROOM_PROP, "month": MONTH_PROP, "building_id": BUILDING_PROP}),
     _tool_schema("bill_get_receipt_image_data", "获取 AIChat 渲染账单图片所需的数据。只返回图片数据，不保存账单。", {"bill_id": BILL_ID_PROP, "contract_id": CONTRACT_ID_PROP, "room_number": ROOM_PROP, "month": MONTH_PROP, "building_id": BUILDING_PROP}),
-    _tool_schema("bill_create_from_ai", "AI助手根据已录入读数准备生成某房间某月账单，并返回账单图片数据。返回待确认操作，不直接写库。支持用户对话调整金额或读数。", {
+    _tool_schema("bill_create_from_ai", "AI助手根据已录入读数准备生成或覆盖某房间/某租户某月账单，并返回账单图片数据。返回待确认操作，不直接写库。支持用户对话调整金额、读数、增加或删除其他费用。", {
         "room_number": ROOM_PROP,
+        "tenant_name": TENANT_PROP,
         "contract_id": CONTRACT_ID_PROP,
         "month": MONTH_PROP,
         "building_id": BUILDING_PROP,
@@ -1720,16 +1903,25 @@ TOOL_SCHEMAS = [
                 "required": ["name", "amount"],
             },
         },
+        "remove_other_fee_names": {
+            "type": "array",
+            "description": "要从已有账单其它费用中删除的项目名称，例如网费、卫生费；用于用户要求删除或去掉某项其它费用时",
+            "items": {"type": "string"},
+        },
+        "clear_other_fees": {"type": "boolean", "description": "是否清空已有账单的全部其它费用"},
         "water_curr": {"type": "number", "description": "用户指定的水表本月读数，可选"},
         "electric_curr": {"type": "number", "description": "用户指定的电表本月读数，可选"},
     }),
-    _tool_schema("contract_tenant_get_room_tenant", "查询某房间当前租客和有效合同。", {"room_number": ROOM_PROP, "building_id": BUILDING_PROP}, ["room_number"]),
-    _tool_schema("contract_tenant_get_contract_meter_binding", "查询某房间合同关联的水电表。", {"room_number": ROOM_PROP, "building_id": BUILDING_PROP}, ["room_number"]),
+    _tool_schema("contract_tenant_get_contract_detail", "按合同 ID、房间号或租户姓名查询有效合同详情。", {"contract_id": CONTRACT_ID_PROP, "room_number": ROOM_PROP, "tenant_name": TENANT_PROP, "building_id": BUILDING_PROP}),
+    _tool_schema("contract_tenant_list_active_contracts", "查询有效合同列表，可按楼栋、房间号或租户姓名筛选。", {"building_id": BUILDING_PROP, "tenant_name": TENANT_PROP, "room_number": ROOM_PROP}),
+    _tool_schema("contract_tenant_get_room_tenant", "查询某房间或某租户当前租客和有效合同。", {"room_number": ROOM_PROP, "tenant_name": TENANT_PROP, "building_id": BUILDING_PROP}),
+    _tool_schema("contract_tenant_get_contract_meter_binding", "查询某房间、某租户或某合同关联的水电表。", {"contract_id": CONTRACT_ID_PROP, "room_number": ROOM_PROP, "tenant_name": TENANT_PROP, "building_id": BUILDING_PROP}),
     _tool_schema("contract_tenant_list_expiring_contracts", "查询指定天数内即将到期的合同。", {"days": {"type": "integer", "description": "未来多少天内到期，默认 30"}, "building_id": BUILDING_PROP}),
     _tool_schema("contract_tenant_list_empty_rooms", "查询当前空置房间。", {"building_id": BUILDING_PROP}),
-    _tool_schema("contract_update_from_ai", "准备修改现有合同。按合同 ID，或楼栋和房间定位合同；返回待确认操作，不直接写库。", {
+    _tool_schema("contract_update_from_ai", "准备修改现有合同。按合同 ID、楼栋房间或租户姓名定位合同；返回待确认操作，不直接写库。", {
         "contract_id": CONTRACT_ID_PROP,
         "room_number": ROOM_PROP,
+        "tenant_name": TENANT_PROP,
         "building_id": BUILDING_PROP,
         "start_date": {"type": "string", "description": "新的合同开始日期，格式 YYYY-MM-DD"},
         "end_date": {"type": "string", "description": "新的合同结束日期，格式 YYYY-MM-DD"},
@@ -1775,6 +1967,8 @@ _HANDLERS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "bill_get_receipt_image_data": bill_get_receipt_image_data,
     "bill_create_from_ai": bill_create_from_ai,
     "confirm_create_bill": confirm_create_bill,
+    "contract_tenant_get_contract_detail": contract_tenant_get_contract_detail,
+    "contract_tenant_list_active_contracts": contract_tenant_list_active_contracts,
     "contract_tenant_get_room_tenant": contract_tenant_get_room_tenant,
     "contract_tenant_get_contract_meter_binding": contract_tenant_get_contract_meter_binding,
     "contract_tenant_list_expiring_contracts": contract_tenant_list_expiring_contracts,

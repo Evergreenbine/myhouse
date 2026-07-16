@@ -266,7 +266,10 @@ def save_chat(title, messages):
 
 def update_chat(conv_id, title, messages):
     c = _conn()
-    c.execute("UPDATE chat_history SET title=?, messages=? WHERE id=?", (title, json.dumps(messages, ensure_ascii=False), conv_id))
+    c.execute(
+        "UPDATE chat_history SET title=?, messages=?, created_at=datetime('now','localtime') WHERE id=?",
+        (title, json.dumps(messages, ensure_ascii=False), conv_id),
+    )
     c.commit()
     c.close()
 

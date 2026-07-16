@@ -9,7 +9,7 @@ export default function App() {
   return (
     <div id="app">
       <div id="top-bar">
-        <span id="app-title" onClick={() => setSection("settings")}>租房管理系统</span>
+        <span id="app-title" onClick={() => setSection("settings")}>FU的小家</span>
         <div className={"section-tab" + (section === "basic" ? " active" : "")} onClick={() => setSection("basic")}>基础信息</div>
         <div className={"section-tab" + (section === "rent" ? " active" : "")} onClick={() => setSection("rent")}>收租管理</div>
         <div className="spacer" />
@@ -20,7 +20,7 @@ export default function App() {
       {section === "settings" && <div id="content"><div id="main-content" style={{margin:0,padding:"24px 28px",flex:1,overflowY:"auto"}}><SettingsPage /></div></div>}
 
       <div id="bottom-bar">
-        <span id="bottom-status">租房管理系统 v1.0</span>
+        <span id="bottom-status">FU的小家 v1.0</span>
       </div>
       <AIChat />
     </div>

@@ -1,5 +1,5 @@
 import React from 'react'
-import { DeleteOutlined, LeftOutlined, PlusOutlined, RightOutlined, UploadOutlined } from '@ant-design/icons'
+import { CopyOutlined, DeleteOutlined, DownloadOutlined, LeftOutlined, PlusOutlined, RightOutlined, UploadOutlined } from '@ant-design/icons'
 import { rental } from '../api'
 import { DayPicker, MonthPicker, showToast } from '../components/ui'
 import { resolveBuildingId, useUIStore } from '../store'
@@ -572,8 +572,8 @@ export class RentPlanPage extends React.Component<{}, State> {
                     <div key={c.id} className="plan-card" onClick={() => this.openDrawer(c)}>
                       <div className={'card-dot ' + dotClass} title={dotLabel} onClick={e => e.stopPropagation()} />
                       <div className="card-header">
-                        <span className="card-tenant">{c.tenant_name || ''}</span>
                         <span className="card-room">{c.room_number || ''}</span>
+                        <span className="card-tenant">{c.tenant_name || ''}</span>
                       </div>
                       <div className="card-items">
                         <div className="card-item">月租 <span>¥{Number(c.monthly_rent || 0).toFixed(2)}</span></div>
@@ -738,9 +738,17 @@ export class RentPlanPage extends React.Component<{}, State> {
                     <span className="section-label" style={{marginBottom:0}}>📋 账单预览</span>
                     <div style={{display:'flex',gap:6}}>
                       <button className="btn btn-sm btn-outline" onClick={() => this.setDrawerStep(1)} style={{padding:'3px 10px',fontSize:11,borderRadius:6}}>返回录入</button>
-                      <button className="btn btn-sm btn-outline" onClick={this.copyReceipt} style={{padding:'3px 10px',fontSize:11,borderRadius:6}}>复制</button>
-                      <button className="btn btn-sm btn-outline" onClick={this.saveReceipt} style={{padding:'3px 10px',fontSize:11,borderRadius:6}}>保存</button>
                       <button className="btn btn-sm btn-primary" onClick={this.goToPaymentStep} style={{padding:'3px 12px',fontSize:11,borderRadius:6}}>完成发送</button>
+                    </div>
+                  </div>
+                  <div className="receipt-image-toolbar">
+                    <div className="ai-bill-image-tools">
+                      <button type="button" onClick={this.copyReceipt} title="复制账单图片" aria-label="复制账单图片">
+                        <CopyOutlined />
+                      </button>
+                      <button type="button" onClick={this.saveReceipt} title="保存账单图片" aria-label="保存账单图片">
+                        <DownloadOutlined />
+                      </button>
                     </div>
                   </div>
                   <div className="receipt-capture" style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'var(--receipt-bg)',fontSize:13}}>
@@ -871,9 +879,15 @@ export class RentPlanPage extends React.Component<{}, State> {
                 <div className="drawer-section">
                   <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
                     <span className="section-label" style={{marginBottom:0}}>📋 账单</span>
-                    <div style={{display:'flex',gap:6}}>
-                      <button className="btn btn-sm btn-outline" onClick={this.copyReceipt} style={{padding:'3px 10px',fontSize:11,borderRadius:6}}>复制</button>
-                      <button className="btn btn-sm btn-outline" onClick={this.saveReceipt} style={{padding:'3px 10px',fontSize:11,borderRadius:6}}>保存</button>
+                  </div>
+                  <div className="receipt-image-toolbar">
+                    <div className="ai-bill-image-tools">
+                      <button type="button" onClick={this.copyReceipt} title="复制账单图片" aria-label="复制账单图片">
+                        <CopyOutlined />
+                      </button>
+                      <button type="button" onClick={this.saveReceipt} title="保存账单图片" aria-label="保存账单图片">
+                        <DownloadOutlined />
+                      </button>
                     </div>
                   </div>
                   <div className="receipt-capture" style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'var(--receipt-bg)',fontSize:13}}>
