@@ -730,18 +730,63 @@ def add_payment(bill_id, amount, pay_date=None, pay_method='', remark=''):
     if pay_date is None:
         from datetime import date; pay_date = date.today().isoformat()
     c = _conn()
-    c.execute("INSERT INTO payments (bill_id,amount,pay_date,pay_method,remark) VALUES (?,?,?,?,?)",
-              (bill_id, amount, pay_date, pay_method, remark))
-    c.commit(); pk = c.lastrowid; c.close()
+    cur = c.execute("INSERT INTO payments (bill_id,amount,pay_date,pay_method,remark) VALUES (?,?,?,?,?)",
+                    (bill_id, amount, pay_date, pay_method, remark))
+    c.commit(); pk = cur.lastrowid; c.close()
     _update_bill_payment_status(bill_id)
     return pk
 
-def get_payments(bill_id=None):
+def update_payment(pid, amount=None, pay_date=None, pay_method=None, remark=None):
     c = _conn()
+    row = c.execute("SELECT bill_id FROM payments WHERE id=?", (pid,)).fetchone()
+    if not row:
+        c.close()
+        return {"success": False, "error": "payment not found"}
+    sets, params = [], []
+    if amount is not None: sets.append("amount=?"); params.append(amount)
+    if pay_date is not None: sets.append("pay_date=?"); params.append(pay_date)
+    if pay_method is not None: sets.append("pay_method=?"); params.append(pay_method)
+    if remark is not None: sets.append("remark=?"); params.append(remark)
+    if sets:
+        params.append(pid)
+        c.execute("UPDATE payments SET " + ",".join(sets) + " WHERE id=?", params)
+    c.commit(); c.close()
+    _update_bill_payment_status(row["bill_id"])
+    return {"success": True}
+
+def get_payments(bill_id=None, month=None, building_id=None, keyword='', start_date=None, end_date=None, pay_method=None):
+    c = _conn()
+    where, params = [], []
     if bill_id:
-        rows = c.execute("SELECT p.*,b.billing_month FROM payments p JOIN bills b ON p.bill_id=b.id WHERE p.bill_id=? ORDER BY p.pay_date", (bill_id,)).fetchall()
-    else:
-        rows = c.execute("SELECT p.*,b.billing_month,b.total_amount FROM payments p JOIN bills b ON p.bill_id=b.id ORDER BY p.pay_date DESC LIMIT 100").fetchall()
+        where.append("p.bill_id=?"); params.append(bill_id)
+    if month:
+        where.append("b.billing_month=?"); params.append(month)
+    if building_id:
+        where.append("bld.id=?"); params.append(building_id)
+    if start_date:
+        where.append("p.pay_date>=?"); params.append(start_date)
+    if end_date:
+        where.append("p.pay_date<=?"); params.append(end_date)
+    if pay_method:
+        where.append("p.pay_method=?"); params.append(pay_method)
+    kw = str(keyword or '').strip()
+    if kw:
+        where.append("(t.name LIKE ? OR r.room_number LIKE ? OR bld.name LIKE ? OR p.remark LIKE ?)")
+        like = f"%{kw}%"
+        params.extend([like, like, like, like])
+    wh = (" WHERE " + " AND ".join(where)) if where else ''
+    order = " ORDER BY p.pay_date ASC,p.id ASC LIMIT 500"
+    rows = c.execute(
+        "SELECT p.*,b.billing_month,b.total_amount,b.status AS bill_status,"
+        "t.name AS tenant_name,r.room_number,bld.id AS building_id,bld.name AS building_name "
+        "FROM payments p "
+        "JOIN bills b ON p.bill_id=b.id "
+        "JOIN contracts c ON b.contract_id=c.id "
+        "JOIN tenants t ON c.tenant_id=t.id "
+        "JOIN rooms r ON c.room_id=r.id "
+        "JOIN buildings bld ON r.building_id=bld.id" + wh + order,
+        params
+    ).fetchall()
     c.close()
     return [dict(r) for r in rows]
 

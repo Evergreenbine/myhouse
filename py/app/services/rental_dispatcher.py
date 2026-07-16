@@ -241,9 +241,19 @@ def dispatch(table, action, data):
 
     if table == "payments":
         if action == "list":
-            return db.get_payments(data.get("bill_id"))
+            return db.get_payments(
+                data.get("bill_id"),
+                data.get("month"),
+                data.get("building_id"),
+                data.get("keyword", ""),
+                data.get("start_date"),
+                data.get("end_date"),
+                data.get("pay_method"),
+            )
         if action == "add":
             return db.add_payment(data.get("bill_id"), data.get("amount", 0), data.get("pay_date"), data.get("pay_method", ""), data.get("remark", ""))
+        if action == "update":
+            return db.update_payment(data.get("id"), data.get("amount"), data.get("pay_date"), data.get("pay_method"), data.get("remark"))
         if action == "delete":
             db.delete_payment(data.get("id"))
             return {"success": True}

@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { showToast } from "../components/ui";
 import { rental, api } from "../api";
+import { formatChineseMoney } from "../utils/money";
 
 interface BillReceiptItem {
   name: string
@@ -211,7 +212,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
     try {
       await this.waitForImages(el)
       return await html2canvas(el, {
-        backgroundColor: "#FFFEF9",
+        backgroundColor: "#FFF4E1",
         scale: 2,
         useCORS: true,
         width: el.scrollWidth,
@@ -297,6 +298,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
             </tbody>
           </table>
           <div className="ai-bill-total">合计：<span>{this.formatMoney(receipt.total_amount)}</span></div>
+          <div className="receipt-total-cn">大写：{formatChineseMoney(receipt.total_amount)}</div>
           <div className="ai-bill-meta">
             <div>交款人：{receipt.tenant_name}</div>
             <div>收款人：{receipt.collector}</div>
@@ -507,11 +509,18 @@ export class AIChat extends React.Component<{}, AIChatState> {
       ["用量", preview.usage],
       ["照片", preview.photo_saved ? "已包含" : undefined],
       ["合计", preview.total_amount === undefined ? undefined : this.formatMoney(preview.total_amount)],
+      ["应收", preview.receivable === undefined ? undefined : this.formatMoney(preview.receivable)],
+      ["已收", preview.paid_amount === undefined ? undefined : this.formatMoney(preview.paid_amount)],
+      ["本次收款", preview.payment_amount === undefined ? undefined : this.formatMoney(preview.payment_amount)],
+      ["收款后待收", preview.remaining_amount === undefined ? undefined : this.formatMoney(preview.remaining_amount)],
+      ["收款日期", preview.pay_date],
+      ["收款方式", preview.pay_method],
     ].filter(item => item[1] !== undefined && item[1] !== null && item[1] !== "")
     var isBill = action.type === "create_bill"
     var isContract = action.type === "update_contract"
-    var actionTitle = isBill ? "待确认账单" : isContract ? "待确认合同修改" : "待确认读数"
-    var confirmText = isBill ? (preview.overwrite ? "确认覆盖" : "确认保存") : isContract ? "确认修改" : "确认录入"
+    var isPayment = action.type === "record_payment"
+    var actionTitle = isBill ? "待确认账单" : isContract ? "待确认合同修改" : isPayment ? "待确认收款" : "待确认读数"
+    var confirmText = isBill ? (preview.overwrite ? "确认覆盖" : "确认保存") : isContract ? "确认修改" : isPayment ? "确认收款" : "确认录入"
     var changeItems = Array.isArray(preview.change_items) ? preview.change_items : []
     var otherFeeDetails = Array.isArray(preview.other_fee_details) ? preview.other_fee_details : []
     return (

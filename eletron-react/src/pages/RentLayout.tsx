@@ -1,5 +1,6 @@
 import { useUIStore } from "../store"
 import { RentPlanPage } from "./RentPlanPage"
+import { PaymentsPage } from "./PaymentsPage"
 import { WaterUsagePage } from "./MeterUsagePage"
 import { ElectricUsagePage } from "./MeterUsagePage"
 
@@ -10,6 +11,7 @@ export function RentLayout() {
       <div id="sidebar-rent">
         {([
           { key: "plan", label: "收租计划" },
+          { key: "payments", label: "收款记录" },
           { key: "waterUsage", label: "水表用量" },
           { key: "electricUsage", label: "电表用量" },
         ] as const).map(item => (
@@ -22,6 +24,7 @@ export function RentLayout() {
       </div>
       <div id="main-content-rent">
         {sideRent === "plan" && <RentPlanPage />}
+        {sideRent === "payments" && <PaymentsPage />}
         {sideRent === "waterUsage" && <WaterUsagePage />}
         {sideRent === "electricUsage" && <ElectricUsagePage />}
       </div>

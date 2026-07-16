@@ -1,10 +1,11 @@
 import React from 'react'
-import { DeleteOutlined, LeftOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons'
+import { DeleteOutlined, LeftOutlined, PlusOutlined, RightOutlined, UploadOutlined } from '@ant-design/icons'
 import { rental } from '../api'
-import { MonthPicker, showToast } from '../components/ui'
+import { DayPicker, MonthPicker, showToast } from '../components/ui'
 import { resolveBuildingId, useUIStore } from '../store'
 import Zoom from 'react-medium-image-zoom'
 import html2canvas from 'html2canvas'
+import { formatChineseMoney } from '../utils/money'
 
 interface Contract { id: number; tenant_name: string; tenant_id: number; room_number: string; room_id: number; monthly_rent: number; water_unit_price: number; electric_unit_price: number; water_meter_id: number | null; electric_meter_id: number | null; building_id: number; building_name: string; status?: string }
 interface Bill { id: number; contract_id: number; total_amount: number; status: string; water_fee: number; electric_fee: number; other_fee: number; other_fee_details?: string; remark?: string; water_current_reading: number; water_last_reading: number; electric_current_reading: number; electric_last_reading: number; water_photo: string; electric_photo: string }
@@ -328,6 +329,15 @@ export class RentPlanPage extends React.Component<{}, State> {
     reader.readAsDataURL(file)
   }
 
+  removePhoto = (type: 'water' | 'electric') => {
+    const isWater = type === 'water'
+    const input = document.getElementById(isWater ? 'file_water' : 'file_electric') as HTMLInputElement | null
+    if (input) input.value = ''
+    if (isWater) this.setState({ wPhoto: '', waterPreviewOpen: false })
+    else this.setState({ ePhoto: '', electricPreviewOpen: false })
+    showToast(`${isWater ? '水表' : '电表'}照片已移除，请保存数据`)
+  }
+
   saveDrawer = async () => {
     const { drawerContract, drawerBill, waterMeter, electricMeter, wLast, wCurr, eLast, eCurr, wPhoto, ePhoto, otherFees } = this.state
     const contract = drawerContract!
@@ -398,11 +408,26 @@ export class RentPlanPage extends React.Component<{}, State> {
 
   confirmPayment = async () => {
     if (!this.state.drawerBill?.id) return
-    await rental('bills', 'update_status', { id: this.state.drawerBill.id, status: 'paid' })
+    const amountText = this.state.paidAmount.trim()
+    const fallbackAmount = Number(this.state.drawerBill.total_amount || 0)
+    const amount = amountText ? Number(amountText) : fallbackAmount
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showToast('请输入有效收款金额')
+      return
+    }
+    await rental('payments', 'add', {
+      bill_id: this.state.drawerBill.id,
+      amount,
+      pay_date: this.state.paidDate,
+      pay_method: '收租计划',
+      remark: '收租计划确认收款',
+    })
+    const nextStatus = amount >= fallbackAmount ? 'paid' : 'partial'
     showToast('收款确认')
     this.setState((s: any) => ({
       drawerStep: 3,
-      drawerBill: { ...s.drawerBill, status: 'paid' }
+      paidAmount: String(amount),
+      drawerBill: { ...s.drawerBill, status: nextStatus }
     }))
     if (this.state.curBid) this.loadPlan(this.state.curBid)
   }
@@ -421,7 +446,7 @@ export class RentPlanPage extends React.Component<{}, State> {
       wrapper.style.zIndex = '-1'
       wrapper.style.pointerEvents = 'none'
       wrapper.style.overflow = 'visible'
-      wrapper.style.background = '#FFFEF9'
+      wrapper.style.background = '#FFF4E1'
       wrapper.style.width = Math.ceil(rect.width) + 'px'
       wrapper.style.minWidth = Math.ceil(rect.width) + 'px'
 
@@ -434,7 +459,7 @@ export class RentPlanPage extends React.Component<{}, State> {
       document.body.appendChild(wrapper)
       try {
         return await html2canvas(clone, {
-          backgroundColor: '#FFFEF9',
+          backgroundColor: '#FFF4E1',
           scale: 2,
           useCORS: true,
           width: clone.scrollWidth,
@@ -621,16 +646,21 @@ export class RentPlanPage extends React.Component<{}, State> {
                     <div style={{flex:1}}><label style={{fontSize:11,color:'var(--text-sec)'}}>水费（元）</label>
                       <div className="locked-field" style={{height:32}}>¥{waterFee.toFixed(2)}</div></div>
                   </div>
-                  <div className="upload-area">
+                  <div className={'upload-area' + (wPhoto ? ' has-image' : '')}>
                     <input type="file" accept="image/*" onChange={e => this.handlePhoto('water', e)} id="file_water" style={{display:'none'}} />
                     <div className="upload-preview" style={{flexDirection:'column',gap:6}}>
                       {wPhoto ? (
-                        <>
-                          <img src={wPhoto} className="meter-preview-img" style={{maxWidth:'100%',maxHeight:160,borderRadius:4,cursor:'pointer'}}
-                            onClick={() => document.getElementById('file_water')?.click()} title="点击更换" />
-                          <button className="btn btn-sm" style={{padding:'2px 10px',fontSize:11}}
-                            onClick={() => this.setState({ waterPreviewOpen: true })}>预览</button>
-                        </>
+                        <div className="meter-photo-preview">
+                          <Zoom><img src={wPhoto} className="meter-preview-img" title="点击放大预览" /></Zoom>
+                          <div className="meter-photo-actions">
+                            <button type="button" className="meter-photo-action" onClick={() => document.getElementById('file_water')?.click()}>
+                              <UploadOutlined /> 更换
+                            </button>
+                            <button type="button" className="meter-photo-action delete" onClick={() => this.removePhoto('water')}>
+                              <DeleteOutlined /> 删除
+                            </button>
+                          </div>
+                        </div>
                       ) : (
                         <span style={{cursor:'pointer'}} onClick={() => document.getElementById('file_water')?.click()}>📷 点击或拖拽上传水表照片</span>
                       )}
@@ -649,16 +679,21 @@ export class RentPlanPage extends React.Component<{}, State> {
                     <div style={{flex:1}}><label style={{fontSize:11,color:'var(--text-sec)'}}>电费（元）</label>
                       <div className="locked-field" style={{height:32}}>¥{elecFee.toFixed(2)}</div></div>
                   </div>
-                  <div className="upload-area">
+                  <div className={'upload-area' + (ePhoto ? ' has-image' : '')}>
                     <input type="file" accept="image/*" onChange={e => this.handlePhoto('electric', e)} id="file_electric" style={{display:'none'}} />
                     <div className="upload-preview" style={{flexDirection:'column',gap:6}}>
                       {ePhoto ? (
-                        <>
-                          <img src={ePhoto} className="meter-preview-img" style={{maxWidth:'100%',maxHeight:160,borderRadius:4,cursor:'pointer'}}
-                            onClick={() => document.getElementById('file_electric')?.click()} title="点击更换" />
-                          <button className="btn btn-sm" style={{padding:'2px 10px',fontSize:11}}
-                            onClick={() => this.setState({ electricPreviewOpen: true })}>预览</button>
-                        </>
+                        <div className="meter-photo-preview">
+                          <Zoom><img src={ePhoto} className="meter-preview-img" title="点击放大预览" /></Zoom>
+                          <div className="meter-photo-actions">
+                            <button type="button" className="meter-photo-action" onClick={() => document.getElementById('file_electric')?.click()}>
+                              <UploadOutlined /> 更换
+                            </button>
+                            <button type="button" className="meter-photo-action delete" onClick={() => this.removePhoto('electric')}>
+                              <DeleteOutlined /> 删除
+                            </button>
+                          </div>
+                        </div>
                       ) : (
                         <span style={{cursor:'pointer'}} onClick={() => document.getElementById('file_electric')?.click()}>📷 点击或拖拽上传电表照片</span>
                       )}
@@ -708,12 +743,12 @@ export class RentPlanPage extends React.Component<{}, State> {
                       <button className="btn btn-sm btn-primary" onClick={this.goToPaymentStep} style={{padding:'3px 12px',fontSize:11,borderRadius:6}}>完成发送</button>
                     </div>
                   </div>
-                  <div className="receipt-capture" style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'#FFFEF9',fontSize:13}}>
+                  <div className="receipt-capture" style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'var(--receipt-bg)',fontSize:13}}>
                     <div style={{textAlign:'center',fontWeight:600,fontSize:15,marginBottom:2}}>房租及费用收据</div>
                     <div style={{fontSize:11,color:'var(--text-third)',marginBottom:8}}>No.{(this.state.planYear + '-' + String(this.state.planMonth).padStart(2,'0')).replace('-','') + drawerContract.room_number}</div>
                     <div style={{marginBottom:6}}>房间：<b>{drawerContract.room_number}</b></div>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,margin:'8px 0'}}>
-                    <thead><tr style={{background:'#FFFEF9'}}><th style={{padding:6,border:'1px solid #ddd'}}>项目</th><th style={{padding:6,border:'1px solid #ddd'}}>本月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>上月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>实用量</th><th style={{padding:6,border:'1px solid #ddd'}}>单价</th><th style={{padding:6,border:'1px solid #ddd'}}>金额</th></tr></thead>
+                    <thead><tr style={{background:'var(--receipt-bg)'}}><th style={{padding:6,border:'1px solid #ddd'}}>项目</th><th style={{padding:6,border:'1px solid #ddd'}}>本月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>上月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>实用量</th><th style={{padding:6,border:'1px solid #ddd'}}>单价</th><th style={{padding:6,border:'1px solid #ddd'}}>金额</th></tr></thead>
                     <tbody>
                       <tr><td style={{padding:6,border:'1px solid #ddd'}}>水费（吨）</td>
                         <td style={{padding:6,border:'1px solid #ddd'}}>{this.formatReceiptReading(wCurr)}</td>
@@ -732,6 +767,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                     </tbody>
                   </table>
                   <div style={{textAlign:'right',fontWeight:700,fontSize:15}}>合计：<span style={{color:'var(--red)',fontSize:18}}>¥{totalAmount}</span></div>
+                  <div className="receipt-total-cn">大写：{formatChineseMoney(totalAmount)}</div>
                   <div style={{textAlign:'right',fontSize:12,color:'var(--text-sec)',marginTop:4,lineHeight:1.8}}>
                     <div>交款人：{drawerContract.tenant_name}</div>
                     <div>收款人：吴钦腾</div>
@@ -764,12 +800,12 @@ export class RentPlanPage extends React.Component<{}, State> {
                   <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
                     <span className="section-label" style={{marginBottom:0}}>📋 账单预览</span>
                   </div>
-                  <div className="receipt-capture" style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'#FFFEF9',fontSize:13}}>
+                  <div className="receipt-capture" style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'var(--receipt-bg)',fontSize:13}}>
                     <div style={{textAlign:'center',fontWeight:600,fontSize:15,marginBottom:2}}>房租及费用收据</div>
                     <div style={{fontSize:11,color:'var(--text-third)',marginBottom:8}}>No.{(this.state.planYear + '-' + String(this.state.planMonth).padStart(2,'0')).replace('-','') + drawerContract.room_number}</div>
                     <div style={{marginBottom:6}}>房间：<b>{drawerContract.room_number}</b></div>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,margin:'8px 0'}}>
-                    <thead><tr style={{background:'#FFFEF9'}}><th style={{padding:6,border:'1px solid #ddd'}}>项目</th><th style={{padding:6,border:'1px solid #ddd'}}>本月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>上月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>实用量</th><th style={{padding:6,border:'1px solid #ddd'}}>单价</th><th style={{padding:6,border:'1px solid #ddd'}}>金额</th></tr></thead>
+                    <thead><tr style={{background:'var(--receipt-bg)'}}><th style={{padding:6,border:'1px solid #ddd'}}>项目</th><th style={{padding:6,border:'1px solid #ddd'}}>本月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>上月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>实用量</th><th style={{padding:6,border:'1px solid #ddd'}}>单价</th><th style={{padding:6,border:'1px solid #ddd'}}>金额</th></tr></thead>
                     <tbody>
                       <tr><td style={{padding:6,border:'1px solid #ddd'}}>水费（吨）</td>
                         <td style={{padding:6,border:'1px solid #ddd'}}>{this.formatReceiptReading(wCurr)}</td>
@@ -788,6 +824,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                     </tbody>
                   </table>
                   <div style={{textAlign:'right',fontWeight:700,fontSize:15}}>合计：<span style={{color:'var(--red)',fontSize:18}}>¥{totalAmount}</span></div>
+                  <div className="receipt-total-cn">大写：{formatChineseMoney(totalAmount)}</div>
                   <div style={{textAlign:'right',fontSize:12,color:'var(--text-sec)',marginTop:4,lineHeight:1.8}}>
                     <div>付款人：{drawerContract.tenant_name}</div>
                     <div>收款人：吴钦腾</div>
@@ -821,7 +858,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                     </div>
                     <div className="form-group" style={{marginBottom:0,flex:1}}>
                       <label style={{fontSize:12}}>收款日期</label>
-                      <input className="soft-input" type="date" value={this.state.paidDate} onChange={e => this.setState({ paidDate: e.target.value })} style={{height:36}} />
+                      <DayPicker value={this.state.paidDate} onChange={paidDate => this.setState({ paidDate })} ariaLabel="选择收款日期" />
                     </div>
                     <button className="btn btn-primary btn-sm" onClick={this.confirmPayment} style={{height:36,padding:'0 16px',whiteSpace:'nowrap'}}>确认收款</button>
                   </div>
@@ -839,12 +876,12 @@ export class RentPlanPage extends React.Component<{}, State> {
                       <button className="btn btn-sm btn-outline" onClick={this.saveReceipt} style={{padding:'3px 10px',fontSize:11,borderRadius:6}}>保存</button>
                     </div>
                   </div>
-                  <div className="receipt-capture" style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'#FFFEF9',fontSize:13}}>
+                  <div className="receipt-capture" style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'var(--receipt-bg)',fontSize:13}}>
                     <div style={{textAlign:'center',fontWeight:600,fontSize:15,marginBottom:2}}>房租及费用收据</div>
                     <div style={{fontSize:11,color:'var(--text-third)',marginBottom:8}}>No.{(this.state.planYear + '-' + String(this.state.planMonth).padStart(2,'0')).replace('-','') + drawerContract.room_number}</div>
                     <div style={{marginBottom:6}}>房间：<b>{drawerContract.room_number}</b></div>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,margin:'8px 0'}}>
-                    <thead><tr style={{background:'#FFFEF9'}}><th style={{padding:6,border:'1px solid #ddd'}}>项目</th><th style={{padding:6,border:'1px solid #ddd'}}>本月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>上月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>实用量</th><th style={{padding:6,border:'1px solid #ddd'}}>单价</th><th style={{padding:6,border:'1px solid #ddd'}}>金额</th></tr></thead>
+                    <thead><tr style={{background:'var(--receipt-bg)'}}><th style={{padding:6,border:'1px solid #ddd'}}>项目</th><th style={{padding:6,border:'1px solid #ddd'}}>本月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>上月读数</th><th style={{padding:6,border:'1px solid #ddd'}}>实用量</th><th style={{padding:6,border:'1px solid #ddd'}}>单价</th><th style={{padding:6,border:'1px solid #ddd'}}>金额</th></tr></thead>
                     <tbody>
                       <tr><td style={{padding:6,border:'1px solid #ddd'}}>水费（吨）</td>
                         <td style={{padding:6,border:'1px solid #ddd'}}>{this.formatReceiptReading(wCurr)}</td>
@@ -863,6 +900,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                     </tbody>
                   </table>
                   <div style={{textAlign:'right',fontWeight:700,fontSize:15}}>合计：<span style={{color:'var(--red)',fontSize:18}}>¥{totalAmount}</span></div>
+                  <div className="receipt-total-cn">大写：{formatChineseMoney(totalAmount)}</div>
                   <div style={{textAlign:'right',fontSize:12,color:'var(--text-sec)',marginTop:4,lineHeight:1.8}}>
                     <div>付款人：{drawerContract.tenant_name}</div>
                     <div>收款人：吴钦腾</div>

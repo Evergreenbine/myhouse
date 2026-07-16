@@ -153,6 +153,30 @@ export function MonthPicker({ value, onChange, ariaLabel, style }: {
   )
 }
 
+// 统一使用 Ant Design 日期面板，值仍按后端需要的 YYYY-MM-DD 格式传递
+export function DayPicker({ value, onChange, ariaLabel, style }: {
+  value: string
+  onChange: (v: string) => void
+  ariaLabel?: string
+  style?: React.CSSProperties
+}) {
+  const selected = /^\d{4}-\d{2}-\d{2}$/.test(value || '') ? dayjs(value) : null
+
+  return (
+    <AntDatePicker
+      className="app-day-picker"
+      value={selected}
+      format="YYYY年M月D日"
+      allowClear={false}
+      inputReadOnly
+      suffixIcon={null}
+      style={style}
+      aria-label={ariaLabel || '选择日期'}
+      onChange={date => { if (date) onChange(date.format('YYYY-MM-DD')) }}
+    />
+  )
+}
+
 // DatePicker 组件
 ﻿export function DatePicker({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   const [open, setOpen] = useState(false)
