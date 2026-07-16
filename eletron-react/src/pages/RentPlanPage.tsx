@@ -1,13 +1,17 @@
 import React from 'react'
+import { DeleteOutlined, LeftOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons'
 import { rental } from '../api'
-import { showToast } from '../components/ui'
+import { MonthPicker, showToast } from '../components/ui'
+import { resolveBuildingId, useUIStore } from '../store'
 import Zoom from 'react-medium-image-zoom'
 import html2canvas from 'html2canvas'
 
 interface Contract { id: number; tenant_name: string; tenant_id: number; room_number: string; room_id: number; monthly_rent: number; water_unit_price: number; electric_unit_price: number; water_meter_id: number | null; electric_meter_id: number | null; building_id: number; building_name: string; status?: string }
-interface Bill { id: number; contract_id: number; total_amount: number; status: string; water_fee: number; electric_fee: number; other_fee: number; water_current_reading: number; water_last_reading: number; electric_current_reading: number; electric_last_reading: number; water_photo: string; electric_photo: string }
+interface Bill { id: number; contract_id: number; total_amount: number; status: string; water_fee: number; electric_fee: number; other_fee: number; other_fee_details?: string; remark?: string; water_current_reading: number; water_last_reading: number; electric_current_reading: number; electric_last_reading: number; water_photo: string; electric_photo: string }
 interface MeterReading { id: number; meter_no: string; room_number: string; reading: number | null; previous_reading: number; usage: number | null; photo: string; status: string }
 interface Building { id: number; name: string; rent_day: number }
+interface OtherFeeItem { id: string; name: string; amount: string }
+interface OtherFeeDetail { name: string; amount: number }
 
 interface State {
   buildings: Building[]
@@ -31,6 +35,7 @@ interface State {
   eCurr: string
   wPhoto: string
   ePhoto: string
+  otherFees: OtherFeeItem[]
   paidAmount: string
   paidDate: string
   waterPreviewOpen: boolean
@@ -39,14 +44,16 @@ interface State {
 
 export class RentPlanPage extends React.Component<{}, State> {
   private planLoadSeq = 0
+  private otherFeeItemSeq = 0
+  private initialUiState = useUIStore.getState()
 
   state: State = {
     buildings: [],
     contracts: [],
     bills: [],
     curBid: null,
-    planYear: new Date().getFullYear(),
-    planMonth: new Date().getMonth() + 1,
+    planYear: this.initialUiState.planYear,
+    planMonth: this.initialUiState.planMonth,
     loading: true,
     firstLoad: true,
     drawerOpen: false,
@@ -57,6 +64,7 @@ export class RentPlanPage extends React.Component<{}, State> {
     electricMeter: null,
     wLast: '', wCurr: '', eLast: '', eCurr: '',
     wPhoto: '', ePhoto: '',
+    otherFees: [{ id: 'fee-initial', name: '', amount: '' }],
     paidAmount: '', paidDate: new Date().toISOString().split('T')[0],
     waterPreviewOpen: false, electricPreviewOpen: false,
   }
@@ -69,7 +77,8 @@ export class RentPlanPage extends React.Component<{}, State> {
 
   loadBuildings = async () => {
     const data = await rental('buildings', 'list') || []
-    const bid = data.length > 0 ? data[0].id : null
+    const bid = resolveBuildingId(data)
+    useUIStore.getState().setSelectedBuildingId(bid)
     this.setState({ buildings: data, curBid: bid, firstLoad: false, loading: false }, () => {
       if (bid) this.loadPlan(bid)
     })
@@ -94,20 +103,32 @@ export class RentPlanPage extends React.Component<{}, State> {
   }
 
   switchBuilding = (id: number) => {
+    useUIStore.getState().setSelectedBuildingId(id)
     this.setState({ curBid: id }, () => this.loadPlan(id))
   }
 
   changeMonth = (delta: number) => {
-    var { planYear, planMonth, curBid } = this.state
-    planMonth += delta
+    const { planYear: currentYear, planMonth: currentMonth, curBid } = this.state
+    let planYear = currentYear
+    let planMonth = currentMonth + delta
     if (planMonth < 1) { planMonth = 12; planYear-- }
     if (planMonth > 12) { planMonth = 1; planYear++ }
-    // 不能超过当前月份
-    var now = new Date()
-    if (planYear > now.getFullYear() || (planYear === now.getFullYear() && planMonth > now.getMonth() + 1)) return
     const month = this.formatBillingMonth(planYear, planMonth)
+    useUIStore.getState().setPlanYearMonth(planYear, planMonth)
     this.setState({ planYear, planMonth }, () => {
       if (curBid) this.loadPlan(curBid, month)
+    })
+  }
+
+  selectMonth = (value: string) => {
+    const [yearText, monthText] = value.split('-')
+    const planYear = Number(yearText)
+    const planMonth = Number(monthText)
+    if (!planYear || planMonth < 1 || planMonth > 12) return
+    const month = this.formatBillingMonth(planYear, planMonth)
+    useUIStore.getState().setPlanYearMonth(planYear, planMonth)
+    this.setState({ planYear, planMonth }, () => {
+      if (this.state.curBid) this.loadPlan(this.state.curBid, month)
     })
   }
 
@@ -149,6 +170,59 @@ export class RentPlanPage extends React.Component<{}, State> {
     this.setState({ drawerStep: nextStep })
   }
 
+  createOtherFeeItem = (name = '', amount = ''): OtherFeeItem => ({
+    id: `fee-${Date.now()}-${++this.otherFeeItemSeq}`,
+    name,
+    amount,
+  })
+
+  parseOtherFeeItems = (bill?: Bill): OtherFeeItem[] => {
+    try {
+      const parsed = JSON.parse(bill?.other_fee_details || '[]')
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const items = parsed
+          .map((item: any) => ({
+            name: String(item?.name || item?.project_name || '').trim(),
+            amount: Number(item?.amount),
+          }))
+          .filter(item => item.name && Number.isFinite(item.amount) && item.amount > 0)
+          .map(item => this.createOtherFeeItem(item.name, String(item.amount)))
+        if (items.length > 0) return items
+      }
+    } catch {
+      // 兼容尚未保存明细的旧账单，继续使用汇总金额回填。
+    }
+    const legacyAmount = Number(bill?.other_fee || 0)
+    if (legacyAmount > 0) return [this.createOtherFeeItem('其他费用', String(legacyAmount))]
+    return [this.createOtherFeeItem()]
+  }
+
+  addOtherFeeItem = () => {
+    this.setState(state => ({ otherFees: [...state.otherFees, this.createOtherFeeItem()] }))
+  }
+
+  updateOtherFeeItem = (id: string, field: 'name' | 'amount', value: string) => {
+    this.setState(state => ({
+      otherFees: state.otherFees.map(item => item.id === id ? { ...item, [field]: value } : item),
+    }))
+  }
+
+  removeOtherFeeItem = (id: string) => {
+    this.setState(state => {
+      const remaining = state.otherFees.filter(item => item.id !== id)
+      return { otherFees: remaining.length > 0 ? remaining : [this.createOtherFeeItem()] }
+    })
+  }
+
+  getOtherFeeAmount = () => this.state.otherFees.reduce((total, item) => {
+    const amount = Number(item.amount)
+    return total + (Number.isFinite(amount) && amount > 0 ? amount : 0)
+  }, 0)
+
+  getOtherFeeDetails = (): OtherFeeDetail[] => this.state.otherFees
+    .map(item => ({ name: item.name.trim(), amount: Number(item.amount) }))
+    .filter(item => item.name && Number.isFinite(item.amount) && item.amount > 0)
+
   openDrawer = async (contract: Contract) => {
     const bill = this.state.bills.find(b => Number(b.contract_id) === Number(contract.id))
 
@@ -184,6 +258,7 @@ export class RentPlanPage extends React.Component<{}, State> {
       eCurr: em?.reading != null ? String(em.reading) : '',
       wPhoto: wm?.photo || bill?.water_photo || '',
       ePhoto: em?.photo || bill?.electric_photo || '',
+      otherFees: this.parseOtherFeeItems(bill),
     })
   }
 
@@ -254,11 +329,28 @@ export class RentPlanPage extends React.Component<{}, State> {
   }
 
   saveDrawer = async () => {
-    const { drawerContract, drawerBill, waterMeter, electricMeter, wLast, wCurr, eLast, eCurr, wPhoto, ePhoto } = this.state
+    const { drawerContract, drawerBill, waterMeter, electricMeter, wLast, wCurr, eLast, eCurr, wPhoto, ePhoto, otherFees } = this.state
     const contract = drawerContract!
     const waterFee = this.calcWaterFee()
     const elecFee = this.calcElectricFee()
     const rentAmount = Number(contract.monthly_rent || 0)
+    const enteredOtherFees = otherFees.filter(item => item.name.trim() || item.amount.trim())
+    for (const item of enteredOtherFees) {
+      if (!item.name.trim()) {
+        showToast('请填写其他费用的项目名称')
+        return
+      }
+      const amount = Number(item.amount)
+      if (!item.amount.trim() || !Number.isFinite(amount) || amount <= 0) {
+        showToast(`请输入“${item.name.trim()}”的有效费用`)
+        return
+      }
+    }
+    const otherFeeDetails: OtherFeeDetail[] = enteredOtherFees.map(item => ({
+      name: item.name.trim(),
+      amount: Number(item.amount),
+    }))
+    const otherFeeAmount = otherFeeDetails.reduce((total, item) => total + item.amount, 0)
 
     const waterCurrReading = this.parseOptionalReading(wCurr)
     const electricCurrReading = this.parseOptionalReading(eCurr)
@@ -272,7 +364,8 @@ export class RentPlanPage extends React.Component<{}, State> {
 
     const data = {
       contract_id: contract.id, billing_month: this.billingMonth,
-      rent_amount: rentAmount, water_fee: waterFee, electric_fee: elecFee, other_fee: 0, remark: '[]',
+      rent_amount: rentAmount, water_fee: waterFee, electric_fee: elecFee,
+      other_fee: otherFeeAmount, other_fee_details: JSON.stringify(otherFeeDetails), remark: drawerBill?.remark || '',
       water_last: parseFloat(wLast) || 0, water_curr: waterCurrReading,
       electric_last: parseFloat(eLast) || 0, electric_curr: electricCurrReading,
       water_photo: wPhoto, electric_photo: ePhoto,
@@ -286,7 +379,7 @@ export class RentPlanPage extends React.Component<{}, State> {
       const bid = drawerBill?.id || res.id
       await rental('bills', 'update_status', { id: bid, status: 'pending' })
       showToast('保存成功')
-      this.setState({ drawerStep: 2, drawerBill: { ...data, id: bid, total_amount: rentAmount + waterFee + elecFee, status: 'pending' } as any })
+      this.setState({ drawerStep: 2, drawerBill: { ...data, id: bid, total_amount: rentAmount + waterFee + elecFee + otherFeeAmount, status: 'pending' } as any })
       if (this.state.curBid) this.loadPlan(this.state.curBid)
     } else { showToast('保存失败') }
   }
@@ -378,6 +471,14 @@ export class RentPlanPage extends React.Component<{}, State> {
 
   closeDrawer = () => this.setState({ drawerOpen: false })
 
+  renderOtherFeeReceiptRows = () => this.getOtherFeeDetails().map((item, index) => (
+    <tr key={`other-fee-receipt-${index}`}>
+      <td style={{padding:6,border:'1px solid #ddd'}}>{item.name}</td>
+      <td style={{padding:6,border:'1px solid #ddd'}} colSpan={4} />
+      <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{item.amount.toFixed(2)}</td>
+    </tr>
+  ))
+
   render() {
     const { buildings, contracts, bills, curBid, planYear, planMonth, loading } = this.state
     if (this.state.firstLoad) return <div style={{padding:40,textAlign:'center',color:'var(--text-third)'}}>加载中...</div>
@@ -400,9 +501,9 @@ export class RentPlanPage extends React.Component<{}, State> {
       <div>
         {/* 月份筛选 */}
         <div className="month-filter">
-          <button className="month-nav" onClick={() => this.changeMonth(-1)}>◀</button>
-          <span className="month-label">{planYear}年{planMonth}月</span>
-          <button className="month-nav" onClick={() => this.changeMonth(1)}>▶</button>
+          <button className="month-nav" onClick={() => this.changeMonth(-1)} aria-label="上一个月"><LeftOutlined /></button>
+          <MonthPicker value={this.billingMonth} onChange={this.selectMonth} ariaLabel="选择账单月份" />
+          <button className="month-nav" onClick={() => this.changeMonth(1)} aria-label="下一个月"><RightOutlined /></button>
         </div>
 
         {/* 楼栋 tabs */}
@@ -440,6 +541,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                   const statusCls = status === 'paid' ? 'tag-green' : status === 'pending_payment' ? 'tag-green' : status === 'draft' ? 'tag-blue' : status === 'empty' ? 'tag-red' : 'tag-orange'
                   const waterFee = bill ? Number(bill.water_fee || 0) : 0
                   const electricFee = bill ? Number(bill.electric_fee || 0) : 0
+                  const otherFee = bill ? Number(bill.other_fee || 0) : 0
                   const totalAmount = bill ? Number(bill.total_amount || 0) : Number(c.monthly_rent || 0)
                   return (
                     <div key={c.id} className="plan-card" onClick={() => this.openDrawer(c)}>
@@ -452,6 +554,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                         <div className="card-item">月租 <span>¥{Number(c.monthly_rent || 0).toFixed(2)}</span></div>
                         {waterFee > 0 && <div className="card-item">水费 <span>¥{waterFee.toFixed(2)}</span></div>}
                         {electricFee > 0 && <div className="card-item">电费 <span>¥{electricFee.toFixed(2)}</span></div>}
+                        {otherFee > 0 && <div className="card-item">其他费用 <span>¥{otherFee.toFixed(2)}</span></div>}
                       </div>
                       <div className="card-total">
                         <span className={'tag ' + statusCls}>{statusLabel}</span>
@@ -471,12 +574,14 @@ export class RentPlanPage extends React.Component<{}, State> {
   }
 
   renderDrawer() {
-    const { drawerOpen, drawerStep, drawerContract, drawerBill, waterMeter, electricMeter, wLast, wCurr, eLast, eCurr, wPhoto, ePhoto } = this.state
+    const { drawerOpen, drawerStep, drawerContract, drawerBill, waterMeter, electricMeter, wLast, wCurr, eLast, eCurr, wPhoto, ePhoto, otherFees } = this.state
     if (!drawerOpen || !drawerContract) return null
     const waterFee = this.calcWaterFee()
     const elecFee = this.calcElectricFee()
     const rentAmount = Number(drawerContract.monthly_rent || 0)
-    const totalAmount = (drawerBill?.total_amount || rentAmount + waterFee + elecFee).toFixed(2)
+    const otherFeeAmount = this.getOtherFeeAmount()
+    const calculatedTotal = rentAmount + waterFee + elecFee + otherFeeAmount
+    const totalAmount = Number(drawerStep === 1 ? calculatedTotal : (drawerBill?.total_amount ?? calculatedTotal)).toFixed(2)
 
     return (
       <>
@@ -561,6 +666,33 @@ export class RentPlanPage extends React.Component<{}, State> {
                     
                   </div>
                 </div>
+
+                <div className="drawer-section">
+                  <div className="section-label">其他费用</div>
+                  <div className="other-fee-editor">
+                    <div className="other-fee-editor-head">
+                      <span>项目名称</span>
+                      <span>费用（元）</span>
+                      <span>操作</span>
+                    </div>
+                    {otherFees.map(item => (
+                      <div className="other-fee-editor-row" key={item.id}>
+                        <input type="text" value={item.name} placeholder="如：网费、卫生费"
+                          onChange={e => this.updateOtherFeeItem(item.id, 'name', e.target.value)} />
+                        <input type="number" min="0" step="0.01" value={item.amount} placeholder="0.00"
+                          onChange={e => this.updateOtherFeeItem(item.id, 'amount', e.target.value)} />
+                        <button type="button" className="other-fee-delete" title="删除项目" aria-label="删除费用项目"
+                          onClick={() => this.removeOtherFeeItem(item.id)}><DeleteOutlined /></button>
+                      </div>
+                    ))}
+                    <div className="other-fee-editor-footer">
+                      <span>小计：<strong>¥{otherFeeAmount.toFixed(2)}</strong></span>
+                      <button type="button" className="btn btn-sm btn-outline other-fee-add" onClick={this.addOtherFeeItem}>
+                        <PlusOutlined /> 添加项目
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -577,7 +709,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                     </div>
                   </div>
                   <div className="receipt-capture" style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'#FFFEF9',fontSize:13}}>
-                    <div style={{textAlign:'center',fontWeight:600,fontSize:15,marginBottom:2}}>房租、水、电费（专用）收据</div>
+                    <div style={{textAlign:'center',fontWeight:600,fontSize:15,marginBottom:2}}>房租及费用收据</div>
                     <div style={{fontSize:11,color:'var(--text-third)',marginBottom:8}}>No.{(this.state.planYear + '-' + String(this.state.planMonth).padStart(2,'0')).replace('-','') + drawerContract.room_number}</div>
                     <div style={{marginBottom:6}}>房间：<b>{drawerContract.room_number}</b></div>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,margin:'8px 0'}}>
@@ -596,6 +728,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                         <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price).toFixed(2)}</td>
                         <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{elecFee.toFixed(2)}</td></tr>
                       <tr><td style={{padding:6,border:'1px solid #ddd'}}>房租</td><td style={{padding:6,border:'1px solid #ddd'}} colSpan={4} /><td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{rentAmount.toFixed(2)}</td></tr>
+                      {this.renderOtherFeeReceiptRows()}
                     </tbody>
                   </table>
                   <div style={{textAlign:'right',fontWeight:700,fontSize:15}}>合计：<span style={{color:'var(--red)',fontSize:18}}>¥{totalAmount}</span></div>
@@ -632,7 +765,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                     <span className="section-label" style={{marginBottom:0}}>📋 账单预览</span>
                   </div>
                   <div className="receipt-capture" style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'#FFFEF9',fontSize:13}}>
-                    <div style={{textAlign:'center',fontWeight:600,fontSize:15,marginBottom:2}}>房租、水、电费（专用）收据</div>
+                    <div style={{textAlign:'center',fontWeight:600,fontSize:15,marginBottom:2}}>房租及费用收据</div>
                     <div style={{fontSize:11,color:'var(--text-third)',marginBottom:8}}>No.{(this.state.planYear + '-' + String(this.state.planMonth).padStart(2,'0')).replace('-','') + drawerContract.room_number}</div>
                     <div style={{marginBottom:6}}>房间：<b>{drawerContract.room_number}</b></div>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,margin:'8px 0'}}>
@@ -651,6 +784,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                         <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price).toFixed(2)}</td>
                         <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{elecFee.toFixed(2)}</td></tr>
                       <tr><td style={{padding:6,border:'1px solid #ddd'}}>房租</td><td style={{padding:6,border:'1px solid #ddd'}} colSpan={4} /><td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{rentAmount.toFixed(2)}</td></tr>
+                      {this.renderOtherFeeReceiptRows()}
                     </tbody>
                   </table>
                   <div style={{textAlign:'right',fontWeight:700,fontSize:15}}>合计：<span style={{color:'var(--red)',fontSize:18}}>¥{totalAmount}</span></div>
@@ -706,7 +840,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                     </div>
                   </div>
                   <div className="receipt-capture" style={{border:'1px solid var(--border-light)',borderRadius:8,padding:16,background:'#FFFEF9',fontSize:13}}>
-                    <div style={{textAlign:'center',fontWeight:600,fontSize:15,marginBottom:2}}>房租、水、电费（专用）收据</div>
+                    <div style={{textAlign:'center',fontWeight:600,fontSize:15,marginBottom:2}}>房租及费用收据</div>
                     <div style={{fontSize:11,color:'var(--text-third)',marginBottom:8}}>No.{(this.state.planYear + '-' + String(this.state.planMonth).padStart(2,'0')).replace('-','') + drawerContract.room_number}</div>
                     <div style={{marginBottom:6}}>房间：<b>{drawerContract.room_number}</b></div>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,margin:'8px 0'}}>
@@ -725,6 +859,7 @@ export class RentPlanPage extends React.Component<{}, State> {
                         <td style={{padding:6,border:'1px solid #ddd'}}>{Number(drawerContract.electric_unit_price).toFixed(2)}</td>
                         <td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{elecFee.toFixed(2)}</td></tr>
                       <tr><td style={{padding:6,border:'1px solid #ddd'}}>房租</td><td style={{padding:6,border:'1px solid #ddd'}} colSpan={4} /><td style={{padding:6,border:'1px solid #ddd',fontWeight:'bold'}}>¥{rentAmount.toFixed(2)}</td></tr>
+                      {this.renderOtherFeeReceiptRows()}
                     </tbody>
                   </table>
                   <div style={{textAlign:'right',fontWeight:700,fontSize:15}}>合计：<span style={{color:'var(--red)',fontSize:18}}>¥{totalAmount}</span></div>

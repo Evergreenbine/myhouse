@@ -1,6 +1,7 @@
 import React from 'react'
 import { rental } from '../api'
 import { showToast, DatePicker } from '../components/ui'
+import { resolveBuildingId, useUIStore } from '../store'
 
 interface Contract { id: number; tenant_name: string; tenant_id: number; room_number: string; room_id: number; monthly_rent: number; start_date: string; end_date: string; deposit: number; status: string; water_unit_price: number; electric_unit_price: number; water_meter_id: number | null; electric_meter_id: number | null }
 interface Building { id: number; name: string; rent_day: number }
@@ -77,7 +78,8 @@ export class ContractsPage extends React.Component<{}, State> {
 
   loadBuildings = async () => {
     const data = await rental('buildings', 'list') || []
-    const bid = data.length > 0 ? data[0].id : null
+    const bid = resolveBuildingId(data)
+    useUIStore.getState().setSelectedBuildingId(bid)
     if (bid) {
       const cs = await rental('contracts', 'list', { active_only: true, building_id: bid }) || []
       this.setState({ buildings: data, curBid: bid, contracts: { [this.contractCacheKey(bid, false)]: cs }, loading: false, firstLoad: false })
@@ -87,6 +89,7 @@ export class ContractsPage extends React.Component<{}, State> {
   }
 
   switchBuilding = async (id: number) => {
+    useUIStore.getState().setSelectedBuildingId(id)
     const key = this.contractCacheKey(id)
     if (this.state.contracts[key]) { this.setState({ curBid: id }); return }
     this.setState({ curBid: id, loading: true })

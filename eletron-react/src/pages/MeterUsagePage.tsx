@@ -1,9 +1,11 @@
 import React from 'react'
+import { LeftOutlined, RightOutlined } from '@ant-design/icons'
 import { rental } from '../api'
-import { showToast } from '../components/ui'
+import { MonthPicker, showToast } from '../components/ui'
+import { resolveBuildingId, useUIStore } from '../store'
 
 interface MeterReading { id: number; meter_no: string; room_number: string; building_name: string; floor: number; reading: number | null; previous_reading: number; usage: number | null; photo: string; status: string }
-interface Building { id: number; name: string }
+interface Building { id: number; name: string; rent_day?: number }
 
 interface State {
   buildings: Building[]
@@ -44,31 +46,49 @@ class MeterUsagePage extends React.Component<{ type: string; title: string; icon
 
   loadBuildings = async () => {
     const data = await rental('buildings', 'list') || []
-    const bid = data.length > 0 ? data[0].id : null
+    const bid = resolveBuildingId(data)
+    useUIStore.getState().setSelectedBuildingId(bid)
     this.setState({ buildings: data, curBid: bid, firstLoad: false })
     if (bid) this.loadData(bid)
   }
 
-  loadData = async (bid: number) => {
+  loadData = async (bid: number, month = this.monthKey) => {
     const timer = setTimeout(() => this.setState({ loading: true }), 200)
     const { type } = this.props
-    const rows = await rental('readings', 'monthly', { type, building_id: bid, month: this.monthKey }) || []
+    const rows = await rental('readings', 'monthly', { type, building_id: bid, month }) || []
     clearTimeout(timer)
     this.setState({ rows, loading: false })
   }
 
   switchBuilding = (id: number) => {
+    useUIStore.getState().setSelectedBuildingId(id)
     this.setState({ curBid: id })
     this.loadData(id)
   }
 
   changeMonth = (delta: number) => {
-    var { usageYear, usageMonth, curBid } = this.state
-    usageMonth += delta
+    const { usageYear: currentYear, usageMonth: currentMonth, curBid } = this.state
+    let usageYear = currentYear
+    let usageMonth = currentMonth + delta
     if (usageMonth < 1) { usageMonth = 12; usageYear-- }
     if (usageMonth > 12) { usageMonth = 1; usageYear++ }
-    this.setState({ usageYear, usageMonth })
-    if (curBid) this.loadData(curBid)
+    const month = usageYear + '-' + String(usageMonth).padStart(2, '0')
+    this.setState({ usageYear, usageMonth }, () => {
+      if (this.state.overviewMode) this.loadOverview()
+      else if (curBid) this.loadData(curBid, month)
+    })
+  }
+
+  selectMonth = (value: string) => {
+    const [yearText, monthText] = value.split('-')
+    const usageYear = Number(yearText)
+    const usageMonth = Number(monthText)
+    if (!usageYear || usageMonth < 1 || usageMonth > 12) return
+    const month = usageYear + '-' + String(usageMonth).padStart(2, '0')
+    this.setState({ usageYear, usageMonth }, () => {
+      if (this.state.overviewMode) this.loadOverview()
+      else if (this.state.curBid) this.loadData(this.state.curBid, month)
+    })
   }
 
   loadOverview = async () => {
@@ -143,7 +163,11 @@ class MeterUsagePage extends React.Component<{ type: string; title: string; icon
       return (
         <div>
           <div className="month-filter">
-            <span className="month-label" style={{minWidth:180}}>2026-06 — {this.monthKey}</span>
+            <div className="month-range-picker">
+              <span className="month-range-start">2026年6月</span>
+              <span className="month-range-separator">至</span>
+              <MonthPicker value={this.monthKey} onChange={this.selectMonth} ariaLabel="选择统计结束月份" />
+            </div>
             <button className="month-nav month-nav-overview" style={{width:80}} onClick={this.backToDetail}>←</button>
           </div>
           <div className="tab-action-row">
@@ -196,9 +220,9 @@ class MeterUsagePage extends React.Component<{ type: string; title: string; icon
       <div>
         {/* 月份切换 */}
         <div className="month-filter">
-          <button className="month-nav" onClick={() => this.changeMonth(-1)}>◀</button>
-          <span className="month-label">{usageYear}年{usageMonth}月</span>
-          <button className="month-nav" onClick={() => this.changeMonth(1)}>▶</button>
+          <button className="month-nav" onClick={() => this.changeMonth(-1)} aria-label="上一个月"><LeftOutlined /></button>
+          <MonthPicker value={this.monthKey} onChange={this.selectMonth} ariaLabel="选择读数月份" />
+          <button className="month-nav" onClick={() => this.changeMonth(1)} aria-label="下一个月"><RightOutlined /></button>
           <button className="month-nav month-nav-overview" onClick={this.loadOverview}>统计概览</button>
         </div>
 

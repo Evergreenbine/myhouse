@@ -1,5 +1,5 @@
 import React from "react";
-import { CloseOutlined, CopyOutlined, DeleteOutlined, DownloadOutlined, InboxOutlined, LoadingOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PaperClipOutlined, RedoOutlined, RollbackOutlined, SearchOutlined } from "@ant-design/icons";
+import { CheckOutlined, CloseOutlined, CopyOutlined, DeleteOutlined, DownloadOutlined, InboxOutlined, LoadingOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PaperClipOutlined, RedoOutlined, RollbackOutlined, SearchOutlined } from "@ant-design/icons";
 import html2canvas from "html2canvas";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -19,6 +19,7 @@ interface BillReceiptImage {
   image_type: "bill_receipt"
   source: string
   bill_id?: number | null
+  contract_id?: number | null
   file_name?: string
   receipt: {
     title: string
@@ -48,16 +49,55 @@ interface AIImageAttachment {
   id: string
   dataUrl: string
   fileName: string
-  meterType: "水表" | "电表"
+  meterType: string
   status: "reading" | "done" | "error"
   ocrNumber: number | null
+  meterNumber?: string
+  buildingId?: number | null
+  buildingName?: string
+  roomId?: number | null
+  roomNumber?: string
+  tenantId?: number | null
+  tenantName?: string
+  confidence?: Record<string, number>
+  warnings?: string[]
   error?: string
+}
+
+interface AIMeterBuilding {
+  id: number
+  name: string
+}
+
+interface AIMeterRoom {
+  id: number
+  room_number: string
+  building_id: number
+  tenant_id?: number | null
+  tenant_name?: string
+}
+
+interface AIMessageImage {
+  id: string
+  dataUrl: string
+  fileName: string
+  meterType?: string
+  ocrNumber?: number | null
+  buildingId?: number | null
+  buildingName?: string
+  roomId?: number | null
+  roomNumber?: string
+  tenantId?: number | null
+  tenantName?: string
+  meterNumber?: string
 }
 
 interface AIMessage {
   role: "user" | "assistant"
   content: string
   billImages?: BillReceiptImage[]
+  images?: AIMessageImage[]
+  pendingActions?: AIPendingAction[]
 }
 
 interface AIChatState {
@@ -75,6 +115,8 @@ interface AIChatState {
   hoverPreviewImage: string
   activePreviewImage: string
   pendingActions: AIPendingAction[]
+  meterBuildings: AIMeterBuilding[]
+  meterRooms: Record<number, AIMeterRoom[]>
 }
 
 const QUICK_PROMPTS = [
@@ -83,6 +125,15 @@ const QUICK_PROMPTS = [
   { label: "录入进度", prompt: "本月哪些房间还未录入或正在录入中？" },
   { label: "收款异常", prompt: "本月有没有部分收款、待发送、待收款的账单？请分别列出来。" },
 ]
+
+const AI_GUIDED_HELP_REPLY = "我还不能确定你遇到的具体问题。请告诉我你正在做什么（查询、录入读数、生成账单或收款），涉及哪个楼栋、房间和月份，以及现在卡在哪一步或页面显示了什么。我会根据这些信息告诉你下一步怎么处理。"
+
+function safeAssistantReply(value: any, fallback = AI_GUIDED_HELP_REPLY) {
+  var text = String(value || "").trim()
+  var technicalMarkers = ["连接失败", "API错误", "API 错误", "请求失败", "服务暂时不可用", "timeout", "traceback", "exception", "工具不在白名单", "🐱"]
+  if (!text || technicalMarkers.some(marker => text.toLowerCase().includes(marker.toLowerCase()))) return fallback
+  return text
+}
 
 export class AIChat extends React.Component<{}, AIChatState> {
   state: AIChatState = {
@@ -100,6 +151,8 @@ export class AIChat extends React.Component<{}, AIChatState> {
     hoverPreviewImage: "",
     activePreviewImage: "",
     pendingActions: [],
+    meterBuildings: [],
+    meterRooms: {},
   }
   private bodyRef = React.createRef<HTMLDivElement>()
   private inputRef = React.createRef<HTMLInputElement>()
@@ -108,7 +161,31 @@ export class AIChat extends React.Component<{}, AIChatState> {
 
   formatMoney = (value: any) => {
     var num = Number(value || 0)
-    return "¥" + num.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    return "¥" + num.toFixed(2)
+  }
+
+  replaceExistingBillImages = (messages: AIMessage[], images: BillReceiptImage[]) => {
+    var savedReplacements = (images || []).filter(image => image.source === "saved_bill" && Number(image.bill_id || 0) > 0)
+    var replacementIds = new Set(
+      savedReplacements.map(image => Number(image.bill_id || 0)).filter(id => id > 0)
+    )
+    var replacementContractIds = new Set(
+      savedReplacements.map(image => Number(image.contract_id || 0)).filter(id => id > 0)
+    )
+    var replacementReceiptKeys = new Set(savedReplacements.map(image => {
+      var receipt = image.receipt || ({} as BillReceiptImage['receipt'])
+      return `${receipt.month || ''}|${receipt.room_number || ''}`
+    }).filter(key => key !== '|'))
+    if (replacementIds.size === 0 && replacementContractIds.size === 0 && replacementReceiptKeys.size === 0) return messages
+    return messages.map(message => ({
+      ...message,
+      billImages: message.billImages?.filter(image => {
+        if (replacementIds.has(Number(image.bill_id || 0))) return false
+        if (replacementContractIds.has(Number(image.contract_id || 0))) return false
+        var key = `${image.receipt?.month || ''}|${image.receipt?.room_number || ''}`
+        return !replacementReceiptKeys.has(key)
+      }),
+    }))
   }
 
   formatCell = (value: any) => {
@@ -192,7 +269,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
           </div>
         </div>
         <div id={targetId} className="ai-bill-receipt-capture">
-          <div className="ai-bill-title">{receipt.title || "房租、水、电费（专用）收据"}</div>
+          <div className="ai-bill-title">{receipt.title || "房租及费用收据"}</div>
           <div className="ai-bill-no">No.{receipt.no}</div>
           <div className="ai-bill-room">房间：<b>{receipt.room_number}</b></div>
           <table className="ai-bill-table">
@@ -269,7 +346,9 @@ export class AIChat extends React.Component<{}, AIChatState> {
       }) || []
       var chat = chats.find(function(c: any) { return c.id === id })
       if (!chat) return
-      this.setState({ messages: chat.messages || [], convId: id, sidebarCollapsed: false })
+      var restoredMessages: AIMessage[] = chat.messages || []
+      var restoredPending = restoredMessages.flatMap(message => message.pendingActions || [])
+      this.setState({ messages: restoredMessages, convId: id, sidebarCollapsed: false, pendingActions: restoredPending })
       this.scrollBottom()
       setTimeout(() => this.inputRef.current?.focus(), 50)
     } catch { /* ignore */ }
@@ -344,9 +423,11 @@ export class AIChat extends React.Component<{}, AIChatState> {
         method: "POST",
         body: JSON.stringify({ table: "_ai", action: "chat", data: { prompt: input, history: this.state.messages.slice(-10), pending_actions: this.state.pendingActions } })
       })
-      var reply = (res && res.reply) ? res.reply : "抱歉，AI 服务暂时不可用"
-      msgs = [...msgs, { role: "assistant" as const, content: reply, billImages: res?.bill_images || [] }]
-      this.setState({ messages: msgs, loading: false, pendingActions: res?.pending_actions || [] })
+      var reply = safeAssistantReply(res?.response?.content || res?.reply)
+      var nextPendingActions = res?.response?.pending_actions || res?.pending_actions || []
+      var responseBillImages = res?.response?.bill_images || res?.bill_images || []
+      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions }]
+      this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions })
       this.scrollBottom()
       var title = input.substring(0, 30)
       var saveRes = await rental("_ai", "save_chat", { id: this.state.convId, title, messages: msgs })
@@ -355,16 +436,142 @@ export class AIChat extends React.Component<{}, AIChatState> {
         this.loadHistory()
       }
     } catch {
-      msgs = [...msgs, { role: "assistant" as const, content: "抱歉，暂时无法连接 AI 服务" }]
+      msgs = [...msgs, { role: "assistant" as const, content: AI_GUIDED_HELP_REPLY }]
       this.setState({ messages: msgs, loading: false })
       this.scrollBottom()
     }
   }
 
+  persistMessages = async (messages: AIMessage[], title: string) => {
+    var saveRes = await rental("_ai", "save_chat", { id: this.state.convId, title, messages })
+    if (saveRes && saveRes.id) {
+      this.setState({ convId: saveRes.id })
+      this.loadHistory()
+    }
+  }
+
+  runPendingAction = async (action: AIPendingAction, command: "confirm" | "cancel") => {
+    if (this.state.loading) return
+    var pendingActions = this.state.pendingActions
+    if (!pendingActions.some(item => item.id === action.id)) return
+    this.setState({ loading: true })
+    try {
+      var res = await api("/api/rental", {
+        method: "POST",
+        body: JSON.stringify({
+          table: "_ai",
+          action: "chat",
+          data: {
+            prompt: "",
+            history: this.state.messages.slice(-10),
+            pending_actions: pendingActions,
+            pending_action_command: command,
+            pending_action_id: action.id,
+          },
+        }),
+      })
+      var reply = safeAssistantReply(res?.response?.content || res?.reply, command === "cancel" ? "已取消这项操作" : AI_GUIDED_HELP_REPLY)
+      var remainingActions = res?.response?.pending_actions || res?.pending_actions || []
+      var responseBillImages = res?.response?.bill_images || res?.bill_images || []
+      var actionRemains = remainingActions.some((item: AIPendingAction) => item.id === action.id)
+      var clearedMessages = this.state.messages.map(message => ({
+        ...message,
+        pendingActions: actionRemains ? message.pendingActions : message.pendingActions?.filter(item => item.id !== action.id),
+      }))
+      var messages = [...this.replaceExistingBillImages(clearedMessages, responseBillImages), {
+        role: "assistant" as const,
+        content: reply,
+        billImages: responseBillImages,
+        pendingActions: remainingActions,
+      }]
+      this.setState({ messages, loading: false, pendingActions: remainingActions })
+      this.scrollBottom()
+      await this.persistMessages(messages, action.label || "AI 操作")
+    } catch {
+      var fallbackMessages = [...this.state.messages, { role: "assistant" as const, content: AI_GUIDED_HELP_REPLY, pendingActions: this.state.pendingActions }]
+      this.setState({ messages: fallbackMessages, loading: false })
+      this.scrollBottom()
+    }
+  }
+
+  renderPendingAction = (action: AIPendingAction) => {
+    var preview = action.preview || {}
+    var fields = [
+      ["楼栋", preview.building_name || preview.building],
+      ["房间", preview.room_number],
+      ["租客", preview.tenant_name],
+      ["月份", preview.month],
+      ["类型", preview.meter_type_label || preview.meter_type],
+      ["读数", preview.reading],
+      ["上月读数", preview.previous_reading],
+      ["用量", preview.usage],
+      ["照片", preview.photo_saved ? "已包含" : undefined],
+      ["合计", preview.total_amount === undefined ? undefined : this.formatMoney(preview.total_amount)],
+    ].filter(item => item[1] !== undefined && item[1] !== null && item[1] !== "")
+    var isBill = action.type === "create_bill"
+    var isContract = action.type === "update_contract"
+    var actionTitle = isBill ? "待确认账单" : isContract ? "待确认合同修改" : "待确认读数"
+    var confirmText = isBill ? (preview.overwrite ? "确认覆盖" : "确认保存") : isContract ? "确认修改" : "确认录入"
+    var changeItems = Array.isArray(preview.change_items) ? preview.change_items : []
+    var otherFeeDetails = Array.isArray(preview.other_fee_details) ? preview.other_fee_details : []
+    return (
+      <div className="ai-pending-action" key={action.id}>
+        <div className="ai-pending-action-title">
+          <span>{actionTitle}</span>
+          <em>需要确认</em>
+        </div>
+        <div className="ai-pending-action-label">{action.label}</div>
+        {fields.length > 0 && (
+          <div className="ai-pending-action-fields">
+            {fields.map(item => <span key={String(item[0])}><b>{item[0]}</b>{String(item[1])}</span>)}
+          </div>
+        )}
+        {changeItems.length > 0 && (
+          <div className="ai-contract-changes">
+            {changeItems.map((item: any) => (
+              <div className="ai-contract-change" key={String(item.field || item.label)}>
+                <b>{item.label}</b>
+                <span>{String(item.before ?? '')}</span>
+                <i>→</i>
+                <strong>{String(item.after ?? '')}</strong>
+              </div>
+            ))}
+          </div>
+        )}
+        {otherFeeDetails.length > 0 && (
+          <div className="ai-other-fee-preview">
+            <div className="ai-other-fee-preview-head"><span>其他费用项目</span><span>费用</span></div>
+            {otherFeeDetails.map((item: any, index: number) => (
+              <div className="ai-other-fee-preview-row" key={`${item.name || 'fee'}-${index}`}>
+                <span>{String(item.name || '')}</span>
+                <strong>{this.formatMoney(item.amount)}</strong>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="ai-pending-action-buttons">
+          <button type="button" className="ai-pending-confirm" onClick={() => this.runPendingAction(action, "confirm")} disabled={this.state.loading}>
+            <CheckOutlined />{confirmText}
+          </button>
+          <button type="button" className="ai-pending-cancel" onClick={() => this.runPendingAction(action, "cancel")} disabled={this.state.loading}>
+            <CloseOutlined />取消
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  renderPendingActions = (actions: AIPendingAction[]) => {
+    if (!actions.length) return null
+    return <div className="ai-pending-action-list">{actions.map(action => this.renderPendingAction(action))}</div>
+  }
+
 
   inferMeterType = () => {
     var input = this.inputRef.current?.value || ""
-    return /水表|水费|用水|水读数/.test(input) ? "水表" as const : "电表" as const
+    if (/水表|水费|用水|水读数/.test(input)) return "水表"
+    if (/电表|电费|用电|电读数/.test(input)) return "电表"
+    return "未知"
   }
 
   inferMeterTypeForFile = (file: File, index: number, total: number) => {
@@ -388,25 +595,88 @@ export class AIChat extends React.Component<{}, AIChatState> {
     })
   }
 
-  recognizeAttachment = async (id: string, dataUrl: string, meterType: "水表" | "电表") => {
+  loadMeterOptions = async () => {
+    if (this.state.meterBuildings.length > 0) return
+    try {
+      var buildings = await rental("buildings", "list") || []
+      var roomEntries = await Promise.all((buildings || []).map(async (building: AIMeterBuilding) => {
+        var [rooms, contracts] = await Promise.all([
+          rental("rooms", "list", { building_id: building.id }),
+          rental("contracts", "list", { active_only: true, building_id: building.id }),
+        ])
+        var contractByRoom: Record<number, any> = {}
+        ;(contracts || []).forEach((contract: any) => { contractByRoom[Number(contract.room_id)] = contract })
+        return [building.id, (rooms || []).map((room: any) => ({
+          id: Number(room.id),
+          room_number: String(room.room_number || ""),
+          building_id: Number(building.id),
+          tenant_id: contractByRoom[Number(room.id)]?.tenant_id || null,
+          tenant_name: contractByRoom[Number(room.id)]?.tenant_name || "",
+        }))] as const
+      }))
+      var rooms: Record<number, AIMeterRoom[]> = {}
+      roomEntries.forEach(entry => { rooms[entry[0]] = entry[1] })
+      this.setState({ meterBuildings: buildings || [], meterRooms: rooms })
+    } catch {
+      this.setState({ meterBuildings: [], meterRooms: {} })
+    }
+  }
+
+  normalizeMeterType = (value: any, fallback = "未知") => {
+    var text = String(value || "").toLowerCase()
+    if (text.includes("水") || text.includes("water")) return "水表"
+    if (text.includes("电") || text.includes("electric")) return "电表"
+    return fallback
+  }
+
+  recognizeAttachment = async (id: string, dataUrl: string, meterType: string) => {
     this.setState(s => ({
       attachments: s.attachments.map(a => a.id === id ? { ...a, meterType, status: "reading", error: undefined } : a)
     }))
     try {
       var base64Data = dataUrl.includes("base64,") ? dataUrl.split("base64,")[1] : dataUrl
-      var ocrRes = await api("/api/rental", {
+      var analysisRes = await api("/api/rental", {
         method: "POST",
-        body: JSON.stringify({ table: "_ocr", action: "read", data: { image: base64Data, meter_type: meterType } })
+        body: JSON.stringify({ table: "_ocr", action: "analyze", data: { image: base64Data, meter_type: meterType } })
       })
-      var num = ocrRes?.numbers?.length ? Number(ocrRes.numbers[0]) : null
+      if (analysisRes?.success === false) throw new Error("recognition_unavailable")
+      var rawNumber = analysisRes?.reading
+      var num = rawNumber === null || rawNumber === undefined || rawNumber === "" ? null : Number(rawNumber)
+      if (!Number.isFinite(num as number)) num = null
+      var recognizedType = this.normalizeMeterType(analysisRes?.meter_type, meterType)
+      var matchedBuilding = this.state.meterBuildings.find(building =>
+        Number(building.id) === Number(analysisRes?.building_id)
+        || (!!analysisRes?.building_name && String(building.name).includes(String(analysisRes.building_name)))
+      )
+      var buildingId = analysisRes?.building_id ? Number(analysisRes.building_id) : matchedBuilding?.id || null
+      var candidateRooms = buildingId ? (this.state.meterRooms[buildingId] || []) : []
+      var matchedRoom = candidateRooms.find(room =>
+        Number(room.id) === Number(analysisRes?.room_id)
+        || (!!analysisRes?.room_number && String(room.room_number) === String(analysisRes.room_number))
+      )
       this.setState(s => ({
         attachments: s.attachments.map(a => a.id === id
-          ? { ...a, status: num !== null ? "done" : "error", ocrNumber: num, error: num === null ? (ocrRes?.error || "未识别") : undefined }
+          ? {
+            ...a,
+            status: num !== null ? "done" : "error",
+            ocrNumber: num,
+            meterType: recognizedType,
+            meterNumber: analysisRes?.meter_number || "",
+            buildingId,
+            buildingName: matchedBuilding?.name || analysisRes?.building_name || "",
+            roomId: analysisRes?.room_id ? Number(analysisRes.room_id) : matchedRoom?.id || null,
+            roomNumber: matchedRoom?.room_number || analysisRes?.room_number || "",
+            tenantId: analysisRes?.tenant_id || matchedRoom?.tenant_id || null,
+            tenantName: analysisRes?.tenant_name || matchedRoom?.tenant_name || "",
+            confidence: analysisRes?.confidence || {},
+            warnings: analysisRes?.warnings || [],
+            error: num === null ? (analysisRes?.error || "未识别到有效读数") : undefined,
+          }
           : a)
       }))
     } catch {
       this.setState(s => ({
-        attachments: s.attachments.map(a => a.id === id ? { ...a, status: "error", ocrNumber: null, error: "识别失败" } : a)
+        attachments: s.attachments.map(a => a.id === id ? { ...a, status: "error", ocrNumber: null, error: "没有识别清楚，请手动选择表具类型、楼栋和房间，并填写读数" } : a)
       }))
     }
   }
@@ -414,6 +684,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
   handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     var files = Array.from(e.target.files || [])
     if (!files.length) return
+    await this.loadMeterOptions()
     var newItems: AIImageAttachment[] = []
     for (var i = 0; i < files.length; i++) {
       var file = files[i]
@@ -451,6 +722,37 @@ export class AIChat extends React.Component<{}, AIChatState> {
     this.recognizeAttachment(id, item.dataUrl, meterType)
   }
 
+  setAttachmentBuilding = (id: string, value: string) => {
+    var buildingId = value ? Number(value) : null
+    var building = this.state.meterBuildings.find(item => Number(item.id) === buildingId)
+    this.setState(s => ({
+      attachments: s.attachments.map(item => item.id === id ? {
+        ...item,
+        buildingId,
+        buildingName: building?.name || "",
+        roomId: null,
+        roomNumber: "",
+        tenantId: null,
+        tenantName: "",
+      } : item),
+    }))
+  }
+
+  setAttachmentRoom = (id: string, value: string) => {
+    var roomId = value ? Number(value) : null
+    var item = this.state.attachments.find(attachment => attachment.id === id)
+    var room = item?.buildingId ? (this.state.meterRooms[item.buildingId] || []).find(candidate => Number(candidate.id) === roomId) : undefined
+    this.setState(s => ({
+      attachments: s.attachments.map(attachment => attachment.id === id ? {
+        ...attachment,
+        roomId,
+        roomNumber: room?.room_number || "",
+        tenantId: room?.tenant_id || null,
+        tenantName: room?.tenant_name || "",
+      } : attachment),
+    }))
+  }
+
   updateAttachmentReading = (id: string, value: string) => {
     var parsed = value.trim() === "" ? null : Number(value)
     this.setState(s => ({
@@ -479,8 +781,21 @@ export class AIChat extends React.Component<{}, AIChatState> {
     
     // Show user message (possibly with image context)
     var userMsg = input || "请识别这几张水电表图片"
-    if (attachments.length) userMsg += "（已上传" + attachments.length + "张图片）"
-    var msgs = [...this.state.messages, { role: "user" as const, content: userMsg }]
+    var messageImages = attachments.map(item => ({
+      id: item.id,
+      dataUrl: item.dataUrl,
+      fileName: item.fileName,
+      meterType: item.meterType,
+      ocrNumber: item.ocrNumber,
+      buildingId: item.buildingId,
+      buildingName: item.buildingName,
+      roomId: item.roomId,
+      roomNumber: item.roomNumber,
+      tenantId: item.tenantId,
+      tenantName: item.tenantName,
+      meterNumber: item.meterNumber,
+    }))
+    var msgs = [...this.state.messages, { role: "user" as const, content: userMsg, images: messageImages }]
     this.setState({ messages: msgs, loading: true, attachments: [] })
     this.scrollBottom()
 
@@ -505,14 +820,24 @@ export class AIChat extends React.Component<{}, AIChatState> {
               image: item.dataUrl,
               file_name: item.fileName,
               ocr_number: item.ocrNumber,
+              meter_type: item.meterType,
               ocr_meter_type: item.meterType,
+              meter_number: item.meterNumber,
+              building_id: item.buildingId,
+              building_name: item.buildingName,
+              room_id: item.roomId,
+              room_number: item.roomNumber,
+              tenant_id: item.tenantId,
+              tenant_name: item.tenantName,
             })),
           }
         })
       })
-      var reply = (res && res.reply) ? res.reply : "抱歉，AI 服务暂时不可用"
-      msgs = [...msgs, { role: "assistant" as const, content: reply, billImages: res?.bill_images || [] }]
-      this.setState({ messages: msgs, loading: false, pendingActions: res?.pending_actions || [] })
+      var reply = safeAssistantReply(res?.response?.content || res?.reply)
+      var nextPendingActions = res?.response?.pending_actions || res?.pending_actions || []
+      var responseBillImages = res?.response?.bill_images || res?.bill_images || []
+      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions }]
+      this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions })
       this.scrollBottom()
       var title = input.substring(0, 30) || "图片识别"
       var saveRes = await rental("_ai", "save_chat", { id: this.state.convId, title, messages: msgs })
@@ -521,7 +846,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
         this.loadHistory()
       }
     } catch {
-      msgs = [...msgs, { role: "assistant" as const, content: "抱歉，暂时无法连接 AI 服务" }]
+      msgs = [...msgs, { role: "assistant" as const, content: AI_GUIDED_HELP_REPLY }]
       this.setState({ messages: msgs, loading: false })
       this.scrollBottom()
     }
@@ -639,7 +964,24 @@ export class AIChat extends React.Component<{}, AIChatState> {
                   return (
                     <div key={i} className="ai-msg-v2 user">
                       <div className="ai-msg-avatar">👤</div>
-                      <div className="ai-msg-bubble user-bubble">{m.content}</div>
+                      <div className="ai-msg-bubble user-bubble">
+                        {m.content && <div>{m.content}</div>}
+                        {m.images && m.images.length > 0 && (
+                          <div className="ai-message-images">
+                            {m.images.map(image => (
+                              <div key={image.id} className="ai-message-image-wrap">
+                                <button type="button" className="ai-message-image" onClick={() => this.setState({ activePreviewImage: image.dataUrl })} title="查看图片">
+                                  <img src={image.dataUrl} alt={image.fileName} />
+                                </button>
+                                <div className="ai-message-image-meta">
+                                  <span>{image.meterType || "表具"}{image.roomNumber ? " · " + image.roomNumber : ""}</span>
+                                  {image.tenantName && <span>{image.tenantName}</span>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )
                 }
@@ -651,6 +993,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
                         {m.content}
                       </ReactMarkdown>
                       {m.billImages && m.billImages.map((image, j) => this.renderBillImage(image, i + "-" + j))}
+                      {this.renderPendingActions(m.pendingActions || [])}
                     </div>
                   </div>
                 )
@@ -678,6 +1021,18 @@ export class AIChat extends React.Component<{}, AIChatState> {
                       <div className="ai-attachment-type">
                         <button type="button" className={item.meterType === "水表" ? "active" : ""} onClick={() => this.setAttachmentMeterType(item.id, "水表")}>水</button>
                         <button type="button" className={item.meterType === "电表" ? "active" : ""} onClick={() => this.setAttachmentMeterType(item.id, "电表")}>电</button>
+                      </div>
+                      <div className="ai-attachment-fields">
+                        <select value={item.buildingId || ""} onChange={e => this.setAttachmentBuilding(item.id, e.target.value)} title="选择楼栋">
+                          <option value="">选择楼栋</option>
+                          {s.meterBuildings.map(building => <option key={building.id} value={building.id}>{building.name}</option>)}
+                        </select>
+                        <select value={item.roomId || ""} onChange={e => this.setAttachmentRoom(item.id, e.target.value)} disabled={!item.buildingId} title="选择房间">
+                          <option value="">选择房间</option>
+                          {(s.meterRooms[item.buildingId || 0] || []).map(room => <option key={room.id} value={room.id}>{room.room_number}</option>)}
+                        </select>
+                        <div className="ai-attachment-tenant">租客：{item.tenantName || "未匹配"}</div>
+                        {item.meterNumber && <div className="ai-attachment-meter-no">表号：{item.meterNumber}</div>}
                       </div>
                       <div className={"ai-attachment-status " + item.status}>
                         {item.status === "reading" && <><LoadingOutlined /> 识别中</>}

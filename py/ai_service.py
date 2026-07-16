@@ -388,10 +388,11 @@ class AIService:
                     time.sleep(1.5)
         return {"content": "🐱 " + last_error, "tool_calls": None}
 
-    def read_meter_image(self, base64_image, meter_type="电表"):
-        """调用多模态AI识别水电表读数，使用独立的OCR配置"""
-        # 从数据库读 OCR 独立配置
+    def analyze_meter_image(self, base64_image, meter_type=""):
+        """Return structured meter recognition data for the editable AI card."""
         from local_db import load_app_user
+        import re
+
         cfg = load_app_user()
         ocr_provider = cfg.get("ocr_provider", "qwen")
         ocr_model = cfg.get("ocr_model", "qwen-vl-max")
@@ -406,48 +407,113 @@ class AIService:
         if not base_url:
             return None, "图片识别供应商未配置 API 地址"
 
-        url = base_url.rstrip("/") + "/chat/completions"
-
-        # 确保是完整 data URL
         if not base64_image.startswith("data:"):
             base64_image = "data:image/jpeg;base64," + base64_image
 
+        hint = meter_type or "水表或电表"
+        system_prompt = (
+            "你是租赁管理系统的水电表图片识别器。"
+            "请严格只返回一个合法JSON对象，不要Markdown、不要解释、不要补充字段。"
+            "看不清或无法确认的字段必须返回null或unknown，禁止猜测。"
+        )
+        user_prompt = (
+            "请识别这张" + hint + "照片。只识别表盘当前读数、表具类型、表号、图片中明确出现的楼栋名和房间号。"
+            "不要把表号当成读数，不要把上月读数当成本月读数，不要读取单位。"
+            "返回固定字段："
+            "{\"meter_type\":\"water|electric|unknown\","
+            "\"reading\":number|null,\"meter_number\":string|null,"
+            "\"building_name\":string|null,\"room_number\":string|null,"
+            "\"confidence\":{\"meter_type\":number,\"reading\":number,\"meter_number\":number,\"location\":number},"
+            "\"warnings\":string[]}."
+        )
         messages = [
-            {"role": "system", "content": "你是一个水电表读数识别助手。只回复数字，不要任何解释。"},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": [
-                {"type": "text", "text": "请识别这张" + meter_type + "照片中的读数。只回复数字，例如：20880。不要加任何单位或说明。"},
-                {"type": "image_url", "image_url": {"url": base64_image}}
-            ]}
+                {"type": "text", "text": user_prompt},
+                {"type": "image_url", "image_url": {"url": base64_image}},
+            ]},
         ]
-
         payload = {
             "model": ocr_model,
             "messages": messages,
             "stream": False,
-            "max_tokens": 50,
+            "max_tokens": 300,
             "temperature": 0.1,
+            "response_format": {"type": "json_object"},
         }
 
-        if HAS_REQUESTS:
-            sess = requests.Session()
-            sess.headers["Authorization"] = "Bearer " + api_key
-            sess.headers["Content-Type"] = "application/json"
-            try:
-                r = sess.post(url, json=payload, timeout=30)
-                if r.status_code != 200:
-                    return None, "AI 识别失败(" + str(r.status_code) + ")"
-                data = r.json()
-                text = data["choices"][0]["message"]["content"].strip()
-                # 提取数字
-                import re
-                nums = re.findall(r'\d+', text)
-                if nums:
-                    return int(nums[-1]), None
-                return None, "未识别到数字"
-            except Exception as e:
-                return None, str(e)
-        else:
+        if not HAS_REQUESTS:
             return None, "需要 requests 库"
+
+        sess = requests.Session()
+        sess.headers["Authorization"] = "Bearer " + api_key
+        sess.headers["Content-Type"] = "application/json"
+        try:
+            url = base_url.rstrip("/") + "/chat/completions"
+            r = sess.post(url, json=payload, timeout=40)
+            if r.status_code != 200:
+                fallback_payload = dict(payload)
+                fallback_payload.pop("response_format", None)
+                r = sess.post(url, json=fallback_payload, timeout=40)
+            if r.status_code != 200:
+                return None, "AI 识别失败(" + str(r.status_code) + ")"
+
+            content = r.json()["choices"][0]["message"].get("content", "")
+            if isinstance(content, dict):
+                parsed = content
+            else:
+                text = str(content).strip()
+                if text.startswith("```"):
+                    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+                try:
+                    parsed = json.loads(text)
+                except Exception:
+                    start, end = text.find("{"), text.rfind("}")
+                    if start < 0 or end <= start:
+                        return None, "AI 未返回合法识别结果"
+                    parsed = json.loads(text[start:end + 1])
+            if not isinstance(parsed, dict):
+                return None, "AI 未返回合法识别结果"
+
+            raw_type = str(parsed.get("meter_type") or "unknown").lower()
+            if "water" in raw_type or "水" in raw_type:
+                normalized_type = "water"
+            elif "electric" in raw_type or "电" in raw_type:
+                normalized_type = "electric"
+            else:
+                normalized_type = "unknown"
+
+            raw_reading = parsed.get("reading")
+            if isinstance(raw_reading, str):
+                match = re.search(r"-?\d+(?:\.\d+)?", raw_reading.replace(",", ""))
+                raw_reading = match.group(0) if match else None
+            try:
+                reading = float(raw_reading) if raw_reading is not None else None
+            except (TypeError, ValueError):
+                reading = None
+
+            confidence = parsed.get("confidence") if isinstance(parsed.get("confidence"), dict) else {}
+            warnings = parsed.get("warnings") if isinstance(parsed.get("warnings"), list) else []
+            return {
+                "meter_type": normalized_type,
+                "reading": int(reading) if reading is not None and reading.is_integer() else reading,
+                "meter_number": str(parsed.get("meter_number") or "").strip() or None,
+                "building_name": str(parsed.get("building_name") or "").strip() or None,
+                "room_number": str(parsed.get("room_number") or "").strip() or None,
+                "confidence": confidence,
+                "warnings": [str(item) for item in warnings],
+            }, None
+        except Exception as e:
+            return None, str(e)
+
+    def read_meter_image(self, base64_image, meter_type="电表"):
+        result, error = self.analyze_meter_image(base64_image, meter_type)
+        if error:
+            return None, error
+        reading = result.get("reading") if isinstance(result, dict) else None
+        if reading is None:
+            return None, "未识别到数字"
+        return reading, None
 
 
 ai_svc = AIService()

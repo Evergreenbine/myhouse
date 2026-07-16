@@ -1,9 +1,10 @@
 import React from 'react'
 import { rental } from '../api'
 import { showToast } from '../components/ui'
+import { resolveBuildingId, useUIStore } from '../store'
 
 interface Meter { id: number; meter_no: string; room_number: string; room_id: number; init_reading: number; photo: string; building_id: number }
-interface Building { id: number; name: string }
+interface Building { id: number; name: string; rent_day?: number }
 interface Room { id: number; room_number: string; floor: number }
 
 interface MeterPageState {
@@ -42,7 +43,8 @@ class MeterPage extends React.Component<{ type: string; title: string; icon: str
 
   loadBuildings = async () => {
     const data = await rental('buildings', 'list') || []
-    const bid = data.length > 0 ? data[0].id : null
+    const bid = resolveBuildingId(data)
+    useUIStore.getState().setSelectedBuildingId(bid)
     if (bid) {
       const ms = await rental('meters', 'list', { building_id: bid, type: this.props.type }) || []
       this.setState({ buildings: data, curBid: bid, meters: { [bid]: ms }, loading: false, firstLoad: false })
@@ -52,6 +54,7 @@ class MeterPage extends React.Component<{ type: string; title: string; icon: str
   }
 
   switchBuilding = async (id: number) => {
+    useUIStore.getState().setSelectedBuildingId(id)
     if (this.state.meters[id]) { this.setState({ curBid: id }); return }
     this.setState({ curBid: id, loading: true })
     const ms = await rental('meters', 'list', { building_id: id, type: this.props.type }) || []

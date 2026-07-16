@@ -146,6 +146,7 @@ def init():
         billing_month TEXT NOT NULL,
         rent_amount REAL DEFAULT 0, water_fee REAL DEFAULT 0,
         electric_fee REAL DEFAULT 0, other_fee REAL DEFAULT 0,
+        other_fee_details TEXT DEFAULT '[]',
         total_amount REAL DEFAULT 0, status TEXT DEFAULT 'unpaid',
         water_last_reading REAL DEFAULT 0, water_current_reading REAL DEFAULT 0,
         electric_last_reading REAL DEFAULT 0, electric_current_reading REAL DEFAULT 0,
@@ -170,6 +171,9 @@ def init():
     except: pass
     try:
         c.execute("ALTER TABLE bills ADD COLUMN electric_photo TEXT DEFAULT ''")
+    except: pass
+    try:
+        c.execute("ALTER TABLE bills ADD COLUMN other_fee_details TEXT DEFAULT '[]'")
     except: pass
     c.execute("""CREATE TABLE IF NOT EXISTS payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -631,19 +635,19 @@ def get_meter_reading_overview(mtype='water', building_id=None, start_month='202
 def add_bill(contract_id, billing_month, rent_amount, water_fee=0,
              electric_fee=0, other_fee=0, remark='',
              water_last=0, water_curr=0, electric_last=0, electric_curr=0,
-             water_photo='', electric_photo=''):
+             water_photo='', electric_photo='', other_fee_details='[]'):
     total = round(rent_amount + water_fee + electric_fee + other_fee, 2)
     conn = _conn()
     cur = conn.cursor()
     cur.execute("""INSERT INTO bills
         (contract_id,billing_month,rent_amount,water_fee,electric_fee,
-         other_fee,total_amount,remark,
+         other_fee,other_fee_details,total_amount,remark,
          water_last_reading,water_current_reading,
          electric_last_reading,electric_current_reading,
          water_photo,electric_photo)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (contract_id, billing_month, rent_amount, water_fee,
-         electric_fee, other_fee, total, remark,
+         electric_fee, other_fee, other_fee_details or '[]', total, remark,
          water_last, water_curr, electric_last, electric_curr,
          water_photo, electric_photo))
     pk = cur.lastrowid
@@ -683,7 +687,7 @@ def get_bill(bid):
 def update_bill(bid, contract_id=None, billing_month=None, rent_amount=None,
                 water_fee=None, electric_fee=None, other_fee=None, remark=None,
                 water_last=None, water_curr=None, electric_last=None, electric_curr=None,
-                water_photo=None, electric_photo=None):
+                water_photo=None, electric_photo=None, other_fee_details=None):
     c = _conn()
     sets, params = [], []
     if contract_id is not None: sets.append("contract_id=?"); params.append(contract_id)
@@ -692,6 +696,7 @@ def update_bill(bid, contract_id=None, billing_month=None, rent_amount=None,
     if water_fee is not None: sets.append("water_fee=?"); params.append(water_fee)
     if electric_fee is not None: sets.append("electric_fee=?"); params.append(electric_fee)
     if other_fee is not None: sets.append("other_fee=?"); params.append(other_fee)
+    if other_fee_details is not None: sets.append("other_fee_details=?"); params.append(other_fee_details)
     if remark is not None: sets.append("remark=?"); params.append(remark)
     if water_last is not None: sets.append("water_last_reading=?"); params.append(water_last)
     if water_curr is not None: sets.append("water_current_reading=?"); params.append(water_curr)

@@ -1,17 +1,31 @@
 import { useState, useEffect } from 'react'
+import { LeftOutlined, RightOutlined } from '@ant-design/icons'
 import { rental } from '../api'
-import { useUIStore } from '../store'
+import { resolveBuildingId, useUIStore } from '../store'
+import { MonthPicker } from '../components/ui'
 
 interface Bill { id: number; tenant_name: string; room_number: string; billing_month: string; total_amount: number; status: string; building_name: string; building_id: number }
 interface Building { id: number; name: string }
 
 export function BillsPage() {
-  const { planYear, planMonth } = useUIStore()
+  const { planYear, planMonth, selectedBuildingId, setSelectedBuildingId, setPlanYearMonth } = useUIStore()
   const [bills, setBills] = useState<Bill[]>([])
   const [buildings, setBuildings] = useState<Building[]>([])
   const [curBid, setCurBid] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const billingMonth = `${planYear}-${String(planMonth).padStart(2, '0')}`
+
+  const changeMonth = (delta: number) => {
+    const date = new Date(planYear, planMonth - 1 + delta, 1)
+    setPlanYearMonth(date.getFullYear(), date.getMonth() + 1)
+  }
+
+  const selectMonth = (value: string) => {
+    const [yearText, monthText] = value.split('-')
+    const year = Number(yearText)
+    const month = Number(monthText)
+    if (year && month >= 1 && month <= 12) setPlanYearMonth(year, month)
+  }
 
   const load = async () => {
     const [bs, blds] = await Promise.all([
@@ -19,23 +33,30 @@ export function BillsPage() {
       rental('buildings', 'list'),
     ])
     setBuildings(blds || [])
-    if (blds?.length && !curBid) setCurBid(blds[0].id)
-    const filtered = (bs || []).filter((b: Bill) => !curBid || Number(b.building_id) === Number(curBid))
+    const bid = resolveBuildingId(blds || [])
+    if (selectedBuildingId !== bid) setSelectedBuildingId(bid)
+    if (curBid !== bid) setCurBid(bid)
+    const filtered = (bs || []).filter((b: Bill) => !bid || Number(b.building_id) === Number(bid))
     setBills(filtered)
     setLoading(false)
   }
 
-  useEffect(() => { setLoading(true); load() }, [curBid, planYear, planMonth])
+  useEffect(() => { setLoading(true); load() }, [curBid, selectedBuildingId, planYear, planMonth])
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-semibold">账单管理</h2>
+          <div className="month-filter" style={{marginBottom:0}}>
+            <button className="month-nav" onClick={() => changeMonth(-1)} aria-label="上一个月"><LeftOutlined /></button>
+            <MonthPicker value={billingMonth} onChange={selectMonth} ariaLabel="选择账单月份" />
+            <button className="month-nav" onClick={() => changeMonth(1)} aria-label="下一个月"><RightOutlined /></button>
+          </div>
           <div className="flex gap-2">
             {buildings.map(b => (
               <button key={b.id} className={`px-3 py-1 rounded text-xs font-medium transition-colors ${curBid === b.id ? 'bg-[var(--primary-light)] text-[var(--primary)]' : 'text-[var(--text-secondary)] hover:bg-gray-100'}`}
-                onClick={() => setCurBid(b.id)}>{b.name}</button>
+                onClick={() => { setCurBid(b.id); setSelectedBuildingId(b.id) }}>{b.name}</button>
             ))}
           </div>
         </div>

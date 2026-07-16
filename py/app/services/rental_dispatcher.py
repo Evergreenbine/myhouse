@@ -24,6 +24,82 @@ def _contract_payload(data):
     }
 
 
+def _normalize_meter_text(value):
+    return "".join(str(value or "").strip().lower().split()).replace("-", "")
+
+
+def _enrich_meter_analysis(analysis, meter_type_hint=""):
+    result = dict(analysis or {})
+    normalized_type = str(result.get("meter_type") or "unknown")
+    if normalized_type == "unknown":
+        hint = str(meter_type_hint or "").lower()
+        if "水" in hint or "water" in hint:
+            normalized_type = "water"
+        elif "电" in hint or "electric" in hint:
+            normalized_type = "electric"
+    result["meter_type"] = normalized_type
+
+    rows = db.get_meters(mtype=normalized_type if normalized_type in {"water", "electric"} else None) or []
+    meter_number = _normalize_meter_text(result.get("meter_number"))
+    room_number = _normalize_meter_text(result.get("room_number"))
+    building_name = _normalize_meter_text(result.get("building_name"))
+
+    exact_meter = [row for row in rows if meter_number and _normalize_meter_text(row.get("meter_no")) == meter_number]
+    matches = exact_meter
+    if not matches and room_number:
+        matches = [row for row in rows if _normalize_meter_text(row.get("room_number")) == room_number]
+    if building_name and matches:
+        scoped = [
+            row for row in matches
+            if building_name in _normalize_meter_text(row.get("building_name"))
+            or _normalize_meter_text(row.get("building_name")) in building_name
+        ]
+        if scoped:
+            matches = scoped
+
+    if len(matches) == 1:
+        row = matches[0]
+        result.update({
+            "meter_id": row.get("id"),
+            "meter_type": row.get("type") or normalized_type,
+            "meter_number": row.get("meter_no") or result.get("meter_number"),
+            "room_id": row.get("room_id"),
+            "room_number": row.get("room_number") or result.get("room_number"),
+            "building_id": row.get("building_id"),
+            "building_name": row.get("building_name") or result.get("building_name"),
+            "match_status": "matched",
+            "match_source": "meter_number" if exact_meter else "room_number",
+        })
+        contracts = db.get_contracts(True, row.get("building_id")) or []
+        contract = next((item for item in contracts if item.get("room_id") == row.get("room_id")), None)
+        if contract:
+            result.update({
+                "contract_id": contract.get("id"),
+                "tenant_id": contract.get("tenant_id"),
+                "tenant_name": contract.get("tenant_name"),
+            })
+    else:
+        result["match_status"] = "ambiguous" if len(matches) > 1 else "unmatched"
+
+    candidates = []
+    for row in matches[:12]:
+        contracts = db.get_contracts(True, row.get("building_id")) or []
+        contract = next((item for item in contracts if item.get("room_id") == row.get("room_id")), None)
+        candidates.append({
+            "meter_id": row.get("id"),
+            "meter_number": row.get("meter_no"),
+            "meter_type": row.get("type"),
+            "building_id": row.get("building_id"),
+            "building_name": row.get("building_name"),
+            "room_id": row.get("room_id"),
+            "room_number": row.get("room_number"),
+            "tenant_id": contract.get("tenant_id") if contract else None,
+            "tenant_name": contract.get("tenant_name") if contract else None,
+        })
+    result["candidates"] = candidates
+    return result
+
+
 def dispatch(table, action, data):
     data = data or {}
 
@@ -138,6 +214,7 @@ def dispatch(table, action, data):
                 data.get("electric_curr", 0),
                 data.get("water_photo", ""),
                 data.get("electric_photo", ""),
+                data.get("other_fee_details", "[]"),
             )
         if action == "update":
             db.update_bill(
@@ -155,6 +232,7 @@ def dispatch(table, action, data):
                 data.get("electric_curr"),
                 data.get("water_photo"),
                 data.get("electric_photo"),
+                data.get("other_fee_details"),
             )
             return {"success": True}
         if action == "update_status":
@@ -187,6 +265,13 @@ def dispatch(table, action, data):
             return ai_chat.init_knowledge()
 
     if table == "_ocr":
+        if action == "analyze":
+            image = data.get("image", "")
+            meter_type = data.get("meter_type", "")
+            analysis, err = ai_svc.analyze_meter_image(image, meter_type)
+            if err:
+                return {"success": False, "error": err}
+            return {"success": True, **_enrich_meter_analysis(analysis, meter_type)}
         if action == "read":
             image = data.get("image", "")
             meter_type = data.get("meter_type", "电表")

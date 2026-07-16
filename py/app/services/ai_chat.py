@@ -7,6 +7,24 @@ from ai_service import PROVIDERS, ai_svc
 from app.services.ai_context import build_rental_ai_context
 
 
+GUIDED_HELP_REPLY = (
+    "我还不能确定你遇到的具体问题。请告诉我：你正在做什么（查询、录入读数、生成账单或收款），"
+    "涉及哪个楼栋、房间和月份，以及现在卡在哪一步或页面显示了什么。"
+    "我会根据这些信息告诉你下一步怎么处理。"
+)
+
+
+def _safe_ai_reply(content):
+    text = str(content or "").strip()
+    technical_markers = (
+        "连接失败", "API错误", "API 错误", "请求失败", "服务暂时不可用",
+        "timeout", "traceback", "exception", "工具不在白名单", "🐱",
+    )
+    if not text or any(marker.lower() in text.lower() for marker in technical_markers):
+        return GUIDED_HELP_REPLY
+    return text
+
+
 def test_provider(data):
     pid = data.get("_provider", "deepseek")
     provider = PROVIDERS.get(pid, PROVIDERS["deepseek"])
@@ -79,6 +97,7 @@ def chat(data):
             "你是租房管理系统助手，名叫'租房小管家'。"
             "请优先根据下面的实时系统数据回答用户问题；不要编造不存在的数据。"
             "如果数据没有录入或上下文没有提供，明确说明缺少数据。"
+            "不要展示程序错误、接口错误、工具名称、异常堆栈或内部日志；无法继续时，追问用户正在做什么、涉及的楼栋房间月份和卡住的步骤。"
             "涉及金额时使用人民币并保留两位小数。"
             "回答简洁实用，首行先给结论，后面用简短分组和紧凑表格。"
             "不要频繁使用 Markdown 大标题、横线和表情符号；除非确实需要，不要输出 ##、---。"
@@ -94,9 +113,10 @@ def chat(data):
         messages.append({"role": "user", "content": prompt})
 
         resp = ai_svc.call_with_tools(messages, max_tokens=1024)
-        return {"reply": resp.get("content", "") or "抱歉，AI 服务暂时不可用"}
-    except Exception as e:
-        return {"reply": "AI 服务调用失败：" + str(e)}
+        reply = _safe_ai_reply(resp.get("content", ""))
+        return {"reply": reply, "response": {"type": "assistant_message", "content": reply, "pending_actions": [], "bill_images": []}}
+    except Exception:
+        return {"reply": GUIDED_HELP_REPLY, "response": {"type": "assistant_message", "content": GUIDED_HELP_REPLY, "pending_actions": [], "bill_images": []}}
 
 
 def save_chat(data):

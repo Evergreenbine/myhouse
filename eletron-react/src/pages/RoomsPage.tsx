@@ -1,9 +1,10 @@
 import React from 'react'
 import { rental } from '../api'
 import { Modal, Button, Input, showToast } from '../components/ui'
+import { resolveBuildingId, useUIStore } from '../store'
 
 interface Room { id: number; room_number: string; floor: number; status: string; building_name: string; building_id: number }
-interface Building { id: number; name: string }
+interface Building { id: number; name: string; rent_day?: number }
 
 interface State {
   rooms: Record<number, Room[]>
@@ -36,7 +37,8 @@ export class RoomsPage extends React.Component<{}, State> {
 
   loadBuildings = async () => {
     const data = await rental('buildings', 'list') || []
-    const bid = data.length > 0 ? data[0].id : null
+    const bid = resolveBuildingId(data)
+    useUIStore.getState().setSelectedBuildingId(bid)
     if (bid) {
       const rooms = await rental('rooms', 'list', { building_id: bid }) || []
       this.setState({ buildings: data, curBid: bid, rooms: { [bid]: rooms }, loading: false })
@@ -46,6 +48,7 @@ export class RoomsPage extends React.Component<{}, State> {
   }
 
   switchBuilding = async (id: number) => {
+    useUIStore.getState().setSelectedBuildingId(id)
     const { rooms } = this.state
     // 有缓存直接切
     if (rooms[id]) {

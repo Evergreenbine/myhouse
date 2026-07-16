@@ -1,5 +1,8 @@
 ﻿import React, { useState, useEffect, useRef } from 'react'
 
+import { DatePicker as AntDatePicker } from 'antd'
+import dayjs from 'dayjs'
+
 // Modal 弹窗
 export function Modal({ open, onClose, title, children }: {
   open: boolean; onClose: () => void; title?: string; children: React.ReactNode
@@ -113,20 +116,41 @@ export function showToast(msg: string) {
     el.className = 'toast'
     document.body.appendChild(el)
   }
-  if (!el) {
-    el = document.createElement('div')
-    el.id = '_toast'
-    el.className = 'toast'
-    document.body.appendChild(el)
-  }
-  el.textContent = msg
-  el.className = 'toast show'
+  const toastEl = el
+  toastEl.textContent = msg
+  toastEl.className = 'toast show'
   clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { el.className = 'toast' }, 2000)
+  toastTimer = setTimeout(() => { toastEl.className = 'toast' }, 2000)
 }
 
 export function ToastContainer() {
   return <div id="_toast" className="toast" />
+}
+
+// 统一使用 Ant Design 月份面板，保证 Electron 和浏览器中的交互一致
+export function MonthPicker({ value, onChange, ariaLabel, style }: {
+  value: string
+  onChange: (v: string) => void
+  ariaLabel?: string
+  style?: React.CSSProperties
+}) {
+  const selected = /^\d{4}-\d{2}$/.test(value || '') ? dayjs(value + '-01') : null
+
+  return (
+    <div className="month-picker-wrap" style={style}>
+      <AntDatePicker
+        className="app-month-picker"
+        picker="month"
+        value={selected}
+        format="YYYY年M月"
+        allowClear={false}
+        inputReadOnly
+        suffixIcon={null}
+        aria-label={ariaLabel || '选择月份'}
+        onChange={date => { if (date) onChange(date.format('YYYY-MM')) }}
+      />
+    </div>
+  )
 }
 
 // DatePicker 组件

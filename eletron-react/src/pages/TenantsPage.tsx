@@ -1,9 +1,10 @@
 import React from 'react'
 import { rental } from '../api'
 import { showToast } from '../components/ui'
+import { resolveBuildingId, useUIStore } from '../store'
 
 interface Tenant { id: number; name: string; phone: string; id_card: string; status: string; room_id: string }
-interface Building { id: number; name: string }
+interface Building { id: number; name: string; rent_day?: number }
 interface Room { id: number; room_number: string; floor: number }
 
 interface State {
@@ -51,7 +52,8 @@ export class TenantsPage extends React.Component<{}, State> {
 
   loadBuildings = async () => {
     const data = await rental('buildings', 'list') || []
-    const bid = data.length > 0 ? data[0].id : null
+    const bid = resolveBuildingId(data)
+    useUIStore.getState().setSelectedBuildingId(bid)
     if (bid) {
       const [tenants, rooms] = await Promise.all([
         rental('tenants', 'list', { active_only: true, building_id: bid }),
@@ -78,6 +80,7 @@ export class TenantsPage extends React.Component<{}, State> {
   }
 
   switchBuilding = async (id: number) => {
+    useUIStore.getState().setSelectedBuildingId(id)
     const ck = this.cacheKey(id)
     if (this.state.tenants[ck]) {
       this.setState({ curBid: id })
