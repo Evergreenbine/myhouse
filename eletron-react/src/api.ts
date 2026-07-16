@@ -1,4 +1,9 @@
-const API = 'http://127.0.0.1:18520'
+const defaultApiBase = (
+  window.location.protocol === 'file:' ||
+  window.location.hostname === 'localhost' ||
+  window.location.hostname === '127.0.0.1'
+) ? 'http://127.0.0.1:18520' : ''
+const API = (import.meta.env.VITE_API_BASE_URL || defaultApiBase).replace(/\/$/, '')
 const REQUEST_TIMEOUT_MS = 90000
 
 export async function api(path: string, opts?: RequestInit) {
