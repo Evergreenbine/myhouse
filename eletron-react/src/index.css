@@ -349,7 +349,13 @@ table a:hover{text-decoration:underline}
 .ai-pending-action-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .ai-pending-action { padding: 11px 12px; border: 1px solid #D8E2F3; border-radius: 9px; background: var(--white); box-shadow: 0 2px 8px rgba(15,23,42,0.04); }
 .ai-pending-action-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 700; color: var(--text); }
-.ai-pending-action-title em { font-style: normal; padding: 2px 6px; border-radius: 5px; background: #FFF6D6; color: #8A5A00; font-size: 11px; font-weight: 500; }
+.ai-pending-action-title em { font-style: normal; min-height: 22px; padding: 2px 7px; border-radius: 5px; background: #FFF6D6; color: #8A5A00; font-size: 11px; font-weight: 500; display:inline-flex;align-items:center;gap:4px; }
+.ai-pending-action.confirmed{border-color:#B7E4C7;background:#FBFFFC;box-shadow:none}
+.ai-pending-action.cancelled{border-color:var(--border-light);background:#FAFBFC;box-shadow:none;opacity:.82}
+.ai-pending-action-title em.status-confirmed{background:#EAF8EF;color:#23834A}
+.ai-pending-action-title em.status-cancelled{background:#EEF1F5;color:var(--text-sec)}
+.ai-pending-action-title em.status-failed{background:#FFF1F0;color:var(--red)}
+.ai-pending-action-error{margin-top:9px;padding:7px 9px;border-radius:5px;background:#FFF5F4;color:#B42318;font-size:11px;line-height:1.5}
 .ai-pending-action-label { margin-top: 5px; color: var(--text-sec); font-size: 12px; line-height: 1.5; }
 .ai-pending-action-fields { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: 8px; color: var(--text-sec); font-size: 11px; }
 .ai-pending-action-fields span { display: inline-flex; gap: 3px; }

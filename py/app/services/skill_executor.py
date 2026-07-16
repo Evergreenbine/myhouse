@@ -151,6 +151,21 @@ def _normalize_month(month: Any = None) -> str:
     return text[:7] if re.match(r"^\d{4}-\d{2}", text) else _today_month()
 
 
+def _normalize_date(value: Any = None) -> str:
+    text = str(value or "").strip()
+    if not text or text in {"今天", "今日", "当天"}:
+        return date.today().isoformat()
+    if text in {"昨天", "昨日"}:
+        return (date.today() - timedelta(days=1)).isoformat()
+    matched = re.search(r"(20\d{2})[-年/](1[0-2]|0?[1-9])[-月/](3[01]|[12]?\d)日?", text)
+    if matched:
+        text = f"{int(matched.group(1)):04d}-{int(matched.group(2)):02d}-{int(matched.group(3)):02d}"
+    try:
+        return datetime.strptime(text[:10], "%Y-%m-%d").date().isoformat()
+    except Exception:
+        return ""
+
+
 def _normalize_meter_type(meter_type: Any = None) -> Optional[str]:
     text = str(meter_type or "").strip().lower()
     if not text or text in {"all", "全部", "水电", "水电表"}:
@@ -1468,6 +1483,175 @@ def payment_compare_paid_amount(bill_id: Any) -> Dict[str, Any]:
     }
 
 
+def _resolve_bill_for_payment(
+    bill_id: Any = None,
+    room_number: Any = None,
+    month: Any = None,
+    building_id: Any = None,
+) -> tuple[Optional[Dict[str, Any]], str]:
+    bid = _int_or_none(bill_id)
+    if bid:
+        bill = db.get_bill(bid)
+        return (bill, "") if bill else (None, "未找到该账单")
+
+    room_text = str(room_number or "").strip()
+    if not room_text:
+        return None, "请说明要确认收款的房间号"
+
+    target_month = _normalize_month(month)
+    rows = db.get_bills(target_month) or []
+    exact = [row for row in rows if str(row.get("room_number") or "").strip() == room_text]
+    target_building_id = _int_or_none(building_id)
+    if target_building_id:
+        exact = [row for row in exact if _int_or_none(row.get("building_id")) == target_building_id]
+    if not exact:
+        return None, f"未找到 {target_month} 的 {room_text} 房间账单"
+    if len(exact) > 1:
+        buildings = "、".join(sorted({str(row.get("building_name") or "未知楼栋") for row in exact}))
+        return None, f"房间号 {room_text} 在多个楼栋都有账单，请明确楼栋：{buildings}"
+    return exact[0], ""
+
+
+def payment_confirm_from_ai(
+    bill_id: Any = None,
+    room_number: Any = None,
+    month: Any = None,
+    building_id: Any = None,
+    amount: Any = None,
+    pay_date: Any = None,
+    pay_method: Any = "",
+    remark: Any = "AI助手确认收款",
+) -> Dict[str, Any]:
+    bill, error = _resolve_bill_for_payment(bill_id, room_number, month, building_id)
+    if not bill:
+        return {"success": False, "message": error}
+
+    status = str(bill.get("status") or "")
+    if status in {"empty", "draft", "pending", "recorded"}:
+        return {
+            "success": False,
+            "message": f"该账单当前为{_status_label(status)}，请先完成账单发送后再确认收款。",
+            "bill": bill,
+        }
+    if status == "paid":
+        return {"success": False, "message": "该账单已经是已收款状态，无需重复确认。", "bill": bill}
+
+    payments = _bill_payments(bill.get("id"))
+    receivable = round(_num(bill.get("total_amount")), 2)
+    paid = _payment_total(payments)
+    due = round(max(receivable - paid, 0), 2)
+    if due <= 0:
+        return {"success": False, "message": "该账单已没有待收金额，无需重复确认。", "bill": bill}
+
+    payment_amount = due if amount is None or amount == "" else round(_num(amount), 2)
+    if payment_amount <= 0:
+        return {"success": False, "message": "本次收款金额必须大于 0。", "bill": bill}
+    if payment_amount > due + 0.01:
+        return {
+            "success": False,
+            "message": f"本次收款 {_money(payment_amount)} 元超过待收 {_money(due)} 元，请核对金额。",
+            "bill": bill,
+        }
+
+    payment_date = _normalize_date(pay_date)
+    if not payment_date:
+        return {"success": False, "message": "收款日期格式不正确，请使用 YYYY-MM-DD。", "bill": bill}
+
+    action_args = {
+        "bill_id": bill.get("id"),
+        "amount": payment_amount,
+        "pay_date": payment_date,
+        "pay_method": str(pay_method or ""),
+        "remark": str(remark or "AI助手确认收款"),
+    }
+    action = _pending_action(
+        "record_payment",
+        f"确认{bill.get('room_number')} {bill.get('billing_month')} 收款 {_money(payment_amount)} 元",
+        "confirm_record_payment",
+        action_args,
+        {
+            "building_name": bill.get("building_name"),
+            "room_number": bill.get("room_number"),
+            "tenant_name": bill.get("tenant_name"),
+            "month": bill.get("billing_month"),
+            "status_label": _status_label(status),
+            "receivable": receivable,
+            "paid_amount": paid,
+            "due_amount": due,
+            "payment_amount": payment_amount,
+            "remaining_amount": round(max(due - payment_amount, 0), 2),
+            "pay_date": payment_date,
+            "pay_method": str(pay_method or ""),
+        },
+    )
+    return {
+        "success": True,
+        "requires_confirmation": True,
+        "action": "payment_prepared",
+        "bill": bill,
+        "pending_action": action,
+        "message": "收款信息已准备，请核对后确认收款。",
+    }
+
+
+def confirm_record_payment(
+    bill_id: Any,
+    amount: Any,
+    pay_date: Any = None,
+    pay_method: Any = "",
+    remark: Any = "AI助手确认收款",
+) -> Dict[str, Any]:
+    bill = db.get_bill(_int_or_none(bill_id))
+    if not bill:
+        return {"success": False, "message": "确认时未找到该账单，请重新查询后再操作。"}
+    if str(bill.get("status") or "") == "paid":
+        return {"success": False, "message": "该账单已经完成收款，请勿重复确认。", "bill": bill}
+
+    payment_amount = round(_num(amount), 2)
+    paid_before = _payment_total(_bill_payments(bill.get("id")))
+    receivable = round(_num(bill.get("total_amount")), 2)
+    due_before = round(max(receivable - paid_before, 0), 2)
+    if payment_amount <= 0:
+        return {"success": False, "message": "本次收款金额必须大于 0。", "bill": bill}
+    if due_before <= 0:
+        return {"success": False, "message": "该账单已没有待收金额，请勿重复确认。", "bill": bill}
+    if payment_amount > due_before + 0.01:
+        return {
+            "success": False,
+            "message": f"当前待收仅 {_money(due_before)} 元，原确认金额已不适用，请重新发起收款。",
+            "bill": bill,
+        }
+
+    payment_date = _normalize_date(pay_date)
+    if not payment_date:
+        return {"success": False, "message": "收款日期格式不正确，请重新发起收款。", "bill": bill}
+
+    payment_id = db.add_payment(
+        bill.get("id"),
+        payment_amount,
+        payment_date,
+        str(pay_method or ""),
+        str(remark or "AI助手确认收款"),
+    )
+    updated_bill = db.get_bill(bill.get("id"))
+    paid_after = _payment_total(_bill_payments(bill.get("id")))
+    due_after = round(max(receivable - paid_after, 0), 2)
+    return {
+        "success": True,
+        "action": "payment_recorded",
+        "message": f"收款成功：{bill.get('room_number')} 本次实收 {_money(payment_amount)} 元。",
+        "payment_id": payment_id,
+        "bill": updated_bill,
+        "payment": {
+            "amount": payment_amount,
+            "pay_date": payment_date,
+            "pay_method": str(pay_method or ""),
+            "paid_total": paid_after,
+            "due": due_after,
+        },
+    }
+
+
 def _tool_schema(name: str, description: str, properties: Dict[str, Any], required: Optional[List[str]] = None) -> Dict[str, Any]:
     return {
         "type": "function",
@@ -1560,6 +1744,16 @@ TOOL_SCHEMAS = [
     _tool_schema("payment_list_pending", "查询指定月份待收款列表。", {"month": MONTH_PROP, "building_id": BUILDING_PROP}),
     _tool_schema("payment_check_anomalies", "检查指定月份收款异常。", {"month": MONTH_PROP, "building_id": BUILDING_PROP}),
     _tool_schema("payment_compare_paid_amount", "对比某账单实收金额和应收金额差异。", {"bill_id": BILL_ID_PROP}, ["bill_id"]),
+    _tool_schema("payment_confirm_from_ai", "准备确认某房间账单收款，返回待确认操作，不直接写库。未传金额时默认收取当前全部待收金额。", {
+        "bill_id": BILL_ID_PROP,
+        "room_number": ROOM_PROP,
+        "month": MONTH_PROP,
+        "building_id": BUILDING_PROP,
+        "amount": {"type": "number", "description": "本次实收金额；不传则默认当前全部待收金额"},
+        "pay_date": {"type": "string", "description": "收款日期，格式 YYYY-MM-DD；不传默认今天"},
+        "pay_method": {"type": "string", "description": "收款方式，例如微信、支付宝、现金、银行转账，可选"},
+        "remark": {"type": "string", "description": "收款备注，可选"},
+    }),
 ]
 
 
@@ -1591,6 +1785,8 @@ _HANDLERS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "payment_list_pending": payment_list_pending,
     "payment_check_anomalies": payment_check_anomalies,
     "payment_compare_paid_amount": payment_compare_paid_amount,
+    "payment_confirm_from_ai": payment_confirm_from_ai,
+    "confirm_record_payment": confirm_record_payment,
 }
 
 

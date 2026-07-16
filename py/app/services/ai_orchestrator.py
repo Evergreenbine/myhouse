@@ -25,7 +25,7 @@ PENDING_ACTION_TOOLS = [
         "type": "function",
         "function": {
             "name": "ai_confirm_pending_action",
-            "description": "确认并执行一个待确认操作，例如录入读数或保存账单。",
+            "description": "确认并执行一个待确认操作，例如录入读数、保存账单、修改合同或确认收款。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -149,9 +149,12 @@ def _build_system_prompt(prompt: str, skill_context: str, data_context: str, ima
         "当用户要求修改现有合同的月租、水电单价、保证金、合同日期或水电表绑定时，调用 contract_update_from_ai。"
         "合同修改必须先返回待确认操作；如果同一房间号存在于多个楼栋，要先请用户明确楼栋。"
         "退租、恢复合同、变更租客或更换房间不是普通合同字段修改，不能调用 contract_update_from_ai，需明确告诉用户应使用对应业务流程。"
+        "当用户要求确认收款、登记收款或标记某房间已经交租时，调用 payment_confirm_from_ai。"
+        "确认收款必须先返回待确认操作；未指定金额时默认使用该账单当前全部待收金额，未指定日期时默认今天。"
+        "账单仍在录入中或待发送、账单已收完、金额超过待收，或房间和楼栋不明确时，不能直接收款，要向用户说明需要先处理或补充什么。"
         "如果存在待确认操作，且用户通过文字表示确认、可以、录入、保存、执行，就调用 ai_confirm_pending_action；界面按钮会通过同一待确认协议直接执行。"
         "如果用户要求取消待确认操作，就调用 ai_cancel_pending_action。"
-        "除 meter_reading_save_from_ai、bill_create_from_ai 和 contract_update_from_ai 这三个待确认工具外，不能声称已经写入、发送账单、确认收款、修改合同或覆盖读数。"
+        "除 meter_reading_save_from_ai、bill_create_from_ai、contract_update_from_ai 和 payment_confirm_from_ai 这四个待确认工具外，不能声称已经写入、发送账单、确认收款、修改合同或覆盖读数。"
         "保存读数或生成账单后，要根据工具结果明确说明是否成功；如果工具提示需要确认、已有读数或已有账单，要如实提醒用户。"
         "如果只是生成账单草稿，必须明确说明草稿未保存，需要用户确认后再操作。"
         f"\n\n今天：{date.today().isoformat()}"
@@ -391,8 +394,9 @@ def _pending_action_command_response(data: Dict[str, Any], command: str) -> Dict
             "reply": reply,
             "bill_images": [],
             "pending_actions": pending_actions,
+            "action_result": {"success": False, "message": reply},
             "skill_hits": [],
-            "response": {"type": "assistant_message", "content": reply, "pending_actions": pending_actions, "bill_images": []},
+            "response": {"type": "assistant_message", "content": reply, "pending_actions": pending_actions, "bill_images": [], "action_result": {"success": False, "message": reply}},
         }
 
     if command == "confirm":
@@ -421,8 +425,9 @@ def _pending_action_command_response(data: Dict[str, Any], command: str) -> Dict
         "reply": reply,
         "bill_images": bill_images,
         "pending_actions": remaining_actions,
+        "action_result": action_result,
         "skill_hits": [],
-        "response": {"type": "assistant_message", "content": reply, "pending_actions": remaining_actions, "bill_images": bill_images},
+        "response": {"type": "assistant_message", "content": reply, "pending_actions": remaining_actions, "bill_images": bill_images, "action_result": action_result},
     }
 
 
@@ -505,11 +510,17 @@ def chat(data: Dict[str, Any]) -> Dict[str, Any]:
         isinstance(action, dict) and action.get("type") == "update_contract"
         for action in pending_actions
     )
+    has_payment_confirmation = any(
+        isinstance(action, dict) and action.get("type") == "record_payment"
+        for action in pending_actions
+    )
 
     if _has_internal_tool_failure(last_tool_results) or _looks_like_technical_failure(reply):
         reply = GUIDED_HELP_REPLY
     elif has_contract_update:
         reply = "合同修改内容已准备，请核对下方的变更前后信息，并使用卡片按钮确认或取消。"
+    elif has_payment_confirmation:
+        reply = "收款信息已准备，请核对账单、金额和日期，并使用卡片按钮确认或取消。"
     elif not reply and bill_images:
         reply = "账单图片已生成，可在下方预览、复制或保存。"
     elif not reply and last_tool_results:

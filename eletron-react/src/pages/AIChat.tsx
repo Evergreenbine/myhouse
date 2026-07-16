@@ -44,6 +44,8 @@ interface AIPendingAction {
   tool: string
   args: any
   preview?: any
+  status?: "pending" | "confirmed" | "cancelled" | "failed"
+  statusMessage?: string
 }
 
 interface AIImageAttachment {
@@ -116,6 +118,7 @@ interface AIChatState {
   hoverPreviewImage: string
   activePreviewImage: string
   pendingActions: AIPendingAction[]
+  pendingActionLoadingId: string
   meterBuildings: AIMeterBuilding[]
   meterRooms: Record<number, AIMeterRoom[]>
 }
@@ -152,6 +155,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
     hoverPreviewImage: "",
     activePreviewImage: "",
     pendingActions: [],
+    pendingActionLoadingId: "",
     meterBuildings: [],
     meterRooms: {},
   }
@@ -326,7 +330,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
 
   newChat = () => {
     if (this.state.messages.length > 0 && !confirm("确定开始新对话？当前对话将丢失。")) return
-    this.setState({ messages: [], convId: 0, pendingActions: [] })
+    this.setState({ messages: [], convId: 0, pendingActions: [], pendingActionLoadingId: "" })
     setTimeout(() => this.inputRef.current?.focus(), 50)
   }
 
@@ -349,8 +353,11 @@ export class AIChat extends React.Component<{}, AIChatState> {
       var chat = chats.find(function(c: any) { return c.id === id })
       if (!chat) return
       var restoredMessages: AIMessage[] = chat.messages || []
-      var restoredPending = restoredMessages.flatMap(message => message.pendingActions || [])
-      this.setState({ messages: restoredMessages, convId: id, sidebarCollapsed: false, pendingActions: restoredPending })
+      var restoredPending = restoredMessages
+        .flatMap(message => message.pendingActions || [])
+        .filter(action => !action.status || action.status === "pending" || action.status === "failed")
+        .filter((action, index, actions) => actions.findIndex(item => item.id === action.id) === index)
+      this.setState({ messages: restoredMessages, convId: id, sidebarCollapsed: false, pendingActions: restoredPending, pendingActionLoadingId: "" })
       this.scrollBottom()
       setTimeout(() => this.inputRef.current?.focus(), 50)
     } catch { /* ignore */ }
@@ -456,7 +463,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
     if (this.state.loading) return
     var pendingActions = this.state.pendingActions
     if (!pendingActions.some(item => item.id === action.id)) return
-    this.setState({ loading: true })
+    this.setState({ loading: true, pendingActionLoadingId: action.id })
     try {
       var res = await api("/api/rental", {
         method: "POST",
@@ -475,24 +482,47 @@ export class AIChat extends React.Component<{}, AIChatState> {
       var reply = safeAssistantReply(res?.response?.content || res?.reply, command === "cancel" ? "已取消这项操作" : AI_GUIDED_HELP_REPLY)
       var remainingActions = res?.response?.pending_actions || res?.pending_actions || []
       var responseBillImages = res?.response?.bill_images || res?.bill_images || []
+      var actionResult = res?.response?.action_result || res?.action_result || {}
       var actionRemains = remainingActions.some((item: AIPendingAction) => item.id === action.id)
-      var clearedMessages = this.state.messages.map(message => ({
-        ...message,
-        pendingActions: actionRemains ? message.pendingActions : message.pendingActions?.filter(item => item.id !== action.id),
-      }))
-      var messages = [...this.replaceExistingBillImages(clearedMessages, responseBillImages), {
-        role: "assistant" as const,
-        content: reply,
-        billImages: responseBillImages,
-        pendingActions: remainingActions,
-      }]
-      this.setState({ messages, loading: false, pendingActions: remainingActions })
-      this.scrollBottom()
+      var actionSucceeded = typeof actionResult.success === "boolean" ? actionResult.success : !actionRemains
+      var actionStatus: AIPendingAction["status"] = actionSucceeded ? (command === "cancel" ? "cancelled" : "confirmed") : "failed"
+      var firstActionMessageIndex = this.state.messages.findIndex(message => message.pendingActions?.some(item => item.id === action.id))
+      var updatedMessages = this.replaceExistingBillImages(this.state.messages, responseBillImages).map((message, messageIndex) => {
+        var containsAction = message.pendingActions?.some(item => item.id === action.id)
+        if (!containsAction) return message
+        if (messageIndex !== firstActionMessageIndex) {
+          return { ...message, pendingActions: message.pendingActions?.filter(item => item.id !== action.id) }
+        }
+        return {
+          ...message,
+          billImages: responseBillImages.length > 0 ? [...(message.billImages || []), ...responseBillImages] : message.billImages,
+          pendingActions: message.pendingActions?.map(item => item.id === action.id ? {
+            ...item,
+            status: actionStatus,
+            statusMessage: actionStatus === "failed" ? reply : "",
+          } : item),
+        }
+      }).filter(message => {
+        var wasLegacyDuplicate = message.role === "assistant"
+          && /^(已确认并完成：|已取消：)/.test(message.content || "")
+          && Boolean(action.label && message.content.includes(action.label))
+        var stillContainsAction = message.pendingActions?.some(item => item.id === action.id)
+        return !wasLegacyDuplicate || stillContainsAction
+      })
+      var messages = updatedMessages
+      this.setState({ messages, loading: false, pendingActionLoadingId: "", pendingActions: remainingActions })
       await this.persistMessages(messages, action.label || "AI 操作")
     } catch {
-      var fallbackMessages = [...this.state.messages, { role: "assistant" as const, content: AI_GUIDED_HELP_REPLY, pendingActions: this.state.pendingActions }]
-      this.setState({ messages: fallbackMessages, loading: false })
-      this.scrollBottom()
+      var fallbackMessages = this.state.messages.map(message => ({
+        ...message,
+        pendingActions: message.pendingActions?.map(item => item.id === action.id ? {
+          ...item,
+          status: "failed" as const,
+          statusMessage: AI_GUIDED_HELP_REPLY,
+        } : item),
+      }))
+      this.setState({ messages: fallbackMessages, loading: false, pendingActionLoadingId: "" })
+      await this.persistMessages(fallbackMessages, action.label || "AI 操作")
     }
   }
 
@@ -519,15 +549,20 @@ export class AIChat extends React.Component<{}, AIChatState> {
     var isBill = action.type === "create_bill"
     var isContract = action.type === "update_contract"
     var isPayment = action.type === "record_payment"
-    var actionTitle = isBill ? "待确认账单" : isContract ? "待确认合同修改" : isPayment ? "待确认收款" : "待确认读数"
+    var actionStatus = action.status || "pending"
+    var actionFinished = actionStatus === "confirmed" || actionStatus === "cancelled"
+    var pendingTitle = isBill ? "待确认账单" : isContract ? "待确认合同修改" : isPayment ? "待确认收款" : "待确认读数"
+    var finishedTitle = isBill ? "账单操作" : isContract ? "合同修改" : isPayment ? "收款确认" : "读数录入"
+    var actionTitle = actionFinished ? finishedTitle : pendingTitle
     var confirmText = isBill ? (preview.overwrite ? "确认覆盖" : "确认保存") : isContract ? "确认修改" : isPayment ? "确认收款" : "确认录入"
+    var statusText = actionStatus === "confirmed" ? "已确认" : actionStatus === "cancelled" ? "已取消" : actionStatus === "failed" ? "执行失败" : "需要确认"
     var changeItems = Array.isArray(preview.change_items) ? preview.change_items : []
     var otherFeeDetails = Array.isArray(preview.other_fee_details) ? preview.other_fee_details : []
     return (
-      <div className="ai-pending-action" key={action.id}>
+      <div className={'ai-pending-action ' + actionStatus} key={action.id}>
         <div className="ai-pending-action-title">
           <span>{actionTitle}</span>
-          <em>需要确认</em>
+          <em className={'status-' + actionStatus}>{actionStatus === "confirmed" && <CheckOutlined />}{statusText}</em>
         </div>
         <div className="ai-pending-action-label">{action.label}</div>
         {fields.length > 0 && (
@@ -558,14 +593,17 @@ export class AIChat extends React.Component<{}, AIChatState> {
             ))}
           </div>
         )}
-        <div className="ai-pending-action-buttons">
-          <button type="button" className="ai-pending-confirm" onClick={() => this.runPendingAction(action, "confirm")} disabled={this.state.loading}>
-            <CheckOutlined />{confirmText}
-          </button>
-          <button type="button" className="ai-pending-cancel" onClick={() => this.runPendingAction(action, "cancel")} disabled={this.state.loading}>
-            <CloseOutlined />取消
-          </button>
-        </div>
+        {action.statusMessage && <div className="ai-pending-action-error">{action.statusMessage}</div>}
+        {!actionFinished && (
+          <div className="ai-pending-action-buttons">
+            <button type="button" className="ai-pending-confirm" onClick={() => this.runPendingAction(action, "confirm")} disabled={this.state.loading}>
+              {this.state.pendingActionLoadingId === action.id ? <LoadingOutlined /> : <CheckOutlined />}{actionStatus === "failed" ? "重新" + confirmText : confirmText}
+            </button>
+            <button type="button" className="ai-pending-cancel" onClick={() => this.runPendingAction(action, "cancel")} disabled={this.state.loading}>
+              <CloseOutlined />取消
+            </button>
+          </div>
+        )}
       </div>
     )
   }
@@ -1007,7 +1045,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
                   </div>
                 )
               })}
-              {s.loading && (
+              {s.loading && !s.pendingActionLoadingId && (
                 <div className="ai-msg-v2 bot">
                   <div className="ai-msg-avatar"><img src="/robot-avatar.jpg" className="ai-bot-avatar" /></div>
                   <div className="ai-msg-bubble bot-bubble ai-loading">
