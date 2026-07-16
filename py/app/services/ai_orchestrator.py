@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from typing import Any, Dict, List, TypedDict
 
@@ -132,6 +133,122 @@ def _has_internal_tool_failure(tool_results: List[Dict[str, Any]]) -> bool:
     return any(isinstance(result, dict) and result.get("ok") is False for result in tool_results)
 
 
+def _looks_like_contract_create(prompt: str) -> bool:
+    text = str(prompt or "").strip()
+    if not text:
+        return False
+    create_words = ("新建", "新增", "创建", "录入", "签订", "签")
+    contract_words = ("合同", "租约", "租房")
+    if any(word in text for word in create_words) and any(word in text for word in contract_words):
+        return True
+    return "入住" in text and ("房" in text or re.search(r"\d{2,5}", text))
+
+
+def _recent_text(data: Dict[str, Any], limit: int = 4) -> str:
+    parts = [str(data.get("prompt") or "")]
+    history = data.get("history") or []
+    for item in history[-limit:]:
+        if isinstance(item, dict):
+            parts.append(str(item.get("content") or ""))
+    return "\n".join(part for part in parts if part)
+
+
+def _should_fallback_contract_create(data: Dict[str, Any]) -> bool:
+    prompt = str(data.get("prompt") or "").strip()
+    if _looks_like_contract_create(prompt):
+        return True
+    recent = _recent_text(data)
+    has_contract_create_context = _looks_like_contract_create(recent) or (
+        "新建合同" in recent and ("补充" in recent or "必填" in recent or "空置" in recent)
+    )
+    has_location_hint = bool(re.search(r"(?<!\d)\d{2,5}(?:\s*(?:房|房间|室|号房))?(?!\d)", prompt))
+    return has_contract_create_context and has_location_hint
+
+
+def _extract_contract_create_hint(prompt: str) -> Dict[str, Any]:
+    text = str(prompt or "").strip()
+    args: Dict[str, Any] = {}
+    form_patterns = {
+        "building_id": r"楼栋ID\s*([^，,。]+)",
+        "building_name": r"楼栋名称\s*([^，,。]+)",
+        "room_id": r"房间ID\s*([^，,。]+)",
+        "room_number": r"房间号\s*([^，,。]+)",
+        "tenant_id": r"租户ID\s*([^，,。]+)",
+        "tenant_name": r"租户姓名\s*([^，,。]+)",
+        "start_date": r"合同开始日期\s*([^，,。]+)",
+        "end_date": r"合同结束日期\s*([^，,。]+)",
+        "monthly_rent": r"月租\s*([^，,。]+)",
+        "water_unit_price": r"水费单价\s*([^，,。]+)",
+        "electric_unit_price": r"电费单价\s*([^，,。]+)",
+        "deposit": r"保证金\s*([^，,。]+)",
+    }
+    for key, pattern in form_patterns.items():
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        value = match.group(1).strip()
+        if value:
+            args[key] = value
+    room_match = re.search(r"(?<!\d)(\d{2,5})(?:\s*(?:房|房间|室|号房))?(?!\d)", text)
+    if room_match and not args.get("room_number"):
+        args["room_number"] = room_match.group(1)
+        before_room = text[:room_match.start()].strip()
+        building_match = re.search(r"([\u4e00-\u9fffA-Za-z0-9_-]{2,12})\s*$", before_room)
+        if building_match:
+            building = building_match.group(1).strip()
+            building = re.sub(r"^(给|帮|把|在|将|我要|需要|请|哈基米)+", "", building).strip()
+            if building and building not in {"新建", "新增", "创建", "录入", "签订", "合同", "租房"}:
+                args["building_name"] = building
+    date_match = re.search(r"(20\d{2}[-/年](?:0?[1-9]|1[0-2])[-/月](?:0?[1-9]|[12]\d|3[01])日?)", text)
+    if date_match and not args.get("start_date"):
+        args["start_date"] = date_match.group(1).replace("年", "-").replace("月", "-").replace("日", "").replace("/", "-")
+    rent_match = re.search(r"(?:月租|租金|房租)\s*(\d+(?:\.\d+)?)", text)
+    if rent_match and not args.get("monthly_rent"):
+        args["monthly_rent"] = rent_match.group(1)
+    deposit_match = re.search(r"(?:押金|保证金)\s*(\d+(?:\.\d+)?)", text)
+    if deposit_match and not args.get("deposit"):
+        args["deposit"] = deposit_match.group(1)
+    water_match = re.search(r"水费(?:单价)?\s*(\d+(?:\.\d+)?)", text)
+    if water_match and not args.get("water_unit_price"):
+        args["water_unit_price"] = water_match.group(1)
+    electric_match = re.search(r"电费(?:单价)?\s*(\d+(?:\.\d+)?)", text)
+    if electric_match and not args.get("electric_unit_price"):
+        args["electric_unit_price"] = electric_match.group(1)
+    return args
+
+
+def _contract_create_form_fallback(data: Dict[str, Any]) -> Dict[str, Any] | None:
+    prompt = str(data.get("prompt") or "").strip()
+    if not _should_fallback_contract_create(data):
+        return None
+    tool_result = execute_tool("contract_create_from_ai", _extract_contract_create_hint(prompt))
+    if not isinstance(tool_result, dict):
+        return None
+    result_data = tool_result.get("data")
+    if not isinstance(result_data, dict):
+        return None
+    form_actions = _collect_form_actions([tool_result])
+    pending_actions = _merge_pending_actions(data.get("pending_actions") or [], [tool_result])
+    skill_hits = search_skills(prompt, top_k=5)
+    if form_actions or pending_actions:
+        return _finalize_chat_response("", data, [tool_result], skill_hits)
+    message = str(result_data.get("message") or tool_result.get("error") or "新建合同没有完成，请检查表单信息后再提交。").strip()
+    return {
+        "reply": message,
+        "bill_images": [],
+        "pending_actions": [],
+        "suggested_actions": [],
+        "form_actions": [],
+        "response": {"type": "assistant_message", "content": message, "pending_actions": [], "bill_images": [], "suggested_actions": [], "form_actions": []},
+        "skill_hits": [{
+            "skill": hit.get("skill"),
+            "title": hit.get("title"),
+            "backend": hit.get("backend"),
+            "score": hit.get("score"),
+        } for hit in skill_hits],
+    }
+
+
 def _history_messages(history: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     messages = []
     for item in history[-10:]:
@@ -202,10 +319,12 @@ def _build_system_prompt(prompt: str, skill_context: str, data_context: str, ima
         "用户明确要求修改、替换或覆盖已有账单及账单图片时，调用 bill_create_from_ai 并设置 overwrite=true；仍需先返回覆盖确认事项，确认后再更新账单和图片。"
         "如果缺少房间号、月份或水表/电表类型，不要猜测，先请用户补充。"
         "当用户查询合同详情、某租户住哪、某房间当前合同、有效合同列表或合同绑定表具时，优先调用 contract_tenant_get_contract_detail、contract_tenant_list_active_contracts、contract_tenant_get_room_tenant 或 contract_tenant_get_contract_meter_binding。"
+        "当用户要求新建、新增、签订或录入租房合同时，调用 contract_create_from_ai；即使缺少租户、房间、合同开始日期或月租，也要调用该工具返回表单卡片，不要只用文字追问。"
+        "新建合同表单要尽量带出用户已提供的信息，例如楼栋名称传 building_name、房间号传 room_number、租客姓名传 tenant_name、已说出的月租/押金/水电单价也要传入。"
         "当用户要求修改现有合同的月租、水电单价、保证金、合同日期或水电表绑定时，调用 contract_update_from_ai。"
         "用户只说租户姓名时，可以把姓名作为 tenant_name 传给合同查询和合同修改工具；如果匹配到多个合同，要让用户补充楼栋或房间。"
-        "合同修改必须先返回待确认操作；如果同一房间号存在于多个楼栋，要先请用户明确楼栋。"
-        "退租、恢复合同、变更租客或更换房间不是普通合同字段修改，不能调用 contract_update_from_ai，需明确告诉用户应使用对应业务流程。"
+        "合同新建和合同修改都必须先返回待确认操作；如果同一房间号存在于多个楼栋，要先请用户明确楼栋。"
+        "退租、恢复合同、变更租客或更换房间不是普通合同字段修改，也不是新建合同，不能调用 contract_update_from_ai，需明确告诉用户应使用对应业务流程。"
         "当用户要求确认收款、登记收款或标记某房间已经交租时，调用 payment_confirm_from_ai。"
         "确认收款必须先返回待确认操作；未指定金额时默认使用该账单当前全部待收金额，未指定日期时默认今天。"
         "账单仍在录入中或待发送、账单已收完、金额超过待收，或房间和楼栋不明确时，不能直接收款，要向用户说明需要先处理或补充什么。"
@@ -213,7 +332,7 @@ def _build_system_prompt(prompt: str, skill_context: str, data_context: str, ima
         "如果用户要求取消待确认操作，就调用 ai_cancel_pending_action。"
         "当你要给用户多个建议、处理方案、下一步选择或“是否继续”的普通选项时，调用 ai_suggest_actions 返回可点击按钮；按钮 label 要短，prompt 要写成点击后可直接执行的完整意图。"
         "如果某个选择会直接写入、覆盖、确认收款或修改合同，要优先生成待确认操作卡片，不能只给建议按钮。"
-        "除 meter_reading_save_from_ai、bill_create_from_ai、contract_update_from_ai 和 payment_confirm_from_ai 这四个待确认工具外，不能声称已经写入、发送账单、确认收款、修改合同或覆盖读数。"
+        "除 meter_reading_save_from_ai、bill_create_from_ai、contract_create_from_ai、contract_update_from_ai 和 payment_confirm_from_ai 这些待确认工具外，不能声称已经写入、发送账单、确认收款、新建或修改合同、覆盖读数。"
         "保存读数或生成账单后，要根据工具结果明确说明是否成功；如果工具提示需要确认、已有读数或已有账单，要如实提醒用户。"
         "如果只是生成账单草稿，必须明确说明草稿未保存，需要用户确认后再操作。"
         f"\n\n今天：{date.today().isoformat()}"
@@ -532,6 +651,30 @@ def _collect_suggested_actions(tool_results: List[Dict[str, Any]]) -> List[Dict[
     return suggestions
 
 
+def _collect_form_actions(tool_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    forms: List[Dict[str, Any]] = []
+    seen = set()
+    for result in tool_results:
+        data = result.get("data") if isinstance(result, dict) else None
+        if not isinstance(data, dict):
+            continue
+        candidates = []
+        if isinstance(data.get("form_action"), dict):
+            candidates.append(data.get("form_action"))
+        for item in data.get("form_actions") or []:
+            if isinstance(item, dict):
+                candidates.append(item)
+        for form in candidates:
+            form_id = str(form.get("id") or "")
+            form_type = str(form.get("type") or "")
+            key = form_id or form_type or json.dumps(form, ensure_ascii=False, sort_keys=True, default=str)
+            if key in seen:
+                continue
+            seen.add(key)
+            forms.append(form)
+    return forms
+
+
 def _prepare_chat_context(data: Dict[str, Any], prompt: str, history: List[Dict[str, Any]]) -> Dict[str, Any]:
     skill_hits = search_skills(prompt, top_k=5)
     skill_context = format_skill_hits(skill_hits)
@@ -603,12 +746,13 @@ def _finalize_chat_response(
     bill_images = _collect_bill_images(last_tool_results)
     pending_actions = _merge_pending_actions(data.get("pending_actions") or [], last_tool_results)
     suggested_actions = _collect_suggested_actions(last_tool_results)
+    form_actions = _collect_form_actions(last_tool_results)
     has_bill_confirmation = any(
         isinstance(action, dict) and action.get("type") == "create_bill"
         for action in pending_actions
     )
     has_contract_update = any(
-        isinstance(action, dict) and action.get("type") == "update_contract"
+        isinstance(action, dict) and action.get("type") in {"update_contract", "create_contract"}
         for action in pending_actions
     )
     has_payment_confirmation = any(
@@ -618,10 +762,12 @@ def _finalize_chat_response(
 
     if _has_internal_tool_failure(last_tool_results) or _looks_like_technical_failure(reply):
         reply = GUIDED_HELP_REPLY
+    elif form_actions:
+        reply = "还需要补充一些合同信息，请在下方表单填写后提交。"
     elif has_bill_confirmation:
         reply = "账单草稿已准备，请核对金额和旧账单信息，并使用卡片按钮确认或取消。"
     elif has_contract_update:
-        reply = "合同修改内容已准备，请核对下方的变更前后信息，并使用卡片按钮确认或取消。"
+        reply = "合同内容已准备，请核对下方的变更前后信息，并使用卡片按钮确认或取消。"
     elif has_payment_confirmation:
         reply = "收款信息已准备，请核对账单、金额和日期，并使用卡片按钮确认或取消。"
     elif not reply and bill_images:
@@ -638,7 +784,8 @@ def _finalize_chat_response(
         "bill_images": bill_images,
         "pending_actions": pending_actions,
         "suggested_actions": suggested_actions,
-        "response": {"type": "assistant_message", "content": reply, "pending_actions": pending_actions, "bill_images": bill_images, "suggested_actions": suggested_actions},
+        "form_actions": form_actions,
+        "response": {"type": "assistant_message", "content": reply, "pending_actions": pending_actions, "bill_images": bill_images, "suggested_actions": suggested_actions, "form_actions": form_actions},
         "skill_hits": [{
             "skill": hit.get("skill"),
             "title": hit.get("title"),
@@ -815,4 +962,7 @@ def _chat_graph(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def chat(data: Dict[str, Any]) -> Dict[str, Any]:
+    form_fallback = _contract_create_form_fallback(data)
+    if form_fallback:
+        return form_fallback
     return _chat_graph(data)

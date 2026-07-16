@@ -2,7 +2,6 @@ from typing import Any
 
 from fastapi import APIRouter, Body
 
-from user_auth import load_user_config
 import local_db as db
 
 router = APIRouter()
@@ -48,8 +47,14 @@ def save_user_config(body: dict[str, Any] | None = Body(default=None)):
 
 @router.get("/api/user/status")
 def user_status():
-    cfg = load_user_config()
-    if cfg and cfg.is_logged_in:
-        return {"logged_in": True, "empno": cfg.empno, "empname": cfg.empname}
-    return {"logged_in": False}
+    return {"password_set": False, "authenticated": True}
 
+
+@router.post("/api/user/login")
+def login(body: dict[str, Any] | None = Body(default=None)):
+    return {"success": True}
+
+
+@router.post("/api/user/logout")
+def logout():
+    return {"success": True}

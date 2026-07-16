@@ -321,6 +321,124 @@ def _resolve_active_contract(
     return None, "未找到匹配的有效合同"
 
 
+def _resolve_tenant_for_contract(
+    tenant_id: Any = None,
+    tenant_name: Any = None,
+    building_id: Any = None,
+) -> tuple[Optional[Dict[str, Any]], str]:
+    tid = _int_or_none(tenant_id)
+    if tid:
+        tenant = db.get_tenant(tid)
+        return (tenant, "") if tenant else (None, "未找到该租户")
+
+    name = str(tenant_name or "").strip()
+    if not name:
+        return None, "请提供租户 ID 或租户姓名"
+    tenants = db.get_tenants(True, _int_or_none(building_id)) or []
+    exact = [item for item in tenants if str(item.get("name") or "").strip() == name]
+    matches = exact or [item for item in tenants if name in str(item.get("name") or "")]
+    if len(matches) == 1:
+        return matches[0], ""
+    if len(matches) > 1:
+        names = "、".join("{}(ID {})".format(item.get("name"), item.get("id")) for item in matches[:8])
+        return None, "匹配到多个租户，请补充租户 ID：" + names
+    return None, "未找到该租户，请先在租户页面新增租户"
+
+
+def _resolve_room_for_contract(
+    room_id: Any = None,
+    room_number: Any = None,
+    building_id: Any = None,
+) -> tuple[Optional[Dict[str, Any]], str]:
+    rid = _int_or_none(room_id)
+    if rid:
+        room = db.get_room(rid)
+        return (room, "") if room else (None, "未找到该房间")
+
+    room_text = str(room_number or "").strip()
+    if not room_text:
+        return None, "请提供房间 ID 或房间号"
+    rooms = db.get_rooms(_int_or_none(building_id)) or []
+    matches = [item for item in rooms if str(item.get("room_number") or "").strip() == room_text]
+    if len(matches) == 1:
+        return matches[0], ""
+    if len(matches) > 1:
+        names = "、".join("{}{}".format(item.get("building_name") or "", item.get("room_number") or "") for item in matches[:8])
+        return None, "多个楼栋都有该房间号，请补充楼栋：" + names
+    return None, "未找到该房间"
+
+
+def _resolve_building_for_contract(
+    building_id: Any = None,
+    building_name: Any = None,
+) -> tuple[Optional[int], str, str]:
+    bid = _int_or_none(building_id)
+    if bid:
+        building = next((item for item in (db.get_buildings() or []) if _int_or_none(item.get("id")) == bid), None)
+        return (bid, str(building.get("name") or "") if building else "", "") if building else (None, "", "未找到该楼栋")
+
+    name = str(building_name or "").strip()
+    if not name:
+        return None, "", ""
+    buildings = db.get_buildings() or []
+    exact = [item for item in buildings if str(item.get("name") or "").strip() == name]
+    matches = exact or [item for item in buildings if name in str(item.get("name") or "")]
+    if len(matches) == 1:
+        return _int_or_none(matches[0].get("id")), str(matches[0].get("name") or ""), ""
+    if len(matches) > 1:
+        names = "、".join("{}(ID {})".format(item.get("name"), item.get("id")) for item in matches[:8])
+        return None, name, "匹配到多个楼栋，请补充楼栋 ID：" + names
+    return None, name, "未找到该楼栋"
+
+
+def _validate_contract_meter(room_id: Any, meter_id: Any, meter_type: str, label: str) -> tuple[Optional[int], str]:
+    mid = _int_or_none(meter_id)
+    if not mid:
+        return None, ""
+    meter = db.get_meter(mid)
+    if not meter:
+        return None, label + "不存在"
+    if str(meter.get("type") or "") != meter_type:
+        return None, label + "类型不正确"
+    if _int_or_none(meter.get("room_id")) != _int_or_none(room_id):
+        return None, label + "不属于该房间"
+    return mid, ""
+
+
+def _contract_create_form_action(
+    values: Optional[Dict[str, Any]] = None,
+    missing: Optional[List[str]] = None,
+    message: str = "",
+) -> Dict[str, Any]:
+    defaults = values or {}
+    return {
+        "id": "contract_create_form",
+        "type": "create_contract",
+        "title": "新建合同",
+        "description": message or "请补充合同信息，提交后会生成确认卡片。",
+        "submit_label": "提交表单",
+        "prompt_template": (
+            "请根据以下表单内容新建合同："
+            "楼栋名称 {building_name}，房间号 {room_number}，租户姓名 {tenant_name}，"
+            "合同开始日期 {start_date}，合同结束日期 {end_date}，月租 {monthly_rent}，"
+            "水费单价 {water_unit_price}，电费单价 {electric_unit_price}，保证金 {deposit}。"
+        ),
+        "values": defaults,
+        "missing": missing or [],
+        "fields": [
+            {"name": "building_name", "label": "楼栋", "type": "text", "required": False, "placeholder": "例如 石潭布"},
+            {"name": "room_number", "label": "房间号", "type": "text", "required": True, "placeholder": "例如 202"},
+            {"name": "tenant_name", "label": "租客姓名", "type": "text", "required": True, "placeholder": "请输入租客姓名"},
+            {"name": "monthly_rent", "label": "月租金额", "type": "number", "required": True, "placeholder": "例如 700"},
+            {"name": "start_date", "label": "合同开始日期", "type": "date", "required": True, "placeholder": "YYYY-MM-DD"},
+            {"name": "end_date", "label": "合同结束日期", "type": "date", "required": False, "placeholder": "YYYY-MM-DD，可空"},
+            {"name": "water_unit_price", "label": "水费单价", "type": "number", "required": False, "placeholder": "默认 0"},
+            {"name": "electric_unit_price", "label": "电费单价", "type": "number", "required": False, "placeholder": "默认 0"},
+            {"name": "deposit", "label": "保证金", "type": "number", "required": False, "placeholder": "默认 0"},
+        ],
+    }
+
+
 def _bill_for_contract(contract_id: Any, month: str) -> Optional[Dict[str, Any]]:
     bills = db.get_bills(month, _int_or_none(contract_id)) or []
     return bills[0] if bills else None
@@ -1418,6 +1536,224 @@ def contract_update_from_ai(
     }
 
 
+def contract_create_from_ai(
+    tenant_id: Any = None,
+    tenant_name: Any = None,
+    room_id: Any = None,
+    room_number: Any = None,
+    building_id: Any = None,
+    building_name: Any = None,
+    start_date: Any = None,
+    end_date: Any = "",
+    monthly_rent: Any = None,
+    water_unit_price: Any = 0,
+    electric_unit_price: Any = 0,
+    deposit: Any = 0,
+    water_meter_id: Any = None,
+    electric_meter_id: Any = None,
+) -> Dict[str, Any]:
+    resolved_building_id, resolved_building_name, building_error = _resolve_building_for_contract(building_id, building_name)
+    form_values = {
+        "building_name": resolved_building_name or str(building_name or "").strip(),
+        "tenant_name": str(tenant_name or "").strip(),
+        "room_number": str(room_number or "").strip(),
+        "start_date": str(start_date or "").strip(),
+        "end_date": str(end_date or "").strip(),
+        "monthly_rent": "" if monthly_rent is None else monthly_rent,
+        "water_unit_price": "" if water_unit_price in {None, ""} else water_unit_price,
+        "electric_unit_price": "" if electric_unit_price in {None, ""} else electric_unit_price,
+        "deposit": "" if deposit in {None, ""} else deposit,
+    }
+    if building_error:
+        return {
+            "success": False,
+            "requires_form": True,
+            "message": building_error,
+            "form_action": _contract_create_form_action(form_values, ["building_name"], building_error),
+        }
+
+    missing_fields = []
+    if not _int_or_none(tenant_id) and not form_values["tenant_name"]:
+        missing_fields.append("tenant_name")
+    if not _int_or_none(room_id) and not form_values["room_number"]:
+        missing_fields.append("room_number")
+    if not form_values["start_date"]:
+        missing_fields.append("start_date")
+    if monthly_rent is None or monthly_rent == "":
+        missing_fields.append("monthly_rent")
+    if missing_fields:
+        return {
+            "success": False,
+            "requires_form": True,
+            "message": "新建合同还缺少必要信息，请填写表单。",
+            "form_action": _contract_create_form_action(form_values, missing_fields, "新建合同还缺少必要信息，请补充后提交。"),
+        }
+
+    tenant, error = _resolve_tenant_for_contract(tenant_id, tenant_name, resolved_building_id)
+    if not tenant:
+        return {
+            "success": False,
+            "requires_form": True,
+            "message": error,
+            "form_action": _contract_create_form_action(form_values, ["tenant_name"], error),
+        }
+    room, error = _resolve_room_for_contract(room_id, room_number, resolved_building_id)
+    if not room:
+        return {
+            "success": False,
+            "requires_form": True,
+            "message": error,
+            "form_action": _contract_create_form_action(form_values, ["room_number"], error),
+        }
+
+    existing_contract = _find_active_contract(room_number=room.get("room_number"), building_id=room.get("building_id"))
+    if existing_contract and _int_or_none(existing_contract.get("room_id")) == _int_or_none(room.get("id")):
+        return {
+            "success": False,
+            "message": "该房间已有有效合同，不能直接新建合同；请先处理原合同。",
+            "existing_contract": _contract_summary(existing_contract),
+        }
+
+    normalized_start, error = _normalize_contract_date(start_date)
+    if error:
+        return {"success": False, "message": "合同开始" + error}
+    normalized_end, error = _normalize_contract_date(end_date, allow_empty=True)
+    if error:
+        return {"success": False, "message": "合同结束" + error}
+    if normalized_end and normalized_end < normalized_start:
+        return {"success": False, "message": "合同结束日期不能早于开始日期"}
+
+    rent = _float_or_none(monthly_rent)
+    if rent is None or rent < 0:
+        return {"success": False, "message": "请提供有效月租金额"}
+    water_price = _float_or_none(water_unit_price)
+    electric_price = _float_or_none(electric_unit_price)
+    deposit_amount = _float_or_none(deposit)
+    if water_price is None or water_price < 0:
+        return {"success": False, "message": "水费单价应为大于等于 0 的数字"}
+    if electric_price is None or electric_price < 0:
+        return {"success": False, "message": "电费单价应为大于等于 0 的数字"}
+    if deposit_amount is None or deposit_amount < 0:
+        return {"success": False, "message": "保证金应为大于等于 0 的数字"}
+
+    water_mid, error = _validate_contract_meter(room.get("id"), water_meter_id, "water", "水表")
+    if error:
+        return {"success": False, "message": error}
+    electric_mid, error = _validate_contract_meter(room.get("id"), electric_meter_id, "electric", "电表")
+    if error:
+        return {"success": False, "message": error}
+
+    contract_payload = {
+        "tenant_id": tenant.get("id"),
+        "room_id": room.get("id"),
+        "start_date": normalized_start,
+        "end_date": normalized_end or "",
+        "monthly_rent": round(rent, 2),
+        "water_unit_price": round(water_price, 4),
+        "electric_unit_price": round(electric_price, 4),
+        "deposit": round(deposit_amount, 2),
+        "water_meter_id": water_mid,
+        "electric_meter_id": electric_mid,
+    }
+    change_items = [
+        {"field": "start_date", "label": "合同开始", "before": "未创建", "after": normalized_start},
+        {"field": "end_date", "label": "合同结束", "before": "未创建", "after": normalized_end or "未填写"},
+        {"field": "monthly_rent", "label": "月租", "before": "未创建", "after": _contract_change_text("monthly_rent", rent)},
+        {"field": "deposit", "label": "保证金", "before": "未创建", "after": _contract_change_text("deposit", deposit_amount)},
+        {"field": "water_unit_price", "label": "水费单价", "before": "未创建", "after": _contract_change_text("water_unit_price", water_price)},
+        {"field": "electric_unit_price", "label": "电费单价", "before": "未创建", "after": _contract_change_text("electric_unit_price", electric_price)},
+    ]
+    if water_mid:
+        change_items.append({"field": "water_meter_id", "label": "水表绑定", "before": "未创建", "after": _contract_change_text("water_meter_id", water_mid)})
+    if electric_mid:
+        change_items.append({"field": "electric_meter_id", "label": "电表绑定", "before": "未创建", "after": _contract_change_text("electric_meter_id", electric_mid)})
+
+    action = _pending_action(
+        "create_contract",
+        "新建{} {}合同：{}".format(room.get("building_name") or "", room.get("room_number") or "", tenant.get("name") or "").strip(),
+        "confirm_create_contract",
+        {"contract": contract_payload},
+        {
+            "building_name": room.get("building_name"),
+            "room_number": room.get("room_number"),
+            "tenant_name": tenant.get("name"),
+            "change_items": change_items,
+        },
+    )
+    return {
+        "success": True,
+        "requires_confirmation": True,
+        "action": "contract_create_prepared",
+        "contract": contract_payload,
+        "tenant": tenant,
+        "room": room,
+        "pending_action": action,
+        "message": "新建合同内容已准备，请用户确认后再写入。",
+    }
+
+
+def confirm_create_contract(contract: Any = None) -> Dict[str, Any]:
+    if not isinstance(contract, dict):
+        return {"success": False, "message": "确认新建合同时缺少合同内容"}
+    tenant = db.get_tenant(_int_or_none(contract.get("tenant_id")))
+    room = db.get_room(_int_or_none(contract.get("room_id")))
+    if not tenant:
+        return {"success": False, "message": "确认新建合同时未找到租户"}
+    if not room:
+        return {"success": False, "message": "确认新建合同时未找到房间"}
+    existing_contract = _find_active_contract(room_number=room.get("room_number"), building_id=room.get("building_id"))
+    if existing_contract and _int_or_none(existing_contract.get("room_id")) == _int_or_none(room.get("id")):
+        return {"success": False, "message": "该房间已有有效合同，无法新建。"}
+
+    start_date, error = _normalize_contract_date(contract.get("start_date"))
+    if error:
+        return {"success": False, "message": "合同开始" + error}
+    end_date, error = _normalize_contract_date(contract.get("end_date"), allow_empty=True)
+    if error:
+        return {"success": False, "message": "合同结束" + error}
+    if end_date and end_date < start_date:
+        return {"success": False, "message": "合同结束日期不能早于开始日期"}
+
+    water_mid, error = _validate_contract_meter(room.get("id"), contract.get("water_meter_id"), "water", "水表")
+    if error:
+        return {"success": False, "message": error}
+    electric_mid, error = _validate_contract_meter(room.get("id"), contract.get("electric_meter_id"), "electric", "电表")
+    if error:
+        return {"success": False, "message": error}
+
+    contract_id = db.add_contract(
+        tenant.get("id"),
+        room.get("id"),
+        start_date,
+        end_date or "",
+        _num(contract.get("monthly_rent")),
+        _num(contract.get("water_unit_price")),
+        _num(contract.get("electric_unit_price")),
+        _num(contract.get("deposit")),
+        "",
+        "active",
+        water_mid,
+        electric_mid,
+    )
+    db.update_tenant(
+        tenant.get("id"),
+        tenant.get("name") or "",
+        tenant.get("phone") or "",
+        tenant.get("id_card") or "",
+        "active",
+        room.get("building_id"),
+        str(room.get("id")),
+    )
+    created = db.get_contract(contract_id)
+    return {
+        "success": True,
+        "action": "contract_created",
+        "contract_id": contract_id,
+        "contract": created,
+        "message": "合同已新建",
+    }
+
+
 def confirm_update_contract(contract_id: Any, changes: Any = None) -> Dict[str, Any]:
     cid = _int_or_none(contract_id)
     contract = db.get_contract(cid) if cid else None
@@ -1932,6 +2268,22 @@ TOOL_SCHEMAS = [
         "water_meter_id": {"type": "integer", "description": "新的水表 ID，必须属于合同房间"},
         "electric_meter_id": {"type": "integer", "description": "新的电表 ID，必须属于合同房间"},
     }),
+    _tool_schema("contract_create_from_ai", "准备新建租房合同。按租户和房间定位，返回待确认操作，不直接写库。", {
+        "tenant_id": {"type": "integer", "description": "租户 ID；如果只知道姓名，可传 tenant_name"},
+        "tenant_name": TENANT_PROP,
+        "room_id": {"type": "integer", "description": "房间 ID；如果只知道房间号，可传 room_number"},
+        "room_number": ROOM_PROP,
+        "building_id": BUILDING_PROP,
+        "building_name": {"type": "string", "description": "楼栋名称；用户说楼栋名称如石潭布时传这里"},
+        "start_date": {"type": "string", "description": "合同开始日期，格式 YYYY-MM-DD"},
+        "end_date": {"type": "string", "description": "合同结束日期，格式 YYYY-MM-DD，可为空"},
+        "monthly_rent": {"type": "number", "description": "月租金额，必填"},
+        "water_unit_price": {"type": "number", "description": "水费单价，默认 0"},
+        "electric_unit_price": {"type": "number", "description": "电费单价，默认 0"},
+        "deposit": {"type": "number", "description": "保证金金额，默认 0"},
+        "water_meter_id": {"type": "integer", "description": "绑定水表 ID，可选，必须属于该房间"},
+        "electric_meter_id": {"type": "integer", "description": "绑定电表 ID，可选，必须属于该房间"},
+    }, ["start_date", "monthly_rent"]),
     _tool_schema("payment_list_paid", "查询今日或本月已收款记录。", {"date_range": {"type": "string", "enum": ["today", "month"], "description": "today 查询今日，month 查询月份"}, "month": MONTH_PROP, "building_id": BUILDING_PROP}),
     _tool_schema("payment_list_pending", "查询指定月份待收款列表。", {"month": MONTH_PROP, "building_id": BUILDING_PROP}),
     _tool_schema("payment_check_anomalies", "检查指定月份收款异常。", {"month": MONTH_PROP, "building_id": BUILDING_PROP}),
@@ -1975,6 +2327,8 @@ _HANDLERS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "contract_tenant_list_empty_rooms": contract_tenant_list_empty_rooms,
     "contract_update_from_ai": contract_update_from_ai,
     "confirm_update_contract": confirm_update_contract,
+    "contract_create_from_ai": contract_create_from_ai,
+    "confirm_create_contract": confirm_create_contract,
     "payment_list_paid": payment_list_paid,
     "payment_list_pending": payment_list_pending,
     "payment_check_anomalies": payment_check_anomalies,

@@ -6,6 +6,7 @@ import { AIChat } from "./pages/AIChat"
 
 export default function App() {
   const { section, setSection } = useUIStore()
+
   return (
     <div id="app">
       <div id="top-bar">

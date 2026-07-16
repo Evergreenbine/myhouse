@@ -3,7 +3,7 @@ import { CheckOutlined, CloseOutlined, CopyOutlined, DeleteOutlined, DownloadOut
 import html2canvas from "html2canvas";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { showToast } from "../components/ui";
+import { DayPicker, Select, showToast } from "../components/ui";
 import { rental, api } from "../api";
 import { formatChineseMoney } from "../utils/money";
 
@@ -55,6 +55,26 @@ interface AISuggestedAction {
   description?: string
 }
 
+interface AIFormField {
+  name: string
+  label: string
+  type?: "text" | "number" | "date"
+  required?: boolean
+  placeholder?: string
+}
+
+interface AIFormAction {
+  id?: string
+  type: string
+  title: string
+  description?: string
+  submit_label?: string
+  prompt_template: string
+  fields: AIFormField[]
+  values?: Record<string, any>
+  missing?: string[]
+}
+
 interface AIImageAttachment {
   id: string
   dataUrl: string
@@ -87,6 +107,13 @@ interface AIMeterRoom {
   tenant_name?: string
 }
 
+interface AIFormTenant {
+  id: number
+  name: string
+  building_id?: number | null
+  room_id?: string | number | null
+}
+
 interface AIMessageImage {
   id: string
   dataUrl: string
@@ -109,6 +136,7 @@ interface AIMessage {
   images?: AIMessageImage[]
   pendingActions?: AIPendingAction[]
   suggestedActions?: AISuggestedAction[]
+  formActions?: AIFormAction[]
 }
 
 interface AIChatState {
@@ -129,8 +157,10 @@ interface AIChatState {
   activePreviewImage: string
   pendingActions: AIPendingAction[]
   pendingActionLoadingId: string
+  formValues: Record<string, Record<string, string>>
   meterBuildings: AIMeterBuilding[]
   meterRooms: Record<number, AIMeterRoom[]>
+  formTenants: Record<number, AIFormTenant[]>
 }
 
 const QUICK_PROMPTS = [
@@ -168,8 +198,10 @@ export class AIChat extends React.Component<{}, AIChatState> {
     activePreviewImage: "",
     pendingActions: [],
     pendingActionLoadingId: "",
+    formValues: {},
     meterBuildings: [],
     meterRooms: {},
+    formTenants: {},
   }
   private bodyRef = React.createRef<HTMLDivElement>()
   private inputRef = React.createRef<HTMLInputElement>()
@@ -177,6 +209,8 @@ export class AIChat extends React.Component<{}, AIChatState> {
   private sidebarRef = React.createRef<HTMLDivElement>()
   private skipNextHistoryAutoRestore = false
   private deletedChatIds = new Set<number>()
+  private meterOptionsLoading = false
+  private tenantOptionsLoading = new Set<number>()
 
   formatMoney = (value: any) => {
     var num = Number(value || 0)
@@ -265,6 +299,31 @@ export class AIChat extends React.Component<{}, AIChatState> {
     a.click()
     document.body.removeChild(a)
     showToast("已保存账单图片")
+  }
+
+  copyMessageText = async (content: string) => {
+    var text = String(content || "").trim()
+    if (!text) {
+      showToast("没有可复制的文字")
+      return
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        var textarea = document.createElement("textarea")
+        textarea.value = text
+        textarea.style.position = "fixed"
+        textarea.style.opacity = "0"
+        document.body.appendChild(textarea)
+        textarea.select()
+        document.execCommand("copy")
+        document.body.removeChild(textarea)
+      }
+      showToast("已复制")
+    } catch {
+      showToast("复制失败")
+    }
   }
 
   renderBillImage = (image: BillReceiptImage, key: string) => {
@@ -473,22 +532,26 @@ export class AIChat extends React.Component<{}, AIChatState> {
 
   sendQuick = (prompt: string) => {
     if (this.state.loading) return
-    if (this.inputRef.current) this.inputRef.current.value = prompt
-    this.send()
+    this.sendPrompt(prompt)
   }
 
   runSuggestedAction = (action: AISuggestedAction) => {
     if (this.state.loading) return
     if (!action.prompt) return
-    if (this.inputRef.current) this.inputRef.current.value = action.prompt
-    this.send()
+    this.sendPrompt(action.prompt)
   }
 
   send = async () => {
     var input = this.state.loading ? "" : (this.inputRef.current?.value || "").trim()
     if (!input) return
-    var convIdAtStart = this.state.convId
     if (this.inputRef.current) this.inputRef.current.value = ""
+    this.sendPrompt(input)
+  }
+
+  sendPrompt = async (input: string) => {
+    input = String(input || "").trim()
+    if (this.state.loading || !input) return
+    var convIdAtStart = this.state.convId
     var msgs = [...this.state.messages, { role: "user" as const, content: input }]
     this.setState({ messages: msgs, loading: true })
     this.scrollBottom()
@@ -501,7 +564,8 @@ export class AIChat extends React.Component<{}, AIChatState> {
       var nextPendingActions = res?.response?.pending_actions || res?.pending_actions || []
       var responseBillImages = res?.response?.bill_images || res?.bill_images || []
       var suggestedActions = res?.response?.suggested_actions || res?.suggested_actions || []
-      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions, suggestedActions }]
+      var formActions = res?.response?.form_actions || res?.form_actions || []
+      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions, suggestedActions, formActions }]
       if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
       this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions })
       this.scrollBottom()
@@ -623,13 +687,14 @@ export class AIChat extends React.Component<{}, AIChatState> {
     ].filter(item => item[1] !== undefined && item[1] !== null && item[1] !== "")
     var isBill = action.type === "create_bill"
     var isContract = action.type === "update_contract"
+    var isCreateContract = action.type === "create_contract"
     var isPayment = action.type === "record_payment"
     var actionStatus = action.status || "pending"
     var actionFinished = actionStatus === "confirmed" || actionStatus === "cancelled"
-    var pendingTitle = isBill ? "待确认账单" : isContract ? "待确认合同修改" : isPayment ? "待确认收款" : "待确认读数"
-    var finishedTitle = isBill ? "账单操作" : isContract ? "合同修改" : isPayment ? "收款确认" : "读数录入"
+    var pendingTitle = isBill ? "待确认账单" : isCreateContract ? "待确认新建合同" : isContract ? "待确认合同修改" : isPayment ? "待确认收款" : "待确认读数"
+    var finishedTitle = isBill ? "账单操作" : isCreateContract ? "合同新建" : isContract ? "合同修改" : isPayment ? "收款确认" : "读数录入"
     var actionTitle = actionFinished ? finishedTitle : pendingTitle
-    var confirmText = isBill ? (preview.overwrite ? "确认覆盖" : "确认保存") : isContract ? "确认修改" : isPayment ? "确认收款" : "确认录入"
+    var confirmText = isBill ? (preview.overwrite ? "确认覆盖" : "确认保存") : isCreateContract ? "确认新建" : isContract ? "确认修改" : isPayment ? "确认收款" : "确认录入"
     var statusText = actionStatus === "confirmed" ? "已确认" : actionStatus === "cancelled" ? "已取消" : actionStatus === "failed" ? "执行失败" : "需要确认"
     var changeItems = Array.isArray(preview.change_items) ? preview.change_items : []
     var otherFeeDetails = Array.isArray(preview.other_fee_details) ? preview.other_fee_details : []
@@ -712,6 +777,237 @@ export class AIChat extends React.Component<{}, AIChatState> {
     )
   }
 
+  getFormKey = (form: AIFormAction, index: number) => {
+    return form.id || form.type + "_" + index
+  }
+
+  getFormValues = (form: AIFormAction, index: number) => {
+    var key = this.getFormKey(form, index)
+    var stored = this.state.formValues[key]
+    if (stored) return stored
+    var values: Record<string, string> = {}
+    ;(form.fields || []).forEach(field => {
+      var value = form.values?.[field.name]
+      values[field.name] = value === undefined || value === null ? "" : String(value)
+    })
+    return values
+  }
+
+  getFormBuilding = (values: Record<string, string>) => {
+    var buildingId = String(values.building_id || "").trim()
+    if (buildingId) {
+      var byId = this.state.meterBuildings.find(building => String(building.id) === buildingId)
+      if (byId) return byId
+    }
+    var buildingValue = String(values.building_name || "").trim()
+    return this.state.meterBuildings.find(building => String(building.name) === buildingValue || String(building.id) === buildingValue)
+  }
+
+  tenantMatchesRoom = (tenant: AIFormTenant, roomId: number) => {
+    var ids = String(tenant.room_id || "").split(",").map(item => item.trim()).filter(Boolean)
+    return ids.includes(String(roomId))
+  }
+
+  getTenantForFormRoom = (buildingId: number, roomNumber: string) => {
+    var room = (this.state.meterRooms[buildingId] || []).find(item => String(item.room_number) === String(roomNumber))
+    if (!room) return undefined
+    var roomId = room.id
+    return (this.state.formTenants[buildingId] || []).find(tenant => this.tenantMatchesRoom(tenant, roomId))
+  }
+
+  updateFormValue = (form: AIFormAction, index: number, name: string, value: string) => {
+    var key = this.getFormKey(form, index)
+    var current = this.getFormValues(form, index)
+    this.setState(s => ({
+      formValues: {
+        ...s.formValues,
+        [key]: { ...current, [name]: value },
+      },
+    }))
+  }
+
+  updateFormBuilding = (form: AIFormAction, index: number, value: string) => {
+    var key = this.getFormKey(form, index)
+    var current = this.getFormValues(form, index)
+    var building = this.state.meterBuildings.find(item => String(item.id) === String(value) || String(item.name) === String(value))
+    if (building) this.loadTenantsForBuilding(building.id)
+    var previousRoomNumber = current.room_number || ""
+    var matchedRoom = building && previousRoomNumber ? (this.state.meterRooms[building.id] || []).find(room => String(room.room_number) === String(previousRoomNumber)) : undefined
+    var matchedTenant = building && matchedRoom ? this.getTenantForFormRoom(building.id, matchedRoom.room_number) : undefined
+    this.setState(s => ({
+      formValues: {
+        ...s.formValues,
+        [key]: {
+          ...current,
+          building_id: building ? String(building.id) : "",
+          building_name: building?.name || value,
+          room_id: matchedRoom ? String(matchedRoom.id) : "",
+          room_number: matchedRoom?.room_number || previousRoomNumber,
+          tenant_id: matchedTenant ? String(matchedTenant.id) : "",
+          tenant_name: matchedTenant?.name || "",
+        },
+      },
+    }))
+  }
+
+  updateFormRoom = (form: AIFormAction, index: number, value: string) => {
+    var key = this.getFormKey(form, index)
+    var current = this.getFormValues(form, index)
+    var building = this.getFormBuilding(current)
+    var room = building ? (this.state.meterRooms[building.id] || []).find(item => String(item.id) === String(value) || String(item.room_number) === String(value)) : undefined
+    var tenant = building && room ? this.getTenantForFormRoom(building.id, room.room_number) : undefined
+    this.setState(s => ({
+      formValues: {
+        ...s.formValues,
+        [key]: { ...current, room_id: room ? String(room.id) : "", room_number: room?.room_number || value, tenant_id: tenant ? String(tenant.id) : current.tenant_id || "", tenant_name: tenant?.name || current.tenant_name || "" },
+      },
+    }))
+  }
+
+  updateFormTenant = (form: AIFormAction, index: number, value: string) => {
+    var key = this.getFormKey(form, index)
+    var current = this.getFormValues(form, index)
+    var building = this.getFormBuilding(current)
+    var tenant = building ? (this.state.formTenants[building.id] || []).find(item => String(item.id) === String(value) || item.name === value) : undefined
+    this.setState(s => ({
+      formValues: {
+        ...s.formValues,
+        [key]: { ...current, tenant_id: tenant ? String(tenant.id) : "", tenant_name: tenant?.name || value },
+      },
+    }))
+  }
+
+  syncFormTenantFromRoom = (form: AIFormAction, index: number, values: Record<string, string>) => {
+    if (form.type !== "create_contract" || values.tenant_name || !values.room_number) return
+    var building = this.getFormBuilding(values)
+    if (!building) return
+    var tenant = this.getTenantForFormRoom(building.id, values.room_number)
+    if (!tenant?.name) return
+    var tenantName = tenant.name
+    var key = this.getFormKey(form, index)
+    setTimeout(() => {
+      this.setState(s => {
+        var current = s.formValues[key] || this.getFormValues(form, index)
+        if (current.tenant_name) return null
+        return { formValues: { ...s.formValues, [key]: { ...current, tenant_name: tenantName } } }
+      })
+    }, 0)
+  }
+
+  runFormAction = (form: AIFormAction, index: number) => {
+    if (this.state.loading) return
+    var values = this.getFormValues(form, index)
+    var missing = (form.fields || []).filter(field => field.required && !String(values[field.name] || "").trim())
+    if (missing.length) {
+      showToast("请补充" + missing.map(field => field.label).join("、"))
+      return
+    }
+    var prompt = form.prompt_template || ""
+    if (form.type === "create_contract") {
+      prompt = "请根据以下表单内容新建合同："
+        + "楼栋ID " + (values.building_id || "") + "，楼栋名称 " + (values.building_name || "") + "，"
+        + "房间ID " + (values.room_id || "") + "，房间号 " + (values.room_number || "") + "，"
+        + "租户ID " + (values.tenant_id || "") + "，租户姓名 " + (values.tenant_name || "") + "，"
+        + "合同开始日期 " + (values.start_date || "") + "，合同结束日期 " + (values.end_date || "") + "，"
+        + "月租 " + (values.monthly_rent || "") + "，水费单价 " + (values.water_unit_price || "") + "，"
+        + "电费单价 " + (values.electric_unit_price || "") + "，保证金 " + (values.deposit || "") + "。"
+    }
+    Object.keys(values).forEach(key => {
+      prompt = prompt.split("{" + key + "}").join(values[key] || "")
+    })
+    if (!prompt.trim()) return
+    this.sendPrompt(prompt)
+  }
+
+  renderFormActions = (forms: AIFormAction[]) => {
+    var validForms = (forms || []).filter(form => form && form.prompt_template && Array.isArray(form.fields))
+    if (!validForms.length) return null
+    var needsRoomOptions = validForms.some(form => form.type === "create_contract")
+    if (needsRoomOptions && this.state.meterBuildings.length === 0) {
+      setTimeout(() => this.loadMeterOptions(), 0)
+    }
+    return (
+      <div className="ai-form-action-list">
+        {validForms.map((form, index) => {
+          var values = this.getFormValues(form, index)
+          var missingSet = new Set(form.missing || [])
+          var selectedBuilding = this.getFormBuilding(values)
+          var selectedBuildingId = selectedBuilding?.id || 0
+          var roomOptions = selectedBuilding ? (this.state.meterRooms[selectedBuilding.id] || []) : []
+          var tenantOptions = selectedBuilding ? (this.state.formTenants[selectedBuilding.id] || []) : []
+          var roomSelectOptions = roomOptions.map(room => ({ value: String(room.id), label: room.room_number }))
+          if (!values.room_id && values.room_number && !roomSelectOptions.some(option => option.value === values.room_number)) {
+            roomSelectOptions = [{ value: values.room_number, label: values.room_number }, ...roomSelectOptions]
+          }
+          var tenantSelectOptions = tenantOptions.map(tenant => ({ value: String(tenant.id), label: tenant.name }))
+          if (!values.tenant_id && values.tenant_name && !tenantSelectOptions.some(option => option.value === values.tenant_name)) {
+            tenantSelectOptions = [{ value: values.tenant_name, label: values.tenant_name }, ...tenantSelectOptions]
+          }
+          if (selectedBuildingId && !this.state.formTenants[selectedBuildingId]) {
+            setTimeout(() => this.loadTenantsForBuilding(selectedBuildingId), 0)
+          }
+          this.syncFormTenantFromRoom(form, index, values)
+          return (
+            <div className="ai-form-action" key={this.getFormKey(form, index)}>
+              <div className="ai-form-action-head">
+                <span>{form.title || "补充信息"}</span>
+                {form.description && <em>{form.description}</em>}
+              </div>
+              <div className="ai-form-action-grid">
+                {form.fields.map(field => (
+                  <label className={missingSet.has(field.name) ? "missing" : ""} key={field.name}>
+                    <span>{field.label}{field.required && <b>*</b>}</span>
+                    {form.type === "create_contract" && field.name === "building_name" ? (
+                      <Select
+                        value={values.building_id || values.building_name || ""}
+                        placeholder={field.placeholder || "选择楼栋"}
+                        options={this.state.meterBuildings.map(building => ({ value: String(building.id), label: building.name }))}
+                        onChange={value => this.updateFormBuilding(form, index, value)}
+                      />
+                    ) : form.type === "create_contract" && field.name === "room_number" ? (
+                      <Select
+                        value={values.room_id || values.room_number || ""}
+                        placeholder={selectedBuilding ? (field.placeholder || "选择房间") : "请先选择楼栋"}
+                        options={roomSelectOptions}
+                        onChange={value => this.updateFormRoom(form, index, value)}
+                      />
+                    ) : form.type === "create_contract" && field.name === "tenant_name" ? (
+                      <Select
+                        value={values.tenant_id || values.tenant_name || ""}
+                        placeholder={selectedBuilding ? (field.placeholder || "选择租客") : "请先选择楼栋"}
+                        options={tenantSelectOptions}
+                        onChange={value => this.updateFormTenant(form, index, value)}
+                      />
+                    ) : field.type === "date" ? (
+                      <DayPicker
+                        value={values[field.name] || ""}
+                        onChange={value => this.updateFormValue(form, index, field.name, value)}
+                        ariaLabel={field.label}
+                      />
+                    ) : (
+                      <input
+                        type={field.type === "number" ? "number" : "text"}
+                        value={values[field.name] || ""}
+                        placeholder={field.placeholder || ""}
+                        onChange={e => this.updateFormValue(form, index, field.name, e.target.value)}
+                        disabled={this.state.loading}
+                      />
+                    )}
+                  </label>
+                ))}
+              </div>
+              <div className="ai-form-action-buttons">
+                <button type="button" onClick={() => this.runFormAction(form, index)} disabled={this.state.loading}>
+                  <CheckOutlined />{form.submit_label === "生成确认卡" ? "提交表单" : (form.submit_label || "提交表单")}
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
 
   inferMeterType = () => {
     var input = this.inputRef.current?.value || ""
@@ -746,13 +1042,15 @@ export class AIChat extends React.Component<{}, AIChatState> {
   }
 
   loadMeterOptions = async () => {
-    if (this.state.meterBuildings.length > 0) return
+    if (this.state.meterBuildings.length > 0 || this.meterOptionsLoading) return
+    this.meterOptionsLoading = true
     try {
       var buildings = await rental("buildings", "list") || []
       var roomEntries = await Promise.all((buildings || []).map(async (building: AIMeterBuilding) => {
-        var [rooms, contracts] = await Promise.all([
+        var [rooms, contracts, tenants] = await Promise.all([
           rental("rooms", "list", { building_id: building.id }),
           rental("contracts", "list", { active_only: true, building_id: building.id }),
+          rental("tenants", "list", { active_only: true, building_id: building.id }),
         ])
         var contractByRoom: Record<number, any> = {}
         ;(contracts || []).forEach((contract: any) => { contractByRoom[Number(contract.room_id)] = contract })
@@ -762,13 +1060,45 @@ export class AIChat extends React.Component<{}, AIChatState> {
           building_id: Number(building.id),
           tenant_id: contractByRoom[Number(room.id)]?.tenant_id || null,
           tenant_name: contractByRoom[Number(room.id)]?.tenant_name || "",
-        }))] as const
+        })), tenants || []] as const
       }))
       var rooms: Record<number, AIMeterRoom[]> = {}
-      roomEntries.forEach(entry => { rooms[entry[0]] = entry[1] })
-      this.setState({ meterBuildings: buildings || [], meterRooms: rooms })
+      var tenantsByBuilding: Record<number, AIFormTenant[]> = {}
+      roomEntries.forEach(entry => {
+        rooms[entry[0]] = entry[1]
+        tenantsByBuilding[entry[0]] = (entry[2] || []).map((tenant: any) => ({
+          id: Number(tenant.id),
+          name: String(tenant.name || ""),
+          building_id: tenant.building_id ? Number(tenant.building_id) : null,
+          room_id: tenant.room_id || "",
+        }))
+      })
+      this.setState({ meterBuildings: buildings || [], meterRooms: rooms, formTenants: tenantsByBuilding })
     } catch {
-      this.setState({ meterBuildings: [], meterRooms: {} })
+      this.setState({ meterBuildings: [], meterRooms: {}, formTenants: {} })
+    } finally {
+      this.meterOptionsLoading = false
+    }
+  }
+
+  loadTenantsForBuilding = async (buildingId: number) => {
+    if (!buildingId || this.state.formTenants[buildingId] || this.tenantOptionsLoading.has(buildingId)) return
+    this.tenantOptionsLoading.add(buildingId)
+    try {
+      var tenants = await rental("tenants", "list", { active_only: true, building_id: buildingId }) || []
+      this.setState(s => ({
+        formTenants: {
+          ...s.formTenants,
+          [buildingId]: tenants.map((tenant: any) => ({
+            id: Number(tenant.id),
+            name: String(tenant.name || ""),
+            building_id: tenant.building_id ? Number(tenant.building_id) : null,
+            room_id: tenant.room_id || "",
+          })),
+        },
+      }))
+    } finally {
+      this.tenantOptionsLoading.delete(buildingId)
     }
   }
 
@@ -1024,7 +1354,8 @@ export class AIChat extends React.Component<{}, AIChatState> {
       var nextPendingActions = res?.response?.pending_actions || res?.pending_actions || []
       var responseBillImages = res?.response?.bill_images || res?.bill_images || []
       var suggestedActions = res?.response?.suggested_actions || res?.suggested_actions || []
-      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions, suggestedActions }]
+      var formActions = res?.response?.form_actions || res?.form_actions || []
+      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions, suggestedActions, formActions }]
       if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
       this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions })
       this.scrollBottom()
@@ -1155,22 +1486,29 @@ export class AIChat extends React.Component<{}, AIChatState> {
                   return (
                     <div key={i} className="ai-msg-v2 user">
                       <div className="ai-msg-avatar">👤</div>
-                      <div className="ai-msg-bubble user-bubble">
-                        {m.content && <div>{m.content}</div>}
-                        {m.images && m.images.length > 0 && (
-                          <div className="ai-message-images">
-                            {m.images.map(image => (
-                              <div key={image.id} className="ai-message-image-wrap">
-                                <button type="button" className="ai-message-image" onClick={() => this.setState({ activePreviewImage: image.dataUrl })} title="查看图片">
-                                  <img src={image.dataUrl} alt={image.fileName} />
-                                </button>
-                                <div className="ai-message-image-meta">
-                                  <span>{image.meterType || "表具"}{image.roomNumber ? " · " + image.roomNumber : ""}</span>
-                                  {image.tenantName && <span>{image.tenantName}</span>}
+                      <div className="ai-msg-stack">
+                        <div className="ai-msg-bubble user-bubble">
+                          {m.content && <div>{m.content}</div>}
+                          {m.images && m.images.length > 0 && (
+                            <div className="ai-message-images">
+                              {m.images.map(image => (
+                                <div key={image.id} className="ai-message-image-wrap">
+                                  <button type="button" className="ai-message-image" onClick={() => this.setState({ activePreviewImage: image.dataUrl })} title="查看图片">
+                                    <img src={image.dataUrl} alt={image.fileName} />
+                                  </button>
+                                  <div className="ai-message-image-meta">
+                                    <span>{image.meterType || "表具"}{image.roomNumber ? " · " + image.roomNumber : ""}</span>
+                                    {image.tenantName && <span>{image.tenantName}</span>}
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
-                          </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        {m.content && (
+                          <button type="button" className="ai-msg-copy" onClick={() => this.copyMessageText(m.content)} title="复制这条消息" aria-label="复制这条消息">
+                            <CopyOutlined />
+                          </button>
                         )}
                       </div>
                     </div>
@@ -1179,13 +1517,21 @@ export class AIChat extends React.Component<{}, AIChatState> {
                 return (
                   <div key={i} className="ai-msg-v2 bot">
                     <div className="ai-msg-avatar"><img src="/robot-avatar.jpg" className="ai-bot-avatar" /></div>
-                    <div className="ai-msg-bubble bot-bubble">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {m.content}
-                      </ReactMarkdown>
-                      {m.billImages && m.billImages.map((image, j) => this.renderBillImage(image, i + "-" + j))}
-                      {this.renderPendingActions(m.pendingActions || [])}
-                      {this.renderSuggestedActions(m.suggestedActions || [])}
+                    <div className="ai-msg-stack">
+                      <div className="ai-msg-bubble bot-bubble">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {m.content}
+                        </ReactMarkdown>
+                        {m.billImages && m.billImages.map((image, j) => this.renderBillImage(image, i + "-" + j))}
+                        {this.renderPendingActions(m.pendingActions || [])}
+                        {this.renderFormActions(m.formActions || [])}
+                        {this.renderSuggestedActions(m.suggestedActions || [])}
+                      </div>
+                      {m.content && (
+                        <button type="button" className="ai-msg-copy" onClick={() => this.copyMessageText(m.content)} title="复制这条回复" aria-label="复制这条回复">
+                          <CopyOutlined />
+                        </button>
+                      )}
                     </div>
                   </div>
                 )

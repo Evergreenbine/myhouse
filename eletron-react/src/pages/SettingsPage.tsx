@@ -194,6 +194,8 @@ export class SettingsPage extends React.Component<{}, SettingsState> {
 
   componentWillUnmount() {
     document.removeEventListener("mousedown", this._onDocClick)
+    clearTimeout(this._saveTimer)
+    clearTimeout(this._ocrSaveTimer)
   }
 
   _onDocClick = () => {
@@ -397,15 +399,10 @@ export class SettingsPage extends React.Component<{}, SettingsState> {
     )
   }
 
-  render() {
+  renderAiSettings() {
     var s = this.state
-    if (s.loading) return <div style={{color:"var(--text-third)",fontSize:13,padding:24}}>加载中...</div>
     return (
-      <div style={{padding:"24px 0"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
-          <div className="page-title" style={{marginBottom:0}}>系统设置</div>
-          <button className="btn btn-sm" onClick={() => useUIStore.getState().setSection("basic")} style={{color:"var(--text-sec)",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,width:32,height:32,justifyContent:"center",padding:0,fontSize:16}}>←</button>
-        </div>
+      <>
         <div className="drawer-section">
           <div className="section-label">🤖 AI 模型设置</div>
           <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
@@ -439,6 +436,20 @@ export class SettingsPage extends React.Component<{}, SettingsState> {
           </div>
           {this.renderOcrDetail()}
         </div>
+      </>
+    )
+  }
+
+  render() {
+    var s = this.state
+    if (s.loading) return <div style={{color:"var(--text-third)",fontSize:13,padding:24}}>加载中...</div>
+    return (
+      <div style={{padding:"24px 0"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+          <div className="page-title" style={{marginBottom:0}}>系统设置</div>
+          <button className="btn btn-sm" onClick={() => useUIStore.getState().setSection("basic")} style={{color:"var(--text-sec)",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,width:32,height:32,justifyContent:"center",padding:0,fontSize:16}}>←</button>
+        </div>
+        {this.renderAiSettings()}
       </div>
     )
   }
