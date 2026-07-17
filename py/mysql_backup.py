@@ -64,6 +64,7 @@ def backup_mysql(output_dir: Path = DEFAULT_BACKUP_DIR) -> Path:
         "--routines",
         "--triggers",
         "--events",
+        "--no-tablespaces",
         "--default-character-set=utf8mb4",
         f"--host={settings['host']}",
         f"--port={settings['port']}",
