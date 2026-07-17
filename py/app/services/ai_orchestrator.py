@@ -60,6 +60,8 @@ class AIChatGraphState(TypedDict, total=False):
 
 _CHAT_GRAPH = None
 _CHAT_CHECKPOINTER_CONN = None
+_SEMANTIC_INTENT_CACHE: Dict[str, Dict[str, Any]] = {}
+_SEMANTIC_INTENT_CACHE_LIMIT = 64
 
 
 def _create_chat_checkpointer():
@@ -334,10 +336,51 @@ def _compact_trace_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     return compact(payload)
 
 
+def _strip_meter_month_text(text: str) -> str:
+    return re.sub(r"(?:20\d{2}\s*(?:[-/年])\s*)?(?:0?[1-9]|1[0-2])\s*月份?", " ", str(text or ""))
+
+
+def _extract_meter_reading_values(prompt: str) -> Dict[str, str]:
+    text = str(prompt or "")
+    values: Dict[str, str] = {}
+    number_pattern = r"\d+(?:\.\d+)?"
+    combo = re.search(r"(?:水\s*电|水电)", text)
+    if combo:
+        tail = _strip_meter_month_text(text[combo.end():])
+        numbers = re.findall(number_pattern, tail)
+        if len(numbers) >= 2:
+            values["water"] = numbers[0]
+            values["electric"] = numbers[1]
+        return values
+    water = re.search(r"水(?!\s*电)(?:表)?(?:读数)?\s*(?:是|为|=|:|：)?\s*(" + number_pattern + r")", text)
+    electric = re.search(r"电(?!\s*费)(?:表)?(?:读数)?\s*(?:是|为|=|:|：)?\s*(" + number_pattern + r")", text)
+    if water:
+        values["water"] = water.group(1)
+    if electric:
+        values["electric"] = electric.group(1)
+    return values
+
+
+def _looks_like_meter_reading_statement(prompt: str) -> bool:
+    text = str(prompt or "").strip()
+    if not text or not re.search(r"\d", text):
+        return False
+    has_meter_words = any(word in text for word in ("水电", "水表", "电表", "水电表", "读数", "抄表")) or ("水" in text and "电" in text)
+    if not has_meter_words:
+        return False
+    has_contract_price_words = any(word in text for word in ("房租", "月租", "租金", "押", "保证金", "合同"))
+    has_explicit_meter_words = any(word in text for word in ("水表", "电表", "水电表", "读数", "抄表"))
+    if has_contract_price_words and not has_explicit_meter_words:
+        return False
+    return bool(_extract_meter_reading_values(text))
+
+
 def _prompt_workflow(prompt: str) -> str:
     text = str(prompt or "").strip()
     if not text:
         return ""
+    if _looks_like_meter_reading_statement(text):
+        return "meter_reading"
     if any(word in text for word in ("水电表", "水表", "电表", "抄表", "表读数", "录读数", "录入读数")):
         return "meter_reading"
     if re.search(r"(?:继续|接着).{0,8}(?:合同|租约)", text):
@@ -357,6 +400,12 @@ def _prompt_workflow(prompt: str) -> str:
 
 def _month_hint(prompt: str) -> str:
     text = str(prompt or "")
+    match = re.search(r"(20\d{2})\s*(?:[-/年])\s*(0?[1-9]|1[0-2])\s*月?", text)
+    if match:
+        return "{}-{:02d}".format(match.group(1), int(match.group(2)))
+    match = re.search(r"(?<!\d)(0?[1-9]|1[0-2])\s*月份?", text)
+    if match:
+        return "{}-{:02d}".format(date.today().year, int(match.group(1)))
     match = re.search(r"(20\d{2})[-/年](0?[1-9]|1[0-2])", text)
     if match:
         return "{}-{:02d}".format(match.group(1), int(match.group(2)))
@@ -389,6 +438,190 @@ def _extract_common_fields(prompt: str) -> Dict[str, Any]:
     return fields
 
 
+def _context_location_fields(context: Dict[str, Any]) -> Dict[str, Any]:
+    fields: Dict[str, Any] = {}
+    sources: List[Dict[str, Any]] = []
+    if isinstance(context, dict):
+        sources.append(context)
+        draft = context.get("contract_draft")
+        if isinstance(draft, dict):
+            sources.append(draft)
+        workflow_state = context.get("workflow_state")
+        workflow_fields = workflow_state.get("fields") if isinstance(workflow_state, dict) else None
+        if isinstance(workflow_fields, dict):
+            sources.append(workflow_fields)
+        suspended = context.get("suspended_contract")
+        if isinstance(suspended, dict):
+            sources.append(suspended)
+            suspended_draft = suspended.get("contract_draft")
+            if isinstance(suspended_draft, dict):
+                sources.append(suspended_draft)
+    for source in reversed(sources):
+        for key in ("building_id", "building_name", "room_id", "room_number", "tenant_id", "tenant_name"):
+            value = source.get(key)
+            if value not in {None, ""}:
+                fields[key] = value
+    return fields
+
+
+def _semantic_intent_history(data: Dict[str, Any]) -> List[Dict[str, str]]:
+    history = data.get("history") or []
+    brief: List[Dict[str, str]] = []
+    for item in history[-6:]:
+        if not isinstance(item, dict):
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        brief.append({
+            "role": str(item.get("role") or item.get("type") or ""),
+            "content": content[:400],
+        })
+    return brief
+
+
+def _context_subset(context: Dict[str, Any], keys: tuple[str, ...]) -> Dict[str, Any]:
+    subset: Dict[str, Any] = {}
+    for key in keys:
+        value = context.get(key)
+        if value is not None and value != "":
+            subset[key] = value
+    return subset
+
+
+def _semantic_intent_cache_key(data: Dict[str, Any]) -> str:
+    context = _session_context(data)
+    context_subset = _context_subset(context, (
+        "active_workflow", "last_completed_workflow", "building_id", "building_name",
+        "room_id", "room_number", "tenant_id", "tenant_name", "workflow_state",
+        "contract_draft", "suspended_contract", "last_intent",
+    ))
+    payload = {
+        "prompt": str(data.get("prompt") or "").strip(),
+        "history": _semantic_intent_history(data),
+        "context": context_subset,
+        "has_images": bool(data.get("uploaded_images") or data.get("uploaded_image") or data.get("ocr_number") is not None),
+    }
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _semantic_workflow_name(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    aliases = {
+        "contract": "contract_create",
+        "create_contract": "contract_create",
+        "new_contract": "contract_create",
+        "contract_update": "contract_manage",
+        "contract_query": "query",
+        "contract_detail": "query",
+        "meter": "meter_reading",
+        "meter_save": "meter_reading",
+        "reading": "meter_reading",
+        "bill": "bill_create",
+        "create_bill": "bill_create",
+        "receipt": "bill_create",
+        "payment_confirm": "payment",
+        "rent_payment": "payment",
+        "unknown": "query",
+    }
+    workflow = aliases.get(raw, raw)
+    allowed = set(WORKFLOW_CONFIGS.keys()) | {"empty", "pending_action"}
+    return workflow if workflow in allowed else ""
+
+
+def _semantic_confidence(value: Any) -> float:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    return max(0.0, min(1.0, confidence))
+
+
+def _normalize_semantic_intent(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    workflow = _semantic_workflow_name(raw.get("workflow") or raw.get("intent") or raw.get("name"))
+    if not workflow:
+        return {}
+    fields = raw.get("fields")
+    return {
+        "name": workflow,
+        "workflow": workflow,
+        "confidence": _semantic_confidence(raw.get("confidence", 0.0)),
+        "source": "ai_semantic",
+        "fields": fields if isinstance(fields, dict) else {},
+        "reason": str(raw.get("reason") or "")[:200],
+    }
+
+
+def _should_reclassify_with_ai(data: Dict[str, Any], rules_workflow: str) -> bool:
+    prompt = str(data.get("prompt") or "").strip()
+    if not prompt or data.get("_skip_semantic_intent"):
+        return False
+    context = _session_context(data)
+    active = str(context.get("active_workflow") or "")
+    if rules_workflow in {"meter_reading", "contract_create", "contract_manage", "bill_create", "payment", "image_ocr"}:
+        return False
+    if rules_workflow == "query" and active:
+        return True
+    if rules_workflow:
+        return False
+    if active == "contract_create" and _extract_contract_create_hint(prompt):
+        return False
+    return bool(active)
+
+
+def _semantic_intent_from_ai(data: Dict[str, Any]) -> Dict[str, Any]:
+    prompt = str(data.get("prompt") or "").strip()
+    if not prompt:
+        return {}
+    cache_key = _semantic_intent_cache_key(data)
+    if cache_key in _SEMANTIC_INTENT_CACHE:
+        return dict(_SEMANTIC_INTENT_CACHE[cache_key])
+
+    call_json = getattr(ai_svc, "call_json", None)
+    if not callable(call_json):
+        return {}
+    context = _session_context(data)
+    user_payload = {
+        "current_prompt": prompt,
+        "recent_history": _semantic_intent_history(data),
+        "session_context": _context_subset(context, (
+            "active_workflow", "workflow_state", "contract_draft",
+            "building_name", "room_number", "tenant_name", "last_intent",
+        )),
+        "has_uploaded_images": bool(data.get("uploaded_images") or data.get("uploaded_image")),
+    }
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是租房管理系统的语义意图识别器，只返回 JSON 对象，不要 Markdown。"
+                "workflow 只能是 contract_create、contract_manage、meter_reading、bill_create、payment、query、image_ocr、empty。"
+                "active_workflow 只是上下文线索，不能强行覆盖当前用户的新意图。"
+                "如果用户问“有合同了吗/住哪/查一下/多少/哪些”，优先判为 query；"
+                "如果用户说“水电读数/抄表/6月份水电是346 9150”，判为 meter_reading；"
+                "如果用户明确新建/新增/签订合同，判为 contract_create；"
+                "如果用户是在修改已有合同，判为 contract_manage。"
+                "返回字段：workflow、confidence(0-1)、fields、reason。"
+            ),
+        },
+        {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False, default=str)},
+    ]
+    raw, err = call_json(messages, max_tokens=260, temperature=0.0, timeout=20)
+    if err or not isinstance(raw, dict):
+        _trace_thread(_thread_id(data), "semantic_intent_error", {"error": err})
+        return {}
+    intent = _normalize_semantic_intent(raw)
+    if not intent:
+        return {}
+    if len(_SEMANTIC_INTENT_CACHE) >= _SEMANTIC_INTENT_CACHE_LIMIT:
+        _SEMANTIC_INTENT_CACHE.clear()
+    _SEMANTIC_INTENT_CACHE[cache_key] = dict(intent)
+    _trace_thread(_thread_id(data), "semantic_intent", intent)
+    return intent
+
+
 def _detect_intent(data: Dict[str, Any]) -> Dict[str, Any]:
     prompt = str(data.get("prompt") or "").strip()
     context = _session_context(data)
@@ -401,21 +634,42 @@ def _detect_intent(data: Dict[str, Any]) -> Dict[str, Any]:
             "source": "pending_command",
             "fields": {},
         }
-    workflow = _prompt_workflow(prompt)
+    rules_workflow = _prompt_workflow(prompt)
+    semantic = _semantic_intent_from_ai(data) if _should_reclassify_with_ai(data, rules_workflow) else {}
+    workflow = str(semantic.get("workflow") or "")
+    source = str(semantic.get("source") or "rules")
+    confidence = _semantic_confidence(semantic.get("confidence", 0.0)) if semantic else 0.0
+    if not workflow or confidence < 0.45:
+        if rules_workflow:
+            workflow = rules_workflow
+            source = "rules"
+            confidence = max(confidence, 0.9)
     if not workflow and data.get("uploaded_images"):
         workflow = "image_ocr"
+        source = "rules"
+        confidence = max(confidence, 0.85)
     if not workflow and context.get("active_workflow") and prompt:
         workflow = str(context.get("active_workflow") or "")
+        source = "context"
+        confidence = max(confidence, 0.55)
     if not workflow:
         workflow = "query" if prompt else "empty"
-    fields = _extract_common_fields(prompt)
+        source = "rules"
+        confidence = max(confidence, 0.65)
+    fields = {}
+    if isinstance(semantic.get("fields"), dict):
+        fields.update({k: v for k, v in semantic.get("fields", {}).items() if v not in {None, ""}})
+    fields.update(_extract_common_fields(prompt))
+    if workflow == "meter_reading":
+        inherited = _context_location_fields(context)
+        fields = {**inherited, **fields}
     if workflow == "contract_create":
         fields.update(_extract_contract_create_hint(prompt))
     return {
         "name": workflow,
         "workflow": workflow,
-        "confidence": 0.9 if workflow not in {"query", "empty"} else 0.65,
-        "source": "rules",
+        "confidence": confidence or (0.9 if workflow not in {"query", "empty"} else 0.65),
+        "source": source,
         "fields": fields,
     }
 
@@ -614,7 +868,7 @@ def _should_fallback_contract_create(data: Dict[str, Any]) -> bool:
         return True
     context = _session_context(data)
     if context.get("active_workflow") == "contract_create":
-        return bool(prompt)
+        return bool(prompt and _extract_contract_create_hint(prompt))
     recent = _recent_text(data)
     has_contract_create_context = _looks_like_contract_create(recent) or (
         "新建合同" in recent and ("补充" in recent or "必填" in recent or "空置" in recent)
@@ -704,6 +958,47 @@ def _contract_create_form_fallback(data: Dict[str, Any]) -> Dict[str, Any] | Non
             "score": hit.get("score"),
         } for hit in skill_hits],
     }
+
+
+def _meter_reading_fallback_args(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    prompt = str(data.get("prompt") or "")
+    if not _looks_like_meter_reading_statement(prompt):
+        return []
+    context = _session_context(data)
+    location = _context_location_fields(context)
+    prompt_fields = _extract_common_fields(prompt)
+    location.update({k: v for k, v in prompt_fields.items() if k in {"building_id", "building_name", "room_number"} and v not in {None, ""}})
+    room_number = str(location.get("room_number") or "").strip()
+    if not room_number:
+        return []
+    month = prompt_fields.get("month") or _month_hint(prompt)
+    if not month:
+        return []
+    readings = _extract_meter_reading_values(prompt)
+    tool_args = []
+    for meter_type in ("water", "electric"):
+        reading = readings.get(meter_type)
+        if reading in {None, ""}:
+            continue
+        args = {
+            "room_number": room_number,
+            "meter_type": meter_type,
+            "month": month,
+            "reading": reading,
+        }
+        if location.get("building_id") not in {None, ""}:
+            args["building_id"] = location.get("building_id")
+        tool_args.append(args)
+    return tool_args
+
+
+def _meter_reading_fallback(data: Dict[str, Any]) -> Dict[str, Any] | None:
+    tool_args = _meter_reading_fallback_args(data)
+    if not tool_args:
+        return None
+    tool_results = [execute_tool("meter_reading_save_from_ai", args) for args in tool_args]
+    skill_hits = search_skills(str(data.get("prompt") or ""), top_k=5)
+    return _finalize_chat_response("已识别到水电表读数，请核对下方待确认操作。", data, tool_results, skill_hits)
 
 
 def _history_messages(history: List[Dict[str, Any]]) -> List[Dict[str, str]]:
@@ -1309,6 +1604,28 @@ def _execute_ai_tool_call(raw_call: Dict[str, Any], data: Dict[str, Any]) -> Dic
             merged_args["room_number"] = room_number
             merged_args.pop("room_id", None)
         tool_args = merged_args
+    if call["name"] == "meter_reading_save_from_ai" and isinstance(tool_args, dict):
+        prompt = str(data.get("prompt") or "")
+        context = _session_context(data)
+        merged_args = dict(tool_args)
+        for key, value in _context_location_fields(context).items():
+            if value not in {None, ""} and key not in merged_args:
+                merged_args[key] = value
+        month = _month_hint(prompt) or str(merged_args.get("month") or "").strip()
+        if month:
+            merged_args["month"] = month
+        readings = _extract_meter_reading_values(prompt)
+        if readings.get("water") and str(merged_args.get("meter_type") or "") in {"", "water"} and "reading" not in merged_args:
+            merged_args["reading"] = readings["water"]
+            merged_args["meter_type"] = "water"
+        if readings.get("electric") and str(merged_args.get("meter_type") or "") == "electric" and "reading" not in merged_args:
+            merged_args["reading"] = readings["electric"]
+        if "reading" not in merged_args:
+            if str(merged_args.get("meter_type") or "") == "water" and readings.get("water"):
+                merged_args["reading"] = readings["water"]
+            elif str(merged_args.get("meter_type") or "") == "electric" and readings.get("electric"):
+                merged_args["reading"] = readings["electric"]
+        tool_args = merged_args
     return execute_tool(call["name"], tool_args)
 
 
@@ -1412,6 +1729,9 @@ def _chat_linear(data: Dict[str, Any]) -> Dict[str, Any]:
         return _pending_action_command_response(data, pending_action_command)
     if not prompt:
         return {"reply": "请先输入你想查询的问题。"}
+    meter_fallback = _meter_reading_fallback(data)
+    if meter_fallback:
+        return meter_fallback
 
     context = _prepare_chat_context(data, prompt, history)
     messages = context["messages"]
@@ -1439,7 +1759,13 @@ def _graph_route(state: AIChatGraphState) -> str:
         return "pending_command"
     if not str(state.get("prompt") or "").strip():
         return "empty_prompt"
-    if _should_fallback_contract_create(state.get("data") or {}):
+    data = state.get("data") or {}
+    intent = _detect_intent(data)
+    workflow = str(intent.get("workflow") or "")
+    _trace_state(state, "route", {"intent": intent})
+    if workflow == "meter_reading" and _meter_reading_fallback_args(data):
+        return "meter_reading"
+    if workflow == "contract_create" and _should_fallback_contract_create(data):
         return "contract_form"
     return "normal_chat"
 
@@ -1465,6 +1791,12 @@ def _graph_contract_form_node(state: AIChatGraphState) -> AIChatGraphState:
     intent = _detect_intent(data)
     _trace_state(state, "contract_form", {"intent": intent, "args": _contract_create_args(data)})
     return {"result": _contract_create_form_fallback(data) or _chat_linear(data)}
+
+
+def _graph_meter_reading_node(state: AIChatGraphState) -> AIChatGraphState:
+    data = state.get("data") or {}
+    _trace_state(state, "meter_reading", {"prompt": data.get("prompt"), "session_context": _session_context(data)})
+    return {"result": _meter_reading_fallback(data) or _chat_linear(data)}
 
 
 def _graph_prepare_context_node(state: AIChatGraphState) -> AIChatGraphState:
@@ -1568,6 +1900,7 @@ def _get_chat_graph() -> Any:
     graph.add_node("pending_command", _graph_pending_command_node)
     graph.add_node("empty_prompt", _graph_empty_prompt_node)
     graph.add_node("contract_form", _graph_contract_form_node)
+    graph.add_node("meter_reading", _graph_meter_reading_node)
     graph.add_node("prepare_context", _graph_prepare_context_node)
     graph.add_node("call_model", _graph_call_model_node)
     graph.add_node("run_tools", _graph_run_tools_node)
@@ -1581,12 +1914,14 @@ def _get_chat_graph() -> Any:
             "pending_command": "pending_command",
             "empty_prompt": "empty_prompt",
             "contract_form": "contract_form",
+            "meter_reading": "meter_reading",
             "normal_chat": "prepare_context",
         },
     )
     graph.add_edge("pending_command", END)
     graph.add_edge("empty_prompt", END)
     graph.add_edge("contract_form", END)
+    graph.add_edge("meter_reading", END)
     graph.add_edge("prepare_context", "call_model")
     graph.add_conditional_edges(
         "call_model",

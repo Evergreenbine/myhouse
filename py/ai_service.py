@@ -388,6 +388,43 @@ class AIService:
                     time.sleep(1.5)
         return {"content": "🐱 " + last_error, "tool_calls": None}
 
+    def call_json(self, messages, max_tokens=512, temperature=0.0, timeout=30, model=None):
+        """鍙戦€佺粨鏋勫寲 JSON 璇锋眰锛岀敤浜庤交閲忕殑鎰忓浘璇嗗埆銆?"""
+        model_name = model or self._model()
+        payload = self._build_payload(model_name, messages, max_tokens=max_tokens, temperature=temperature)
+        payload["response_format"] = {"type": "json_object"}
+
+        last_error = ""
+        for attempt in range(3):
+            try:
+                result, err = self._api_request(model_name, payload, timeout)
+                if err:
+                    if "API Key" in err:
+                        return None, err
+                    last_error = err
+                    break
+                choice = result["choices"][0]
+                message = choice.get("message", {})
+                content = message.get("content", "")
+                if isinstance(content, dict):
+                    return content, None
+                text = str(content).strip()
+                if text.startswith("```"):
+                    text = text[3:].strip()
+                    if "\n" in text:
+                        text = text.split("\n", 1)[1].strip()
+                    if text.endswith("```"):
+                        text = text[:-3].strip()
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    return parsed, None
+                return None, "JSON response is not an object"
+            except Exception as e:
+                last_error = "AI JSON call failed on attempt " + str(attempt + 1) + ": " + str(e)[:80]
+                if attempt < 2:
+                    time.sleep(1.5)
+        return None, last_error or "AI JSON call failed"
+
     def analyze_meter_image(self, base64_image, meter_type=""):
         """Return structured meter recognition data for the editable AI card."""
         from local_db import load_app_user

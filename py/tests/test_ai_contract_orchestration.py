@@ -213,6 +213,35 @@ class ContractOrchestrationTests(unittest.TestCase):
         self.assertTrue(first["id"].startswith("contract_create_form_"))
 
 
+    def test_semantic_intent_switches_away_from_stale_contract_form(self):
+        ai_orchestrator._SEMANTIC_INTENT_CACHE.clear()
+        data = {
+            "prompt": "他有合同了吗?",
+            "session_context": {
+                "active_workflow": "contract_create",
+                "contract_draft": {"building_name": "石潭布", "room_number": "302"},
+            },
+        }
+        semantic_result = ({
+            "workflow": "query",
+            "confidence": 0.92,
+            "fields": {"room_number": "302"},
+            "reason": "用户在询问已有合同",
+        }, None)
+        with patch.object(ai_orchestrator.ai_svc, "call_json", return_value=semantic_result) as call_json:
+            intent = ai_orchestrator._detect_intent(data)
+            route = ai_orchestrator._graph_route({
+                "data": data,
+                "prompt": data["prompt"],
+                "pending_action_command": "",
+            })
+
+        self.assertEqual(intent["workflow"], "query")
+        self.assertEqual(intent["source"], "ai_semantic")
+        self.assertEqual(route, "normal_chat")
+        self.assertEqual(call_json.call_count, 1)
+
+
 class ContractPersistenceTests(unittest.TestCase):
     def test_ai_thread_state_and_trace_persist_in_local_db(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -255,6 +284,32 @@ class ContractPersistenceTests(unittest.TestCase):
                 self.assertEqual(db.get_room(room_id)["status"], "rented")
             finally:
                 db.DB_PATH = original_path
+
+    def test_meter_reading_phrase_prefers_meter_workflow_over_contract_context(self):
+        context = {
+            "active_workflow": "contract_create",
+            "contract_draft": {
+                "building_id": 2,
+                "building_name": "石潭布",
+                "room_number": "301",
+                "tenant_name": "阳慕华",
+            },
+        }
+        data = {
+            "prompt": "他6月份的水电是346 9150",
+            "session_context": context,
+        }
+
+        intent = ai_orchestrator._detect_intent(data)
+        route = ai_orchestrator._graph_route({"data": data, "prompt": data["prompt"], "pending_action_command": ""})
+        meter_args = ai_orchestrator._meter_reading_fallback_args(data)
+
+        self.assertEqual(intent["workflow"], "meter_reading")
+        self.assertEqual(route, "meter_reading")
+        self.assertEqual(len(meter_args), 2)
+        self.assertEqual(meter_args[0]["room_number"], "301")
+        self.assertEqual(meter_args[0]["month"], "2026-06")
+        self.assertEqual({item["meter_type"] for item in meter_args}, {"water", "electric"})
 
 
 if __name__ == "__main__":
