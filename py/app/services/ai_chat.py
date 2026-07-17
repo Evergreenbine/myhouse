@@ -1,3 +1,5 @@
+import traceback
+
 import requests
 
 import local_db as db
@@ -72,14 +74,16 @@ def chat(data):
     if data.get("_test"):
         return test_provider(data)
 
+    orchestrator_error = ""
     try:
         from app.services.ai_orchestrator import chat as skill_chat
 
         result = skill_chat(data)
         if result and result.get("reply"):
             return result
-    except Exception:
-        pass
+    except Exception as exc:
+        orchestrator_error = str(exc)
+        traceback.print_exc()
 
     try:
         prompt = data.get("prompt", "")
@@ -117,9 +121,15 @@ def chat(data):
 
         resp = ai_svc.call_with_tools(messages, max_tokens=1024)
         reply = _safe_ai_reply(resp.get("content", ""))
-        return {"reply": reply, "response": {"type": "assistant_message", "content": reply, "pending_actions": [], "bill_images": []}}
+        response = {"type": "assistant_message", "content": reply, "pending_actions": [], "bill_images": []}
+        if orchestrator_error:
+            response["orchestrator_error"] = orchestrator_error
+        return {"reply": reply, "orchestrator_error": orchestrator_error, "response": response}
     except Exception:
-        return {"reply": GUIDED_HELP_REPLY, "response": {"type": "assistant_message", "content": GUIDED_HELP_REPLY, "pending_actions": [], "bill_images": []}}
+        response = {"type": "assistant_message", "content": GUIDED_HELP_REPLY, "pending_actions": [], "bill_images": []}
+        if orchestrator_error:
+            response["orchestrator_error"] = orchestrator_error
+        return {"reply": GUIDED_HELP_REPLY, "orchestrator_error": orchestrator_error, "response": response}
 
 
 def save_chat(data):

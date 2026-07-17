@@ -267,8 +267,8 @@ table a:hover{text-decoration:underline}
 /* === AI Chat V2 === */
 #ai-float-btn { position: fixed; right: 24px; bottom: 50px; width: 52px; height: 52px; border-radius: 50%; background: var(--white); box-shadow: 0 4px 16px rgba(51,112,255,0.2), 0 2px 6px rgba(0,0,0,0.08); cursor: pointer; z-index: 901; display: flex; align-items: center; justify-content: center; transition: all 0.2s; border: 1px solid var(--border-light); }
 #ai-float-btn:hover { transform: scale(1.08); box-shadow: 0 6px 24px rgba(51,112,255,0.25); }
-#ai-float-btn.running { border-color: #A9C2FF; animation: aiFloatWorking 1.5s ease-in-out infinite; }
-@keyframes aiFloatWorking { 0%, 100% { box-shadow: 0 4px 16px rgba(51,112,255,0.2), 0 2px 6px rgba(0,0,0,0.08); } 50% { box-shadow: 0 6px 24px rgba(51,112,255,0.36), 0 2px 8px rgba(0,0,0,0.10); } }
+#ai-float-btn.running { border-color: #6F96FF; animation: aiFloatWorking 1.05s ease-in-out infinite; }
+@keyframes aiFloatWorking { 0%, 100% { transform: scale(1); box-shadow: 0 4px 16px rgba(51,112,255,0.2), 0 2px 6px rgba(0,0,0,0.08), 0 0 0 0 rgba(51,112,255,0.36); } 50% { transform: scale(1.13); box-shadow: 0 12px 34px rgba(51,112,255,0.44), 0 4px 12px rgba(0,0,0,0.14), 0 0 0 10px rgba(51,112,255,0.14); } }
 
 .ai-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 998; }
 .ai-chat-window { position: fixed; inset: 40px; z-index: 999; display: none; background: var(--white); border-radius: 12px; box-shadow: 0 8px 48px rgba(0,0,0,0.18); overflow: hidden; }
@@ -412,12 +412,14 @@ table a:hover{text-decoration:underline}
 .ai-form-action-grid label span { display: inline-flex; align-items: center; gap: 3px; }
 .ai-form-action-grid label b { color: var(--red); font-weight: 700; }
 .ai-form-action-grid label.missing input { border-color: #F0A35E; background: #FFF9F2; }
+.ai-form-action-grid label.missing .app-day-picker.ant-picker { border-color: #F0A35E; background: #FFF9F2; }
 .ai-form-action-grid input { width: 100%; height: 34px; border: 1px solid #DDE6F2; border-radius: 7px; padding: 0 9px; background: var(--white); color: var(--text); font-size: 13px; outline: none; box-sizing: border-box; }
 .ai-form-action-grid input:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(51,112,255,0.12); }
 .ai-form-action-grid .soft-input { height: 34px; border-color: #DDE6F2; border-radius: 7px; padding: 0 9px; font-size: 13px; }
 .ai-form-action-grid .app-day-picker.ant-picker { height: 34px; border-color: #DDE6F2; border-radius: 7px; padding: 0 9px; }
 .ai-form-action-grid .app-day-picker .ant-picker-input { height: 100%; display: flex; align-items: center; }
-.ai-form-action-grid .app-day-picker .ant-picker-input>input { height: 100%; line-height: 34px; font-size: 13px; }
+.ai-form-action-grid .app-day-picker .ant-picker-input>input { height: 100%; line-height: 34px; font-size: 13px; border: 0; border-radius: 0; padding: 0; background: transparent; box-shadow: none; }
+.ai-form-action-grid .app-day-picker .ant-picker-input>input:focus { border-color: transparent; background: transparent; box-shadow: none; }
 .ai-form-action-buttons { display: flex; justify-content: flex-end; margin-top: 13px; }
 .ai-form-action-buttons button { height: 32px; padding: 0 14px; border: 1px solid var(--blue); border-radius: 6px; background: var(--blue); color: #FFF; cursor: pointer; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
 .ai-form-action-buttons button:disabled { opacity: .55; cursor: not-allowed; }
@@ -779,7 +781,9 @@ select.soft-input{appearance:auto;-webkit-appearance:auto;height:38px;padding:0 
 #ai-float-btn:hover{transform:scale(1.08);box-shadow:0 6px 24px rgba(51,112,255,0.3),0 2px 8px rgba(0,0,0,0.12)}
 #ai-float-btn img{width:36px;height:36px;object-fit:contain;border-radius:50%}
 #ai-float-btn .ai-dot{position:absolute;top:4px;right:4px;width:10px;height:10px;background:var(--green);border-radius:50%;border:2px solid var(--white)}
-#ai-float-btn.running{border:1px solid #A9C2FF;animation:aiFloatWorking 1.5s ease-in-out infinite}
+#ai-float-btn.running{border:1px solid #6F96FF;animation:aiFloatWorking 1.05s ease-in-out infinite}
+#ai-float-btn.running .ai-dot{animation:aiDotWorking 1.05s ease-in-out infinite}
+@keyframes aiDotWorking{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(52,199,89,0.35)}50%{transform:scale(1.35);box-shadow:0 0 0 5px rgba(52,199,89,0.12)}}
 .ai-chat-panel{position:fixed;right:24px;bottom:110px;width:440px;height:560px;background:var(--white);border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,0.15);z-index:901;display:none;flex-direction:column;overflow:hidden}
 .ai-chat-panel.open{display:flex}
 .ai-chat-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(135deg,#3370FF,#5B8DEF);color:white;flex-shrink:0}

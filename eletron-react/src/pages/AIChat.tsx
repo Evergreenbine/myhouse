@@ -75,6 +75,10 @@ interface AIFormAction {
   missing?: string[]
 }
 
+interface AISessionContext {
+  [key: string]: any
+}
+
 interface AIImageAttachment {
   id: string
   dataUrl: string
@@ -137,6 +141,7 @@ interface AIMessage {
   pendingActions?: AIPendingAction[]
   suggestedActions?: AISuggestedAction[]
   formActions?: AIFormAction[]
+  sessionContext?: AISessionContext
 }
 
 interface AIChatState {
@@ -158,6 +163,7 @@ interface AIChatState {
   pendingActions: AIPendingAction[]
   pendingActionLoadingId: string
   formValues: Record<string, Record<string, string>>
+  sessionContext: AISessionContext
   meterBuildings: AIMeterBuilding[]
   meterRooms: Record<number, AIMeterRoom[]>
   formTenants: Record<number, AIFormTenant[]>
@@ -199,6 +205,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
     pendingActions: [],
     pendingActionLoadingId: "",
     formValues: {},
+    sessionContext: {},
     meterBuildings: [],
     meterRooms: {},
     formTenants: {},
@@ -211,6 +218,19 @@ export class AIChat extends React.Component<{}, AIChatState> {
   private deletedChatIds = new Set<number>()
   private meterOptionsLoading = false
   private tenantOptionsLoading = new Set<number>()
+  private aiThreadId = "client:" + Date.now().toString(36) + ":" + Math.random().toString(36).slice(2)
+
+  makeThreadId = () => {
+    return "client:" + Date.now().toString(36) + ":" + Math.random().toString(36).slice(2)
+  }
+
+  syncThreadIdFromContext = (context: AISessionContext) => {
+    if (context?.thread_id) this.aiThreadId = String(context.thread_id)
+  }
+
+  componentDidMount() {
+    this.loadHistory({ restoreLatest: true })
+  }
 
   formatMoney = (value: any) => {
     var num = Number(value || 0)
@@ -404,7 +424,8 @@ export class AIChat extends React.Component<{}, AIChatState> {
 
   newChat = () => {
     this.skipNextHistoryAutoRestore = true
-    this.setState({ messages: [], convId: 0, pendingActions: [], pendingActionLoadingId: "", attachments: [], attachmentPanelOpen: false, attachmentDragActive: false })
+    this.aiThreadId = this.makeThreadId()
+    this.setState({ messages: [], convId: 0, pendingActions: [], pendingActionLoadingId: "", attachments: [], attachmentPanelOpen: false, attachmentDragActive: false, formValues: {}, sessionContext: {} })
     setTimeout(() => this.inputRef.current?.focus(), 50)
   }
 
@@ -414,12 +435,16 @@ export class AIChat extends React.Component<{}, AIChatState> {
       .flatMap(message => message.pendingActions || [])
       .filter(action => !action.status || action.status === "pending" || action.status === "failed")
       .filter((action, index, actions) => actions.findIndex(item => item.id === action.id) === index)
+    var restoredContext = [...restoredMessages].reverse().find(message => message.sessionContext)?.sessionContext || {}
+    this.aiThreadId = restoredContext.thread_id || ("chat:" + String(chat.id || this.makeThreadId()))
     return {
       messages: restoredMessages,
       convId: Number(chat.id || 0),
       sidebarCollapsed: false,
       pendingActions: restoredPending,
       pendingActionLoadingId: "",
+      formValues: {},
+      sessionContext: restoredContext,
     }
   }
 
@@ -499,6 +524,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
       }
       if (this.state.convId === id) {
         this.skipNextHistoryAutoRestore = true
+        this.aiThreadId = this.makeThreadId()
         this.setState({ messages: [], convId: 0, pendingActions: [], pendingActionLoadingId: "", attachments: [], attachmentPanelOpen: false, attachmentDragActive: false, loading: false })
       }
       showToast("已删除")
@@ -509,6 +535,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
     this.runHistoryRemoval(id, async () => {
       await rental("_ai", "archive_chat", { id })
       if (this.state.convId === id) {
+        this.aiThreadId = this.makeThreadId()
         this.setState({ messages: [], convId: 0, pendingActions: [] })
       }
       showToast("已归档")
@@ -558,16 +585,18 @@ export class AIChat extends React.Component<{}, AIChatState> {
     try {
       var res = await api("/api/rental", {
         method: "POST",
-        body: JSON.stringify({ table: "_ai", action: "chat", data: { prompt: input, history: this.state.messages.slice(-10), pending_actions: this.state.pendingActions } })
+        body: JSON.stringify({ table: "_ai", action: "chat", data: { prompt: input, history: this.state.messages.slice(-10), pending_actions: this.state.pendingActions, session_context: { ...this.state.sessionContext, thread_id: this.aiThreadId }, chat_thread_id: this.aiThreadId, conversation_id: this.state.convId || "" } })
       })
       var reply = safeAssistantReply(res?.response?.content || res?.reply)
       var nextPendingActions = res?.response?.pending_actions || res?.pending_actions || []
       var responseBillImages = res?.response?.bill_images || res?.bill_images || []
       var suggestedActions = res?.response?.suggested_actions || res?.suggested_actions || []
       var formActions = res?.response?.form_actions || res?.form_actions || []
-      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions, suggestedActions, formActions }]
+      var sessionContext = res?.response?.session_context || res?.session_context || this.state.sessionContext
+      this.syncThreadIdFromContext(sessionContext)
+      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions, suggestedActions, formActions, sessionContext }]
       if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
-      this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions })
+      this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions, sessionContext })
       this.scrollBottom()
       var title = input.substring(0, 30)
       if (this.state.convId > 0 && this.deletedChatIds.has(this.state.convId)) return
@@ -611,6 +640,9 @@ export class AIChat extends React.Component<{}, AIChatState> {
             pending_actions: pendingActions,
             pending_action_command: command,
             pending_action_id: action.id,
+            session_context: { ...this.state.sessionContext, thread_id: this.aiThreadId },
+            chat_thread_id: this.aiThreadId,
+            conversation_id: this.state.convId || "",
           },
         }),
       })
@@ -618,6 +650,8 @@ export class AIChat extends React.Component<{}, AIChatState> {
       var remainingActions = res?.response?.pending_actions || res?.pending_actions || []
       var responseBillImages = res?.response?.bill_images || res?.bill_images || []
       var actionResult = res?.response?.action_result || res?.action_result || {}
+      var sessionContext = res?.response?.session_context || res?.session_context || this.state.sessionContext
+      this.syncThreadIdFromContext(sessionContext)
       var actionRemains = remainingActions.some((item: AIPendingAction) => item.id === action.id)
       var actionSucceeded = typeof actionResult.success === "boolean" ? actionResult.success : !actionRemains
       var actionStatus: AIPendingAction["status"] = actionSucceeded ? (command === "cancel" ? "cancelled" : "confirmed") : "failed"
@@ -631,6 +665,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
         }
         return {
           ...message,
+          sessionContext,
           billImages: responseBillImages.length > 0 ? [...(message.billImages || []), ...responseBillImages] : message.billImages,
           pendingActions: message.pendingActions?.map(item => item.id === action.id ? {
             ...item,
@@ -646,7 +681,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
         return !wasLegacyDuplicate || stillContainsAction
       })
       var messages = updatedMessages
-      this.setState({ messages, loading: false, pendingActionLoadingId: "", pendingActions: remainingActions })
+      this.setState({ messages, loading: false, pendingActionLoadingId: "", pendingActions: remainingActions, sessionContext })
       await this.persistMessages(messages, action.label || "AI 操作")
     } catch {
       if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
@@ -778,7 +813,8 @@ export class AIChat extends React.Component<{}, AIChatState> {
   }
 
   getFormKey = (form: AIFormAction, index: number) => {
-    return form.id || form.type + "_" + index
+    var initialValues = JSON.stringify(form.values || {})
+    return (form.id || form.type + "_" + index) + "_" + initialValues
   }
 
   getFormValues = (form: AIFormAction, index: number) => {
@@ -786,6 +822,9 @@ export class AIChat extends React.Component<{}, AIChatState> {
     var stored = this.state.formValues[key]
     if (stored) return stored
     var values: Record<string, string> = {}
+    Object.entries(form.values || {}).forEach(([name, value]) => {
+      values[name] = value === undefined || value === null ? "" : String(value)
+    })
     ;(form.fields || []).forEach(field => {
       var value = form.values?.[field.name]
       values[field.name] = value === undefined || value === null ? "" : String(value)
@@ -959,7 +998,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
                     <span>{field.label}{field.required && <b>*</b>}</span>
                     {form.type === "create_contract" && field.name === "building_name" ? (
                       <Select
-                        value={values.building_id || values.building_name || ""}
+                        value={selectedBuilding ? String(selectedBuilding.id) : values.building_id || values.building_name || ""}
                         placeholder={field.placeholder || "选择楼栋"}
                         options={this.state.meterBuildings.map(building => ({ value: String(building.id), label: building.name }))}
                         onChange={value => this.updateFormBuilding(form, index, value)}
@@ -1332,6 +1371,9 @@ export class AIChat extends React.Component<{}, AIChatState> {
             prompt: chatPrompt,
             history: this.state.messages.slice(-10),
             pending_actions: this.state.pendingActions,
+            session_context: { ...this.state.sessionContext, thread_id: this.aiThreadId },
+            chat_thread_id: this.aiThreadId,
+            conversation_id: this.state.convId || "",
             uploaded_images: attachments.map((item, index) => ({
               image_index: index,
               image: item.dataUrl,
@@ -1355,9 +1397,11 @@ export class AIChat extends React.Component<{}, AIChatState> {
       var responseBillImages = res?.response?.bill_images || res?.bill_images || []
       var suggestedActions = res?.response?.suggested_actions || res?.suggested_actions || []
       var formActions = res?.response?.form_actions || res?.form_actions || []
-      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions, suggestedActions, formActions }]
+      var sessionContext = res?.response?.session_context || res?.session_context || this.state.sessionContext
+      this.syncThreadIdFromContext(sessionContext)
+      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions, suggestedActions, formActions, sessionContext }]
       if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
-      this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions })
+      this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions, sessionContext })
       this.scrollBottom()
       var title = input.substring(0, 30) || "图片识别"
       if (this.state.convId > 0 && this.deletedChatIds.has(this.state.convId)) return

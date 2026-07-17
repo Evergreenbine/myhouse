@@ -11,6 +11,7 @@ import hashlib
 import re
 from datetime import date, datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
+from uuid import uuid4
 
 import local_db as db
 
@@ -412,7 +413,7 @@ def _contract_create_form_action(
 ) -> Dict[str, Any]:
     defaults = values or {}
     return {
-        "id": "contract_create_form",
+        "id": "contract_create_form_" + uuid4().hex,
         "type": "create_contract",
         "title": "新建合同",
         "description": message or "请补充合同信息，提交后会生成确认卡片。",
@@ -1386,6 +1387,8 @@ def _normalize_contract_date(value: Any, allow_empty: bool = False) -> tuple[Opt
     text = str(value or "").strip()
     if not text and allow_empty:
         return "", ""
+    if not text:
+        return None, "不能为空"
     text = text.replace("年", "-").replace("月", "-").replace("日", "").replace("/", "-")
     try:
         normalized = datetime.strptime(text[:10], "%Y-%m-%d").date().isoformat()
@@ -1571,6 +1574,21 @@ def contract_create_from_ai(
             "message": building_error,
             "form_action": _contract_create_form_action(form_values, ["building_name"], building_error),
         }
+
+    preview_room = None
+    if _int_or_none(room_id) or form_values["room_number"]:
+        preview_room, _ = _resolve_room_for_contract(room_id, room_number, resolved_building_id)
+        if preview_room:
+            resolved_building_id = _int_or_none(preview_room.get("building_id")) or resolved_building_id
+            resolved_building_name = str(preview_room.get("building_name") or resolved_building_name or "")
+            form_values.update({
+                "building_id": "" if resolved_building_id is None else str(resolved_building_id),
+                "building_name": resolved_building_name,
+                "room_id": "" if preview_room.get("id") is None else str(preview_room.get("id")),
+                "room_number": str(preview_room.get("room_number") or form_values["room_number"]),
+            })
+    elif resolved_building_id:
+        form_values["building_id"] = str(resolved_building_id)
 
     missing_fields = []
     if not _int_or_none(tenant_id) and not form_values["tenant_name"]:

@@ -143,11 +143,11 @@ export function MonthPicker({ value, onChange, ariaLabel, style }: {
         picker="month"
         value={selected}
         format="YYYY年M月"
-        allowClear={false}
+        allowClear
         inputReadOnly
         suffixIcon={null}
         aria-label={ariaLabel || '选择月份'}
-        onChange={date => { if (date) onChange(date.format('YYYY-MM')) }}
+        onChange={date => onChange(date ? date.format('YYYY-MM') : '')}
       />
     </div>
   )
@@ -167,12 +167,12 @@ export function DayPicker({ value, onChange, ariaLabel, style }: {
       className="app-day-picker"
       value={selected}
       format="YYYY年M月D日"
-      allowClear={false}
+      allowClear
       inputReadOnly
       suffixIcon={null}
       style={style}
       aria-label={ariaLabel || '选择日期'}
-      onChange={date => { if (date) onChange(date.format('YYYY-MM-DD')) }}
+      onChange={date => onChange(date ? date.format('YYYY-MM-DD') : '')}
     />
   )
 }
@@ -191,6 +191,15 @@ export function DayPicker({ value, onChange, ariaLabel, style }: {
     document.addEventListener("mousedown", handler)
     return () => document.removeEventListener("mousedown", handler)
   }, [])
+
+  useEffect(() => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return
+    const selectedDate = dayjs(value)
+    if (selectedDate.isValid()) {
+      setViewYear(selectedDate.year())
+      setViewMonth(selectedDate.month() + 1)
+    }
+  }, [value, onChange])
 
   const daysInMonth = (y: number, m: number) => new Date(y, m, 0).getDate()
   const firstDayOfWeek = (y: number, m: number) => new Date(y, m - 1, 1).getDay()
@@ -227,6 +236,14 @@ export function DayPicker({ value, onChange, ariaLabel, style }: {
         <span className="date-picker-text" style={displayValue ? {} : {color:"var(--text-third)"}}>
           {displayValue || placeholder || "\u8bf7\u9009\u62e9\u65e5\u671f"}
         </span>
+        {displayValue && (
+          <button
+            type="button"
+            aria-label="清空日期"
+            onClick={e => { e.stopPropagation(); onChange(''); setOpen(false) }}
+            style={{position:'absolute',right:28,top:'50%',transform:'translateY(-50%)',border:'none',background:'transparent',color:'var(--text-third)',cursor:'pointer',fontSize:16,lineHeight:1,padding:0,width:16,height:16}}
+          >×</button>
+        )}
         <span className="date-picker-icon">{String.fromCodePoint(0x1F4C5)}</span>
       </div>
       {open && (

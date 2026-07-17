@@ -28,6 +28,18 @@ def init():
         c.execute("ALTER TABLE chat_history ADD COLUMN archived INTEGER DEFAULT 0")
     except:
         pass
+    c.execute("""CREATE TABLE IF NOT EXISTS ai_thread_state (
+        thread_id TEXT PRIMARY KEY,
+        state TEXT DEFAULT '{}',
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS ai_trace (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        thread_id TEXT DEFAULT '',
+        event TEXT DEFAULT '',
+        payload TEXT DEFAULT '{}',
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    )""")
 
     # AI 知识库表（向量存储用 SQLite 文本，实际用 TF-IDF）
     c.execute("""CREATE TABLE IF NOT EXISTS ai_knowledge (
@@ -274,6 +286,73 @@ def update_chat(conv_id, title, messages):
     c.close()
 
 
+def load_ai_thread_state(thread_id):
+    if not thread_id:
+        return {}
+    c = _conn()
+    row = c.execute("SELECT state FROM ai_thread_state WHERE thread_id=?", (str(thread_id),)).fetchone()
+    c.close()
+    if not row:
+        return {}
+    try:
+        state = json.loads(row["state"] or "{}")
+        return state if isinstance(state, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_ai_thread_state(thread_id, state):
+    if not thread_id:
+        return False
+    payload = json.dumps(state if isinstance(state, dict) else {}, ensure_ascii=False, default=str)
+    c = _conn()
+    c.execute(
+        "INSERT OR REPLACE INTO ai_thread_state (thread_id, state, updated_at) VALUES (?,?,datetime('now','localtime'))",
+        (str(thread_id), payload),
+    )
+    c.commit()
+    c.close()
+    return True
+
+
+def append_ai_trace(thread_id, event, payload=None):
+    c = _conn()
+    c.execute(
+        "INSERT INTO ai_trace (thread_id, event, payload, created_at) VALUES (?,?,?,datetime('now','localtime'))",
+        (
+            str(thread_id or ""),
+            str(event or ""),
+            json.dumps(payload if isinstance(payload, dict) else {}, ensure_ascii=False, default=str),
+        ),
+    )
+    c.commit()
+    c.close()
+    return True
+
+
+def load_ai_trace(thread_id, limit=80):
+    c = _conn()
+    rows = c.execute(
+        "SELECT id, thread_id, event, payload, created_at FROM ai_trace WHERE thread_id=? ORDER BY id DESC LIMIT ?",
+        (str(thread_id or ""), int(limit or 80)),
+    ).fetchall()
+    c.close()
+    items = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except Exception:
+            payload = {}
+        items.append({
+            "id": row["id"],
+            "thread_id": row["thread_id"],
+            "event": row["event"],
+            "payload": payload,
+            "time": row["created_at"],
+        })
+    return list(reversed(items))
+
+
 # ============================================================
 # 租房管理 CRUD
 # ============================================================
@@ -384,6 +463,8 @@ def add_contract(tenant_id, room_id, start_date, end_date='',
         (tenant_id, room_id, start_date, end_date, monthly_rent,
          water_price, electric_price, deposit, contract_file, status,
          water_meter_id, electric_meter_id))
+    if room_id:
+        c.execute("UPDATE rooms SET status=? WHERE id=?", ("rented" if status == "active" else "idle", room_id))
     c.commit(); pk = cur.lastrowid; c.close()
     return pk
 
