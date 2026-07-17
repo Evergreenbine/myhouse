@@ -1,13 +1,141 @@
 # -*- coding: utf-8 -*-
-"""本地 SQLite 数据库 — 存储应用配置、加班理由等"""
+"""本地数据库访问层。
+
+默认使用 SQLite；设置 DB_BACKEND=mysql 或提供 db_config.local.env 后使用 MySQL。
+"""
 import sqlite3
 import os
 import json
+import re
 from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "local.db")
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "db_config.local.env")
+
+
+def _load_env_file(path):
+    values = {}
+    if not os.path.exists(path):
+        return values
+    with open(path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+_LOCAL_DB_CONFIG = _load_env_file(CONFIG_PATH)
+DB_BACKEND = (
+    os.environ.get("DB_BACKEND")
+    or _LOCAL_DB_CONFIG.get("DB_BACKEND")
+    or ("mysql" if _LOCAL_DB_CONFIG.get("MYSQL_HOST") else "sqlite")
+).lower()
+
+
+class _Row(dict):
+    def __init__(self, keys, values):
+        super().__init__(zip(keys, values))
+        self._values = tuple(values)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._values[key]
+        return super().__getitem__(key)
+
+
+class _MySQLCursor:
+    def __init__(self, cursor, owner):
+        self._cursor = cursor
+        self._owner = owner
+
+    @property
+    def lastrowid(self):
+        return self._cursor.lastrowid
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        if row is None:
+            return None
+        keys = [col[0] for col in self._cursor.description or []]
+        return _Row(keys, row)
+
+    def fetchall(self):
+        rows = self._cursor.fetchall()
+        keys = [col[0] for col in self._cursor.description or []]
+        return [_Row(keys, row) for row in rows]
+
+    def __iter__(self):
+        return iter(self.fetchall())
+
+
+class _MySQLConnection:
+    def __init__(self, conn):
+        self._conn = conn
+        self.lastrowid = None
+
+    def execute(self, sql, params=None):
+        translated = _translate_mysql_sql(sql)
+        cursor = self._conn.cursor()
+        if translated is None:
+            return _MySQLCursor(cursor, self)
+        cursor.execute(translated, params or ())
+        self.lastrowid = cursor.lastrowid
+        return _MySQLCursor(cursor, self)
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        self._conn.close()
+
+
+def _translate_mysql_sql(sql):
+    stripped = sql.strip()
+    upper = stripped.upper()
+    if upper.startswith("PRAGMA"):
+        return None
+    sql = re.sub(r"\bINSERT\s+OR\s+REPLACE\s+INTO\b", "REPLACE INTO", sql, flags=re.IGNORECASE)
+    sql = sql.replace("datetime('now','localtime')", "NOW()")
+    sql = sql.replace("date('now')", "CURDATE()")
+    sql = re.sub(r"CAST\(([^)]+?)\s+AS\s+INTEGER\)", r"CAST(\1 AS UNSIGNED)", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"(?<!`)\bkey\b(?!`)", "`key`", sql, flags=re.IGNORECASE)
+    sql = sql.replace("?", "%s")
+    return sql
+
+
+def _mysql_settings():
+    cfg = dict(_LOCAL_DB_CONFIG)
+    for key in ("MYSQL_HOST", "MYSQL_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD"):
+        if os.environ.get(key) is not None:
+            cfg[key] = os.environ[key]
+    return {
+        "host": cfg.get("MYSQL_HOST", "127.0.0.1"),
+        "port": int(cfg.get("MYSQL_PORT", "3306")),
+        "database": cfg.get("MYSQL_DATABASE", "myhouse"),
+        "user": cfg.get("MYSQL_USER", "myhouse"),
+        "password": cfg.get("MYSQL_PASSWORD", ""),
+    }
+
+
+def _mysql_conn():
+    try:
+        import pymysql
+    except ImportError as exc:
+        raise RuntimeError("MySQL 模式需要安装 PyMySQL：pip install PyMySQL") from exc
+    conn = pymysql.connect(
+        charset="utf8mb4",
+        autocommit=False,
+        cursorclass=pymysql.cursors.Cursor,
+        **_mysql_settings(),
+    )
+    return _MySQLConnection(conn)
 
 def _conn():
+    if DB_BACKEND == "mysql":
+        return _mysql_conn()
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     c = sqlite3.connect(DB_PATH)
     c.row_factory = sqlite3.Row
@@ -15,6 +143,14 @@ def _conn():
     return c
 
 def init():
+    if DB_BACKEND == "mysql":
+        c = _conn()
+        try:
+            c.execute("SELECT 1 FROM buildings LIMIT 1")
+        finally:
+            c.close()
+        return
+
     c = _conn()
     
     # 基础设施表

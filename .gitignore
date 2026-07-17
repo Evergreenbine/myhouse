@@ -19,6 +19,7 @@ py/_server*.log
 # User config (contains credentials & personal data)
 py/user_config.json
 py/ai_config.json
+py/db_config.local.env
 py/moods.json
 py/todos.json
 py/achievements.json
