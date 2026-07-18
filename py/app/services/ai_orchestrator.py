@@ -893,6 +893,7 @@ def _extract_contract_create_hint(prompt: str) -> Dict[str, Any]:
         "water_unit_price": r"水费单价\s*([^，,。]+)",
         "electric_unit_price": r"电费单价\s*([^，,。]+)",
         "deposit": r"保证金\s*([^，,。]+)",
+        "other_fee_details": r"其它费用\s*([^。]+)",
     }
     for key, pattern in form_patterns.items():
         match = re.search(pattern, text)
@@ -923,6 +924,18 @@ def _extract_contract_create_hint(prompt: str) -> Dict[str, Any]:
     electric_match = re.search(r"(?:电费(?:单价)?|电)\s*(?:是|为|=|:|：)?\s*(\d+(?:\.\d+)?)\s*(?:元|块)?", text)
     if electric_match and not args.get("electric_unit_price"):
         args["electric_unit_price"] = electric_match.group(1)
+    other_fee_matches = re.findall(
+        r"((?:网|网络|宽带|卫生|管理|物业|停车|清洁|垃圾|公摊|电梯|维修|其它|其他)[\u4e00-\u9fffA-Za-z_-]{0,8}费?)\s*[:：=]?\s*(\d+(?:\.\d+)?)\s*(?:元|块)?",
+        text,
+    )
+    ignored_fee_names = {"水", "水费", "电", "电费", "月租", "房租", "租金", "押金", "保证金"}
+    other_fees = [
+        {"name": name if name.endswith("费") else name + "费", "amount": float(amount)}
+        for name, amount in other_fee_matches
+        if name not in ignored_fee_names
+    ]
+    if other_fees and not args.get("other_fee_details"):
+        args["other_fee_details"] = other_fees
     return args
 
 
@@ -1072,6 +1085,7 @@ def _build_system_prompt(
         "上传图片上下文中的类型、读数、表号、楼栋、房间和租客是结构化识别结果；优先使用这些值，不要重新猜测。"
         "涉及图片识别、录入读数或保存账单时，先返回待确认操作，不能因为用户上传图片就直接写入数据库。"
         "当用户继续要求生成账单时，在读数保存成功后调用 bill_create_from_ai。"
+        "生成账单时，合同中约定的其它费用会默认带入账单草稿；用户本轮明确添加、删除、清空或修改其它费用时，以用户本轮要求为准。"
         "用户要求添加网费、卫生费等其他费用时，调用 bill_create_from_ai 并通过 other_fee_details 按项目名称和金额逐项传递，不能只传其他费用汇总。"
         "用户要求删除、去掉或取消网费、卫生费等某项其他费用时，调用 bill_create_from_ai，设置 overwrite=true，并通过 remove_other_fee_names 传入要删除的项目名称；用户要求清空全部其他费用时设置 clear_other_fees=true。"
         "删除或修改某个租户账单的其他费用时，如果用户只说租户姓名，没有说房间号，可以把姓名作为 tenant_name 传给 bill_create_from_ai。"
@@ -1080,10 +1094,10 @@ def _build_system_prompt(
         "如果缺少房间号、月份或水表/电表类型，不要猜测，先请用户补充。"
         "当用户查询合同详情、某租户住哪、某房间当前合同、有效合同列表或合同绑定表具时，优先调用 contract_tenant_get_contract_detail、contract_tenant_list_active_contracts、contract_tenant_get_room_tenant 或 contract_tenant_get_contract_meter_binding。"
         "当用户要求新建、新增、签订或录入租房合同时，调用 contract_create_from_ai；即使缺少租户、房间、合同开始日期或月租，也要调用该工具返回表单卡片，不要只用文字追问。"
-        "新建合同表单要尽量带出用户已提供的信息，例如楼栋名称传 building_name、房间号传 room_number、租客姓名传 tenant_name、已说出的月租/押金/水电单价也要传入。"
+        "新建合同表单要尽量带出用户已提供的信息，例如楼栋名称传 building_name、房间号传 room_number、租客姓名传 tenant_name、已说出的月租/押金/水电单价/其它费用也要传入。"
         "业务会话上下文中的楼栋、房间只用于承接省略表达；用户本轮明确说出的业务意图和楼栋房间永远优先。"
         "用户说先做、改做或录入水电表时，应切换到抄表流程，不能因为此前正在新建合同而继续生成合同表单。"
-        "当用户要求修改现有合同的月租、水电单价、保证金、合同日期或水电表绑定时，调用 contract_update_from_ai。"
+        "当用户要求修改现有合同的月租、水电单价、保证金、合同日期、水电表绑定或合同约定其它费用时，调用 contract_update_from_ai；其它费用通过 other_fee_details 按项目名称和金额逐项传递。"
         "合同结束日期可以改成空值；合同开始日期不能为空，修改开始日期时必须提供具体的 YYYY-MM-DD 日期。"
         "用户只说租户姓名时，可以把姓名作为 tenant_name 传给合同查询和合同修改工具；如果匹配到多个合同，要让用户补充楼栋或房间。"
         "合同新建和合同修改都必须先返回待确认操作；如果同一房间号存在于多个楼栋，要先请用户明确楼栋。"

@@ -7,7 +7,7 @@ import Zoom from 'react-medium-image-zoom'
 import html2canvas from 'html2canvas'
 import { formatChineseMoney } from '../utils/money'
 
-interface Contract { id: number; tenant_name: string; tenant_id: number; room_number: string; room_id: number; monthly_rent: number; water_unit_price: number; electric_unit_price: number; water_meter_id: number | null; electric_meter_id: number | null; building_id: number; building_name: string; status?: string }
+interface Contract { id: number; tenant_name: string; tenant_id: number; room_number: string; room_id: number; monthly_rent: number; water_unit_price: number; electric_unit_price: number; water_meter_id: number | null; electric_meter_id: number | null; building_id: number; building_name: string; status?: string; other_fee_details?: string }
 interface Bill { id: number; contract_id: number; total_amount: number; status: string; water_fee: number; electric_fee: number; other_fee: number; other_fee_details?: string; remark?: string; water_current_reading: number; water_last_reading: number; electric_current_reading: number; electric_last_reading: number; water_photo: string; electric_photo: string }
 interface MeterReading { id: number; meter_no: string; room_number: string; reading: number | null; previous_reading: number; usage: number | null; photo: string; status: string }
 interface Building { id: number; name: string; rent_day: number }
@@ -177,9 +177,9 @@ export class RentPlanPage extends React.Component<{}, State> {
     amount,
   })
 
-  parseOtherFeeItems = (bill?: Bill): OtherFeeItem[] => {
+  parseOtherFeeItems = (source?: { other_fee_details?: string; other_fee?: number | string }): OtherFeeItem[] => {
     try {
-      const parsed = JSON.parse(bill?.other_fee_details || '[]')
+      const parsed = JSON.parse(source?.other_fee_details || '[]')
       if (Array.isArray(parsed) && parsed.length > 0) {
         const items = parsed
           .map((item: any) => ({
@@ -193,7 +193,7 @@ export class RentPlanPage extends React.Component<{}, State> {
     } catch {
       // 兼容尚未保存明细的旧账单，继续使用汇总金额回填。
     }
-    const legacyAmount = Number(bill?.other_fee || 0)
+    const legacyAmount = Number(source?.other_fee || 0)
     if (legacyAmount > 0) return [this.createOtherFeeItem('其他费用', String(legacyAmount))]
     return [this.createOtherFeeItem()]
   }
@@ -249,7 +249,7 @@ export class RentPlanPage extends React.Component<{}, State> {
       eCurr: em?.reading != null ? String(em.reading) : '',
       wPhoto: wm?.photo || bill?.water_photo || '',
       ePhoto: em?.photo || bill?.electric_photo || '',
-      otherFees: this.parseOtherFeeItems(bill),
+      otherFees: this.parseOtherFeeItems(bill || contract),
     })
   }
 

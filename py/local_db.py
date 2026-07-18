@@ -333,6 +333,11 @@ def init():
         c = _conn()
         try:
             c.execute("SELECT 1 FROM buildings LIMIT 1")
+            try:
+                c.execute("ALTER TABLE contracts ADD COLUMN other_fee_details TEXT")
+            except Exception:
+                pass
+            c.commit()
         finally:
             c.close()
         return
@@ -446,10 +451,14 @@ def init():
         water_unit_price REAL DEFAULT 0,
         electric_unit_price REAL DEFAULT 0,
         deposit REAL DEFAULT 0, contract_file TEXT DEFAULT '',
+        other_fee_details TEXT DEFAULT '[]',
         water_meter_id INTEGER, electric_meter_id INTEGER,
         status TEXT DEFAULT 'active',
         created_at TEXT DEFAULT (datetime('now','localtime'))
     )""")
+    try:
+        c.execute("ALTER TABLE contracts ADD COLUMN other_fee_details TEXT DEFAULT '[]'")
+    except: pass
     try:
         c.execute("ALTER TABLE contracts ADD COLUMN water_meter_id INTEGER")
     except: pass
@@ -785,16 +794,17 @@ def set_tenant_status(tid, status):
 def add_contract(tenant_id, room_id, start_date, end_date='',
                  monthly_rent=0, water_price=0, electric_price=0,
                  deposit=0, contract_file='', status='active',
-                 water_meter_id=None, electric_meter_id=None):
+                 water_meter_id=None, electric_meter_id=None,
+                 other_fee_details='[]'):
     c = _conn()
     cur = c.execute("""INSERT INTO contracts
         (tenant_id,room_id,start_date,end_date,monthly_rent,
          water_unit_price,electric_unit_price,deposit,contract_file,status,
-         water_meter_id,electric_meter_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+         water_meter_id,electric_meter_id,other_fee_details)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (tenant_id, room_id, start_date, end_date, monthly_rent,
          water_price, electric_price, deposit, contract_file, status,
-         water_meter_id, electric_meter_id))
+         water_meter_id, electric_meter_id, other_fee_details or '[]'))
     if room_id:
         c.execute("UPDATE rooms SET status=? WHERE id=?", ("rented" if status == "active" else "idle", room_id))
     c.commit(); pk = cur.lastrowid; c.close()
@@ -839,14 +849,15 @@ def get_contract(cid):
 def update_contract(cid, tenant_id, room_id, start_date, end_date='',
                     monthly_rent=0, water_price=0, electric_price=0,
                     deposit=0, contract_file='', status='active',
-                    water_meter_id=None, electric_meter_id=None):
+                    water_meter_id=None, electric_meter_id=None,
+                    other_fee_details='[]'):
     c = _conn()
     c.execute("""UPDATE contracts SET tenant_id=?,room_id=?,start_date=?,end_date=?,
         monthly_rent=?,water_unit_price=?,electric_unit_price=?,deposit=?,
-        contract_file=?,status=?,water_meter_id=?,electric_meter_id=? WHERE id=?""",
+        contract_file=?,status=?,water_meter_id=?,electric_meter_id=?,other_fee_details=? WHERE id=?""",
         (tenant_id, room_id, start_date, end_date, monthly_rent,
          water_price, electric_price, deposit, contract_file, status,
-         water_meter_id, electric_meter_id, cid))
+         water_meter_id, electric_meter_id, other_fee_details or '[]', cid))
     if room_id:
         c.execute("UPDATE rooms SET status=? WHERE id=?", ("rented" if status == "active" else "idle", room_id))
     c.commit(); c.close()

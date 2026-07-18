@@ -1,4 +1,5 @@
 import os
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -6,7 +7,7 @@ from unittest.mock import patch
 import local_db as db
 from app.services import ai_orchestrator
 from app.services import rental_dispatcher
-from app.services.skill_executor import _contract_create_form_action
+from app.services.skill_executor import _contract_create_form_action, execute_tool
 
 
 BUILDINGS = [
@@ -84,6 +85,24 @@ class ContractOrchestrationTests(unittest.TestCase):
         self.assertEqual(args["water_unit_price"], "4")
         self.assertEqual(args["electric_unit_price"], "1")
         self.assertEqual(args["deposit"], "650")
+
+    def test_contract_create_extracts_other_fee_details(self):
+        context = {
+            "active_workflow": "contract_create",
+            "building_id": 2,
+            "building_name": "石潭布",
+        }
+        with patch.object(ai_orchestrator.db, "get_buildings", return_value=BUILDINGS):
+            args = ai_orchestrator._contract_create_args({
+                "prompt": "301月租650，网费50，卫生费20",
+                "session_context": context,
+            })
+
+        self.assertEqual(args["room_number"], "301")
+        self.assertEqual(args["other_fee_details"], [
+            {"name": "网费", "amount": 50.0},
+            {"name": "卫生费", "amount": 20.0},
+        ])
 
     def test_contract_create_route_enters_graph_form_node(self):
         with patch.object(ai_orchestrator.db, "get_buildings", return_value=BUILDINGS):
@@ -284,6 +303,37 @@ class ContractPersistenceTests(unittest.TestCase):
                 self.assertEqual(db.get_room(room_id)["status"], "rented")
             finally:
                 db.DB_PATH = original_path
+
+    def test_contract_other_fees_default_into_bill_draft(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original_path = db.DB_PATH
+            db.DB_PATH = os.path.join(temp_dir, "local.db")
+            try:
+                db.init()
+                building_id = db.add_building("测试楼栋")
+                room_id = db.add_room(building_id, "201")
+                tenant_id = db.add_tenant("测试租客", building_id=building_id, room_id=str(room_id))
+                other_fees = [{"name": "网费", "amount": 50}, {"name": "卫生费", "amount": 20}]
+                contract_id = db.add_contract(
+                    tenant_id,
+                    room_id,
+                    "2026-07-01",
+                    monthly_rent=800,
+                    other_fee_details=json.dumps(other_fees, ensure_ascii=False),
+                )
+
+                result = execute_tool("bill_generate_draft", {
+                    "contract_id": contract_id,
+                    "month": "2026-07",
+                })
+                draft = result["data"]
+            finally:
+                db.DB_PATH = original_path
+
+        self.assertTrue(draft["success"])
+        self.assertEqual(draft["draft"]["other_fee_details"], other_fees)
+        self.assertEqual(draft["draft"]["other_fee"], 70)
+        self.assertEqual(draft["draft"]["total_amount"], 870)
 
     def test_meter_reading_phrase_prefers_meter_workflow_over_contract_context(self):
         context = {

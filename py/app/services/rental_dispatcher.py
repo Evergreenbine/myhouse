@@ -1,7 +1,16 @@
 import local_db as db
+import json
 from ai_service import ai_svc
 
 from app.services import ai_chat
+
+
+def _json_text(value, default="[]"):
+    if value is None or value == "":
+        return default
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
 
 
 def _contract_payload(data):
@@ -21,6 +30,7 @@ def _contract_payload(data):
         "status": data.get("status", existing.get("status", "active")),
         "water_meter_id": data.get("water_meter_id", existing.get("water_meter_id")),
         "electric_meter_id": data.get("electric_meter_id", existing.get("electric_meter_id")),
+        "other_fee_details": _json_text(data.get("other_fee_details", existing.get("other_fee_details", "[]"))),
     }
 
 
@@ -158,6 +168,7 @@ def dispatch(table, action, data):
                 data.get("status", "active"),
                 data.get("water_meter_id"),
                 data.get("electric_meter_id"),
+                _json_text(data.get("other_fee_details", "[]")),
             )
         if action == "update":
             payload = _contract_payload(data)

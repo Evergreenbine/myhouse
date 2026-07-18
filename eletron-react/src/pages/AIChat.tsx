@@ -949,7 +949,8 @@ export class AIChat extends React.Component<{}, AIChatState> {
         + "租户ID " + (values.tenant_id || "") + "，租户姓名 " + (values.tenant_name || "") + "，"
         + "合同开始日期 " + (values.start_date || "") + "，合同结束日期 " + (values.end_date || "") + "，"
         + "月租 " + (values.monthly_rent || "") + "，水费单价 " + (values.water_unit_price || "") + "，"
-        + "电费单价 " + (values.electric_unit_price || "") + "，保证金 " + (values.deposit || "") + "。"
+        + "电费单价 " + (values.electric_unit_price || "") + "，保证金 " + (values.deposit || "") + "，"
+        + "其它费用 " + (values.other_fee_details || "") + "。"
     }
     Object.keys(values).forEach(key => {
       prompt = prompt.split("{" + key + "}").join(values[key] || "")

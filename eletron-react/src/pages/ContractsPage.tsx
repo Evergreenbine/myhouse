@@ -1,13 +1,16 @@
 import React from 'react'
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { rental } from '../api'
 import { showToast, DatePicker } from '../components/ui'
 import { resolveBuildingId, useUIStore } from '../store'
 
-interface Contract { id: number; tenant_name: string; tenant_id: number; room_number: string; room_id: number; monthly_rent: number; start_date: string; end_date: string; deposit: number; status: string; water_unit_price: number; electric_unit_price: number; water_meter_id: number | null; electric_meter_id: number | null }
+interface Contract { id: number; tenant_name: string; tenant_id: number; room_number: string; room_id: number; monthly_rent: number; start_date: string; end_date: string; deposit: number; status: string; water_unit_price: number; electric_unit_price: number; water_meter_id: number | null; electric_meter_id: number | null; other_fee_details?: string }
 interface Building { id: number; name: string; rent_day: number }
 interface Room { id: number; room_number: string; floor: number }
 interface Tenant { id: number; name: string; room_id: string }
 interface Meter { id: number; meter_no: string; room_number: string }
+interface OtherFeeItem { id: string; name: string; amount: string }
+interface OtherFeeDetail { name: string; amount: number }
 
 interface State {
   contracts: Record<string, Contract[]>
@@ -31,6 +34,7 @@ interface State {
   electricMeterId: string
   electricPrice: string
   deposit: string
+  otherFees: OtherFeeItem[]
   status: string
   // modal data
   modalRooms: Room[]
@@ -46,6 +50,8 @@ interface State {
 }
 
 export class ContractsPage extends React.Component<{}, State> {
+  private otherFeeItemSeq = 0
+
   state: State = {
     contracts: {},
     buildings: [],
@@ -58,11 +64,73 @@ export class ContractsPage extends React.Component<{}, State> {
     roomId: '', tenantId: '', monthlyRent: '', startDate: '', endDate: '', rentDay: '1',
     waterInit: '', waterMeterId: '', waterPrice: '',
     elecInit: '', electricMeterId: '', electricPrice: '',
-    deposit: '', status: 'active',
+    deposit: '', otherFees: [{ id: 'contract-fee-initial', name: '', amount: '' }], status: 'active',
     modalRooms: [], modalTenants: [], modalWaterMeters: [], modalElectricMeters: [],
     roomMenuOpen: false, tenantMenuOpen: false, waterMeterMenuOpen: false, electricMeterMenuOpen: false,
     checkoutConfirm: null,
     checkoutDate: new Date().toISOString().split('T')[0],
+  }
+
+  createOtherFeeItem = (name = '', amount = ''): OtherFeeItem => ({
+    id: `contract-fee-${Date.now()}-${++this.otherFeeItemSeq}`,
+    name,
+    amount,
+  })
+
+  parseOtherFeeDetails = (value?: string): OtherFeeDetail[] => {
+    try {
+      const parsed = JSON.parse(value || '[]')
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed
+          .map((item: any) => ({
+            name: String(item?.name || item?.project_name || '').trim(),
+            amount: Number(item?.amount),
+          }))
+          .filter(item => item.name && Number.isFinite(item.amount) && item.amount > 0)
+      }
+    } catch {}
+    return []
+  }
+
+  parseOtherFeeItems = (value?: string): OtherFeeItem[] => {
+    const details = this.parseOtherFeeDetails(value)
+    if (details.length > 0) {
+      return details.map(item => this.createOtherFeeItem(item.name, String(item.amount)))
+    }
+    return [this.createOtherFeeItem()]
+  }
+
+  addOtherFeeItem = () => {
+    this.setState(state => ({ otherFees: [...state.otherFees, this.createOtherFeeItem()] }))
+  }
+
+  updateOtherFeeItem = (id: string, field: 'name' | 'amount', value: string) => {
+    this.setState(state => ({
+      otherFees: state.otherFees.map(item => item.id === id ? { ...item, [field]: value } : item),
+    }))
+  }
+
+  removeOtherFeeItem = (id: string) => {
+    this.setState(state => {
+      const remaining = state.otherFees.filter(item => item.id !== id)
+      return { otherFees: remaining.length > 0 ? remaining : [this.createOtherFeeItem()] }
+    })
+  }
+
+  getOtherFeeDetails = (): OtherFeeDetail[] => this.state.otherFees
+    .map(item => ({ name: item.name.trim(), amount: Number(item.amount) }))
+    .filter(item => item.name && Number.isFinite(item.amount) && item.amount > 0)
+
+  getOtherFeeAmount = (items = this.state.otherFees) => items.reduce((total, item) => {
+    const amount = Number(item.amount)
+    return total + (Number.isFinite(amount) && amount > 0 ? amount : 0)
+  }, 0)
+
+  formatOtherFeeSummary = (value?: string) => {
+    const items = this.parseOtherFeeDetails(value)
+    if (!items.length) return '-'
+    const total = items.reduce((sum, item) => sum + item.amount, 0)
+    return `${items.length} 项 / ¥${total.toFixed(2)}`
   }
 
   componentDidMount() { this.loadBuildings() }
@@ -154,7 +222,7 @@ export class ContractsPage extends React.Component<{}, State> {
       monthlyRent: '', startDate: '', endDate: '', rentDay: String(bld.rent_day || 1),
       waterInit: '', waterMeterId: '', waterPrice: '',
       elecInit: '', electricMeterId: '', electricPrice: '',
-      deposit: '', status: 'active',
+      deposit: '', otherFees: [this.createOtherFeeItem()], status: 'active',
       modalRooms: rooms || [], modalTenants: tenants || [],
       modalWaterMeters: waterMeters || [], modalElectricMeters: electricMeters || [],
       roomMenuOpen: false, tenantMenuOpen: false, waterMeterMenuOpen: false, electricMeterMenuOpen: false,
@@ -183,7 +251,7 @@ export class ContractsPage extends React.Component<{}, State> {
       rentDay: String(bld.rent_day || 1),
       waterInit: '', waterMeterId: String(c.water_meter_id || ''), waterPrice: String(c.water_unit_price || ''),
       elecInit: '', electricMeterId: String(c.electric_meter_id || ''), electricPrice: String(c.electric_unit_price || ''),
-      deposit: String(c.deposit || ''), status: c.status || 'active',
+      deposit: String(c.deposit || ''), otherFees: this.parseOtherFeeItems(c.other_fee_details), status: c.status || 'active',
       modalRooms: rooms || [], modalTenants: allT,
       modalWaterMeters: waterMeters || [], modalElectricMeters: electricMeters || [],
       roomMenuOpen: false, tenantMenuOpen: false, waterMeterMenuOpen: false, electricMeterMenuOpen: false,
@@ -191,14 +259,25 @@ export class ContractsPage extends React.Component<{}, State> {
   }
 
   save = async () => {
-    const { startDate, roomId, tenantId, monthlyRent, rentDay, deposit, waterMeterId, waterPrice, electricMeterId, electricPrice, editId, curBid } = this.state
+    const { startDate, roomId, tenantId, monthlyRent, rentDay, deposit, waterMeterId, waterPrice, electricMeterId, electricPrice, editId, curBid, otherFees } = this.state
     if (!startDate) { showToast('请选择合同开始日期'); return }
+    const enteredOtherFees = otherFees.filter(item => item.name.trim() || item.amount.trim())
+    for (const item of enteredOtherFees) {
+      if (!item.name.trim()) { showToast('请填写其它费用的项目名称'); return }
+      const amount = Number(item.amount)
+      if (!item.amount.trim() || !Number.isFinite(amount) || amount <= 0) {
+        showToast(`请输入“${item.name.trim()}”的有效费用`)
+        return
+      }
+    }
+    const otherFeeDetails = this.getOtherFeeDetails()
     const data: any = {
       tenant_id: parseInt(tenantId), room_id: parseInt(roomId),
       start_date: startDate, end_date: this.state.endDate,
       monthly_rent: parseFloat(monthlyRent) || 0, deposit: parseFloat(deposit) || 0,
       water_unit_price: parseFloat(waterPrice) || 0, electric_unit_price: parseFloat(electricPrice) || 0,
       water_meter_id: waterMeterId || null, electric_meter_id: electricMeterId || null,
+      other_fee_details: JSON.stringify(otherFeeDetails),
       rent_day: parseInt(rentDay) || 1,
     }
     if (editId) data.status = this.state.status
@@ -254,7 +333,7 @@ export class ContractsPage extends React.Component<{}, State> {
           ) : (
             <div className="table-wrap">
               <table>
-                <thead><tr><th>租客</th><th>房间</th><th>月租</th><th>合同期</th><th>保证金</th><th className="status-cell">状态</th><th>操作</th></tr></thead>
+                <thead><tr><th>租客</th><th>房间</th><th>月租</th><th>合同期</th><th>保证金</th><th>其它费用</th><th className="status-cell">状态</th><th>操作</th></tr></thead>
                 <tbody>
                   {curContracts.map(c => (
                     <tr key={c.id}>
@@ -263,6 +342,7 @@ export class ContractsPage extends React.Component<{}, State> {
                       <td>¥{Number(c.monthly_rent || 0).toFixed(2)}</td>
                       <td>{(c.start_date || '') + ' ~ ' + (c.end_date || '')}</td>
                       <td>¥{Number(c.deposit || 0).toFixed(2)}</td>
+                      <td>{this.formatOtherFeeSummary(c.other_fee_details)}</td>
                       <td className="status-cell">
                         <span className={'status-dot ' + (c.status === 'active' ? 'rented' : 'idle')}
                           title={c.status === 'active' ? '生效中' : '已退租'} />
@@ -316,7 +396,7 @@ export class ContractsPage extends React.Component<{}, State> {
   }
 
   renderModal() {
-    const { modal, editId, roomId, tenantId, monthlyRent, startDate, endDate, rentDay, waterInit, waterMeterId, waterPrice, elecInit, electricMeterId, electricPrice, deposit, status, modalRooms, modalTenants, modalWaterMeters, modalElectricMeters } = this.state
+    const { modal, editId, roomId, tenantId, monthlyRent, startDate, endDate, rentDay, waterInit, waterMeterId, waterPrice, elecInit, electricMeterId, electricPrice, deposit, otherFees, status, modalRooms, modalTenants, modalWaterMeters, modalElectricMeters } = this.state
     if (!modal) return null
 
     const roomMap: Record<string,string> = {}
@@ -326,6 +406,7 @@ export class ContractsPage extends React.Component<{}, State> {
     const selRoom = modalRooms.find(r => String(r.id) === roomId)
     const selWaterMeter = modalWaterMeters.find(m => String(m.id) === waterMeterId)
     const selElecMeter = modalElectricMeters.find(m => String(m.id) === electricMeterId)
+    const otherFeeAmount = this.getOtherFeeAmount(otherFees)
 
     return (
       <div className="modal-overlay" onClick={() => this.setState({ modal: false })}>
@@ -473,6 +554,32 @@ export class ContractsPage extends React.Component<{}, State> {
                   </div>
                 </div>
               )}
+              <div className="form-group" style={{gridColumn:'1 / -1'}}>
+                <label>其它费用约定</label>
+                <div className="other-fee-editor">
+                  <div className="other-fee-editor-head">
+                    <span>项目名称</span>
+                    <span>费用（元）</span>
+                    <span>操作</span>
+                  </div>
+                  {otherFees.map(item => (
+                    <div className="other-fee-editor-row" key={item.id}>
+                      <input type="text" value={item.name} placeholder="如：网费、卫生费"
+                        onChange={e => this.updateOtherFeeItem(item.id, 'name', e.target.value)} />
+                      <input type="number" min="0" step="0.01" value={item.amount} placeholder="0.00"
+                        onChange={e => this.updateOtherFeeItem(item.id, 'amount', e.target.value)} />
+                      <button type="button" className="other-fee-delete" title="删除项目" aria-label="删除费用项目"
+                        onClick={() => this.removeOtherFeeItem(item.id)}><DeleteOutlined /></button>
+                    </div>
+                  ))}
+                  <div className="other-fee-editor-footer">
+                    <span>小计：<strong>¥{otherFeeAmount.toFixed(2)}</strong></span>
+                    <button type="button" className="btn btn-sm btn-outline other-fee-add" onClick={this.addOtherFeeItem}>
+                      <PlusOutlined /> 添加项目
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
             <div className="modal-actions">
               <button className="btn btn-outline" onClick={() => this.setState({ modal: false })}>取消</button>

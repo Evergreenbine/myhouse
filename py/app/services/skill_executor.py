@@ -44,6 +44,7 @@ CONTRACT_UPDATE_LABELS = {
     "deposit": "保证金",
     "water_meter_id": "水表绑定",
     "electric_meter_id": "电表绑定",
+    "other_fee_details": "其它费用",
 }
 
 
@@ -79,9 +80,16 @@ def _normalize_other_fee_details(value: Any, fallback_amount: Any = 0) -> List[D
     parsed = value
     if isinstance(value, str):
         try:
-            parsed = json.loads(value) if value.strip() else []
+            stripped = value.strip()
+            parsed = json.loads(stripped) if stripped.startswith(("[", "{")) else stripped
         except Exception:
-            parsed = []
+            parsed = value.strip()
+    if isinstance(parsed, dict):
+        parsed = [parsed]
+    if isinstance(parsed, str):
+        text = parsed.strip()
+        pairs = re.findall(r"([\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z_-]{0,12})\s*(?:费|费用)?\s*[:：=]?\s*(\d+(?:\.\d+)?)", text)
+        parsed = [{"name": name if name.endswith("费") else name + "费", "amount": amount} for name, amount in pairs]
     if not isinstance(parsed, list):
         parsed = []
 
@@ -98,6 +106,21 @@ def _normalize_other_fee_details(value: Any, fallback_amount: Any = 0) -> List[D
     if not details and fallback > 0:
         details.append({"name": "其他费用", "amount": fallback})
     return details
+
+
+def _other_fee_details_text(value: Any) -> str:
+    details = _normalize_other_fee_details(value)
+    if not details:
+        return "无"
+    return "、".join(f"{item['name']} ¥{_money(item['amount'])}" for item in details)
+
+
+def _contract_other_fee_details(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return _normalize_other_fee_details(contract.get("other_fee_details"))
+
+
+def _contract_other_fee_total(contract: Dict[str, Any]) -> float:
+    return round(sum(_num(item.get("amount")) for item in _contract_other_fee_details(contract)), 2)
 
 
 def _normalize_other_fee_names(value: Any) -> List[str]:
@@ -422,7 +445,8 @@ def _contract_create_form_action(
             "请根据以下表单内容新建合同："
             "楼栋名称 {building_name}，房间号 {room_number}，租户姓名 {tenant_name}，"
             "合同开始日期 {start_date}，合同结束日期 {end_date}，月租 {monthly_rent}，"
-            "水费单价 {water_unit_price}，电费单价 {electric_unit_price}，保证金 {deposit}。"
+            "水费单价 {water_unit_price}，电费单价 {electric_unit_price}，保证金 {deposit}，"
+            "其它费用 {other_fee_details}。"
         ),
         "values": defaults,
         "missing": missing or [],
@@ -436,6 +460,7 @@ def _contract_create_form_action(
             {"name": "water_unit_price", "label": "水费单价", "type": "number", "required": False, "placeholder": "默认 0"},
             {"name": "electric_unit_price", "label": "电费单价", "type": "number", "required": False, "placeholder": "默认 0"},
             {"name": "deposit", "label": "保证金", "type": "number", "required": False, "placeholder": "默认 0"},
+            {"name": "other_fee_details", "label": "其它费用", "type": "text", "required": False, "placeholder": "例如 网费50、卫生费20"},
         ],
     }
 
@@ -448,7 +473,9 @@ def _bill_for_contract(contract_id: Any, month: str) -> Optional[Dict[str, Any]]
 def _rent_plan_row(contract: Dict[str, Any], month: str) -> Dict[str, Any]:
     bill = _bill_for_contract(contract.get("id"), month)
     if not bill:
-        expected = _num(contract.get("monthly_rent"))
+        contract_other_fees = _contract_other_fee_details(contract)
+        contract_other_total = round(sum(_num(item.get("amount")) for item in contract_other_fees), 2)
+        expected = round(_num(contract.get("monthly_rent")) + contract_other_total, 2)
         return {
             "building": contract.get("building_name", ""),
             "room_number": contract.get("room_number", ""),
@@ -468,7 +495,8 @@ def _rent_plan_row(contract: Dict[str, Any], month: str) -> Dict[str, Any]:
                 "rent": _num(contract.get("monthly_rent")),
                 "water_fee": 0.0,
                 "electric_fee": 0.0,
-                "other_fee": 0.0,
+                "other_fee": contract_other_total,
+                "other_fee_details": contract_other_fees,
             },
         }
 
@@ -499,6 +527,10 @@ def _rent_plan_row(contract: Dict[str, Any], month: str) -> Dict[str, Any]:
             "water_fee": _num(bill.get("water_fee")),
             "electric_fee": _num(bill.get("electric_fee")),
             "other_fee": _num(bill.get("other_fee")),
+            "other_fee_details": _normalize_other_fee_details(
+                bill.get("other_fee_details"),
+                bill.get("other_fee"),
+            ),
         },
     }
 
@@ -899,7 +931,9 @@ def bill_generate_draft(
     rent = _num(contract.get("monthly_rent"))
     water_fee = round(_num(water_usage) * _num(contract.get("water_unit_price")), 2) if water_usage is not None else 0.0
     electric_fee = round(_num(electric_usage) * _num(contract.get("electric_unit_price")), 2) if electric_usage is not None else 0.0
-    total = round(rent + water_fee + electric_fee, 2)
+    other_fee_details = _contract_other_fee_details(contract)
+    other_fee = round(sum(_num(item.get("amount")) for item in other_fee_details), 2)
+    total = round(rent + water_fee + electric_fee + other_fee, 2)
 
     return {
         "success": True,
@@ -921,8 +955,8 @@ def bill_generate_draft(
             "electric_usage": electric_usage,
             "electric_fee": electric_fee,
             "electric_photo": electric.get("photo", "") if electric else "",
-            "other_fee": 0.0,
-            "other_fee_details": [],
+            "other_fee": other_fee,
+            "other_fee_details": other_fee_details,
             "total_amount": total,
         },
         "missing": missing,
@@ -1410,6 +1444,8 @@ def _contract_change_text(field: str, value: Any) -> str:
         return "¥" + _money(value)
     if field in {"water_meter_id", "electric_meter_id"}:
         return _meter_binding_text(value)
+    if field == "other_fee_details":
+        return _other_fee_details_text(value)
     return str(value or "未填写")
 
 
@@ -1444,9 +1480,11 @@ def _validate_contract_changes(
             if _int_or_none(meter.get("room_id")) != _int_or_none(contract.get("room_id")):
                 return None, CONTRACT_UPDATE_LABELS[field] + "不属于该合同房间"
             changes[field] = mid
+        elif field == "other_fee_details":
+            changes[field] = _normalize_other_fee_details(raw)
 
     if not changes:
-        return None, "请说明要修改月租、水电单价、押金、合同日期或表具绑定中的哪一项"
+        return None, "请说明要修改月租、水电单价、押金、合同日期、表具绑定或其它费用中的哪一项"
 
     start_date = str(changes.get("start_date", contract.get("start_date") or ""))
     end_date = str(changes.get("end_date", contract.get("end_date") or ""))
@@ -1470,6 +1508,7 @@ def contract_update_from_ai(
     deposit: Any = _UNSET,
     water_meter_id: Any = _UNSET,
     electric_meter_id: Any = _UNSET,
+    other_fee_details: Any = _UNSET,
 ) -> Dict[str, Any]:
     contract, error = _resolve_contract_for_update(contract_id, room_number, building_id, tenant_name)
     if not contract:
@@ -1484,6 +1523,7 @@ def contract_update_from_ai(
         "deposit": deposit,
         "water_meter_id": water_meter_id,
         "electric_meter_id": electric_meter_id,
+        "other_fee_details": other_fee_details,
     }
     requested = {key: value for key, value in supplied.items() if value is not _UNSET}
     changes, error = _validate_contract_changes(contract, requested)
@@ -1496,6 +1536,8 @@ def contract_update_from_ai(
         before = contract.get(field)
         if field in {"monthly_rent", "water_unit_price", "electric_unit_price", "deposit"}:
             unchanged = abs(_num(before) - _num(after)) < 0.0001
+        elif field == "other_fee_details":
+            unchanged = _normalize_other_fee_details(before) == _normalize_other_fee_details(after)
         else:
             unchanged = str(before or "") == str(after or "")
         if unchanged:
@@ -1554,6 +1596,7 @@ def contract_create_from_ai(
     deposit: Any = 0,
     water_meter_id: Any = None,
     electric_meter_id: Any = None,
+    other_fee_details: Any = None,
 ) -> Dict[str, Any]:
     resolved_building_id, resolved_building_name, building_error = _resolve_building_for_contract(building_id, building_name)
     form_values = {
@@ -1566,6 +1609,7 @@ def contract_create_from_ai(
         "water_unit_price": "" if water_unit_price in {None, ""} else water_unit_price,
         "electric_unit_price": "" if electric_unit_price in {None, ""} else electric_unit_price,
         "deposit": "" if deposit in {None, ""} else deposit,
+        "other_fee_details": other_fee_details or "",
     }
     if building_error:
         return {
@@ -1653,6 +1697,7 @@ def contract_create_from_ai(
         return {"success": False, "message": "电费单价应为大于等于 0 的数字"}
     if deposit_amount is None or deposit_amount < 0:
         return {"success": False, "message": "保证金应为大于等于 0 的数字"}
+    normalized_other_fees = _normalize_other_fee_details(other_fee_details)
 
     water_mid, error = _validate_contract_meter(room.get("id"), water_meter_id, "water", "水表")
     if error:
@@ -1672,6 +1717,7 @@ def contract_create_from_ai(
         "deposit": round(deposit_amount, 2),
         "water_meter_id": water_mid,
         "electric_meter_id": electric_mid,
+        "other_fee_details": normalized_other_fees,
     }
     change_items = [
         {"field": "start_date", "label": "合同开始", "before": "未创建", "after": normalized_start},
@@ -1685,6 +1731,8 @@ def contract_create_from_ai(
         change_items.append({"field": "water_meter_id", "label": "水表绑定", "before": "未创建", "after": _contract_change_text("water_meter_id", water_mid)})
     if electric_mid:
         change_items.append({"field": "electric_meter_id", "label": "电表绑定", "before": "未创建", "after": _contract_change_text("electric_meter_id", electric_mid)})
+    if normalized_other_fees:
+        change_items.append({"field": "other_fee_details", "label": "其它费用", "before": "未创建", "after": _contract_change_text("other_fee_details", normalized_other_fees)})
 
     action = _pending_action(
         "create_contract",
@@ -1738,6 +1786,8 @@ def confirm_create_contract(contract: Any = None) -> Dict[str, Any]:
     electric_mid, error = _validate_contract_meter(room.get("id"), contract.get("electric_meter_id"), "electric", "电表")
     if error:
         return {"success": False, "message": error}
+    other_fee_details = _normalize_other_fee_details(contract.get("other_fee_details"))
+    other_fee_details_json = json.dumps(other_fee_details, ensure_ascii=False)
 
     contract_id = db.add_contract(
         tenant.get("id"),
@@ -1752,6 +1802,7 @@ def confirm_create_contract(contract: Any = None) -> Dict[str, Any]:
         "active",
         water_mid,
         electric_mid,
+        other_fee_details_json,
     )
     db.update_tenant(
         tenant.get("id"),
@@ -1798,6 +1849,10 @@ def confirm_update_contract(contract_id: Any, changes: Any = None) -> Dict[str, 
         status=contract.get("status") or "active",
         water_meter_id=normalized.get("water_meter_id", contract.get("water_meter_id")),
         electric_meter_id=normalized.get("electric_meter_id", contract.get("electric_meter_id")),
+        other_fee_details=json.dumps(
+            _normalize_other_fee_details(normalized.get("other_fee_details", contract.get("other_fee_details"))),
+            ensure_ascii=False,
+        ),
     )
     updated = db.get_contract(cid)
     return {
@@ -1823,6 +1878,8 @@ def _contract_summary(contract: Dict[str, Any]) -> Dict[str, Any]:
         "deposit": contract.get("deposit"),
         "water_unit_price": contract.get("water_unit_price"),
         "electric_unit_price": contract.get("electric_unit_price"),
+        "other_fee_details": _contract_other_fee_details(contract),
+        "other_fee_total": _contract_other_fee_total(contract),
         "water_meter_id": contract.get("water_meter_id"),
         "electric_meter_id": contract.get("electric_meter_id"),
         "status": contract.get("status"),
@@ -2209,6 +2266,18 @@ TENANT_PROP = {"type": "string", "description": "租户/租客姓名；用户只
 BILL_ID_PROP = {"type": "integer", "description": "账单 ID"}
 CONTRACT_ID_PROP = {"type": "integer", "description": "合同 ID"}
 METER_TYPE_PROP = {"type": "string", "enum": ["water", "electric"], "description": "水表 water，电表 electric；不传表示全部"}
+OTHER_FEE_DETAILS_PROP = {
+    "type": "array",
+    "description": "其它费用约定明细，例如网费、卫生费；合同中约定后，生成账单时默认带出",
+    "items": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "费用项目名称，例如网费"},
+            "amount": {"type": "number", "description": "该项目每期费用金额"},
+        },
+        "required": ["name", "amount"],
+    },
+}
 
 TOOL_SCHEMAS = [
     _tool_schema("rent_plan_list_month_status", "查询指定月份所有房间的收租进度。", {"month": MONTH_PROP, "building_id": BUILDING_PROP}),
@@ -2285,6 +2354,7 @@ TOOL_SCHEMAS = [
         "deposit": {"type": "number", "description": "新的保证金金额"},
         "water_meter_id": {"type": "integer", "description": "新的水表 ID，必须属于合同房间"},
         "electric_meter_id": {"type": "integer", "description": "新的电表 ID，必须属于合同房间"},
+        "other_fee_details": OTHER_FEE_DETAILS_PROP,
     }),
     _tool_schema("contract_create_from_ai", "准备新建租房合同。按租户和房间定位，返回待确认操作，不直接写库。", {
         "tenant_id": {"type": "integer", "description": "租户 ID；如果只知道姓名，可传 tenant_name"},
@@ -2301,6 +2371,7 @@ TOOL_SCHEMAS = [
         "deposit": {"type": "number", "description": "保证金金额，默认 0"},
         "water_meter_id": {"type": "integer", "description": "绑定水表 ID，可选，必须属于该房间"},
         "electric_meter_id": {"type": "integer", "description": "绑定电表 ID，可选，必须属于该房间"},
+        "other_fee_details": OTHER_FEE_DETAILS_PROP,
     }, ["start_date", "monthly_rent"]),
     _tool_schema("payment_list_paid", "查询今日或本月已收款记录。", {"date_range": {"type": "string", "enum": ["today", "month"], "description": "today 查询今日，month 查询月份"}, "month": MONTH_PROP, "building_id": BUILDING_PROP}),
     _tool_schema("payment_list_pending", "查询指定月份待收款列表。", {"month": MONTH_PROP, "building_id": BUILDING_PROP}),
