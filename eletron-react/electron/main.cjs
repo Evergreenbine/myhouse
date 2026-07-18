@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, clipboard, nativeImage } = require("electron")
+const { app, BrowserWindow, Menu, ipcMain, clipboard, nativeImage } = require("electron")
 const path = require("path")
 
 const DEFAULT_SERVER_URL = "http://39.106.55.190"
@@ -9,12 +9,14 @@ function getAppUrl() {
 }
 
 function createWindow() {
+  const icon = path.join(__dirname, "app.ico")
   const win = new BrowserWindow({
     width: 1280,
     height: 860,
     minWidth: 980,
     minHeight: 680,
     title: "FU的小家",
+    icon,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -34,6 +36,10 @@ ipcMain.handle("clipboard:write-image", async (_event, dataUrl) => {
 })
 
 app.whenReady().then(createWindow)
+
+app.whenReady().then(() => {
+  Menu.setApplicationMenu(null)
+})
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit()
