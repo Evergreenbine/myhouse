@@ -97,8 +97,11 @@ def chat(data):
             ])
 
         data_context = build_rental_ai_context(prompt)
+        profile = db.load_app_user() or {}
+        ai_nickname = str(profile.get("ai_nickname") or "哈基米").replace("\n", " ").replace("\r", " ").strip()[:20] or "哈基米"
+        user_nickname = str(profile.get("user_nickname") or "大王").replace("\n", " ").replace("\r", " ").strip()[:20] or "大王"
         system_prompt = (
-            "你是哈基米助手，名叫'哈基米'，你对用户的称呼是'大王'。"
+            f"你的名字是'{ai_nickname}'，你对用户的称呼是'{user_nickname}'。"
             "请优先根据下面的实时系统数据回答用户问题；不要编造不存在的数据。"
             "如果数据没有录入或上下文没有提供，明确说明缺少数据。"
             "不要展示程序错误、接口错误、工具名称、异常堆栈或内部日志；无法继续时，追问用户正在做什么、涉及的楼栋房间月份和卡住的步骤。"

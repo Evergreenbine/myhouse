@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 from datetime import date
 from typing import Any, Dict, List, Optional, TypedDict
 
@@ -62,6 +63,60 @@ _CHAT_GRAPH = None
 _CHAT_CHECKPOINTER_CONN = None
 _SEMANTIC_INTENT_CACHE: Dict[str, Dict[str, Any]] = {}
 _SEMANTIC_INTENT_CACHE_LIMIT = 64
+_STATUS_LISTENERS: Dict[str, List[Any]] = {}
+_STATUS_LISTENERS_LOCK = threading.Lock()
+
+
+def _status_text(event: str, payload: Optional[Dict[str, Any]] = None) -> str:
+    labels = {
+        "graph_start": "\u6b63\u5728\u7406\u89e3\u4f60\u7684\u95ee\u9898",
+        "route": "\u6b63\u5728\u5224\u65ad\u4e1a\u52a1\u6d41\u7a0b",
+        "pending_command": "\u6b63\u5728\u6267\u884c\u786e\u8ba4\u64cd\u4f5c",
+        "empty_prompt": "\u6b63\u5728\u5904\u7406\u5f85\u786e\u8ba4\u64cd\u4f5c",
+        "contract_form": "\u6b63\u5728\u6574\u7406\u5408\u540c\u4fe1\u606f",
+        "meter_reading": "\u6b63\u5728\u5904\u7406\u6c34\u7535\u8868\u8bfb\u6570",
+        "prepare_context": "\u6b63\u5728\u51c6\u5907\u4e1a\u52a1\u4e0a\u4e0b\u6587",
+        "semantic_intent": "\u6b63\u5728\u8bc6\u522b\u610f\u56fe",
+        "call_model": "\u6b63\u5728\u601d\u8003\u4e0b\u4e00\u6b65",
+        "run_tools": "\u6b63\u5728\u8c03\u7528\u4e1a\u52a1\u5de5\u5177",
+        "finalize": "\u6b63\u5728\u6574\u7406\u56de\u590d",
+        "graph_end": "\u5df2\u5b8c\u6210",
+    }
+    return labels.get(str(event or ""), "\u6b63\u5728\u5904\u7406")
+
+
+def add_status_listener(thread_id: str, listener: Any) -> None:
+    if not thread_id or thread_id == "transient":
+        return
+    with _STATUS_LISTENERS_LOCK:
+        _STATUS_LISTENERS.setdefault(thread_id, []).append(listener)
+
+
+def remove_status_listener(thread_id: str, listener: Any) -> None:
+    if not thread_id:
+        return
+    with _STATUS_LISTENERS_LOCK:
+        listeners = _STATUS_LISTENERS.get(thread_id) or []
+        _STATUS_LISTENERS[thread_id] = [item for item in listeners if item is not listener]
+        if not _STATUS_LISTENERS[thread_id]:
+            _STATUS_LISTENERS.pop(thread_id, None)
+
+
+def _emit_status(thread_id: str, event: str, payload: Optional[Dict[str, Any]] = None) -> None:
+    with _STATUS_LISTENERS_LOCK:
+        listeners = list(_STATUS_LISTENERS.get(thread_id) or [])
+    if not listeners:
+        return
+    item = {
+        "event": event,
+        "text": _status_text(event, payload),
+        "payload": payload or {},
+    }
+    for listener in listeners:
+        try:
+            listener(item)
+        except Exception:
+            pass
 
 
 def _create_chat_checkpointer():
@@ -146,7 +201,7 @@ PENDING_ACTION_TOOLS = [
                 "properties": {
                     "actions": {
                         "type": "array",
-                        "description": "建议方案列表，通常 2 到 4 个。",
+                        "description": "建议方案列表，1 到 4 个；只有一个明确下一步时也要返回。",
                         "items": {
                             "type": "object",
                             "properties": {
@@ -313,8 +368,10 @@ def _hydrate_thread_data(data: Dict[str, Any]) -> Dict[str, Any]:
 def _trace_thread(thread_id: str, event: str, payload: Optional[Dict[str, Any]] = None) -> None:
     if not thread_id or thread_id == "transient":
         return
+    compact_payload = _compact_trace_payload(payload or {})
+    _emit_status(thread_id, event, compact_payload)
     try:
-        db.append_ai_trace(thread_id, event, _compact_trace_payload(payload or {}))
+        db.append_ai_trace(thread_id, event, compact_payload)
     except Exception:
         pass
 
@@ -1054,6 +1111,16 @@ def _extract_tool_call(call: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _assistant_identity() -> tuple[str, str]:
+    config = db.load_app_user() or {}
+
+    def _clean(value: Any, fallback: str) -> str:
+        text = re.sub(r"[\r\n\t]+", " ", str(value or "")).strip()
+        return (text or fallback)[:20]
+
+    return _clean(config.get("ai_nickname"), "哈基米"), _clean(config.get("user_nickname"), "大王")
+
+
 def _build_system_prompt(
     prompt: str,
     skill_context: str,
@@ -1063,8 +1130,10 @@ def _build_system_prompt(
     intent: Optional[Dict[str, Any]] = None,
     tool_plan: Optional[Dict[str, Any]] = None,
 ) -> str:
+    ai_nickname, user_nickname = _assistant_identity()
     return (
-        "你是哈基米助手，名叫“哈基米”，你对用户的称呼是“大王”。"
+        f"你的名字是“{ai_nickname}”，你对用户的称呼是“{user_nickname}”。"
+        f"当需要自称或称呼用户时，始终使用“{ai_nickname}”和“{user_nickname}”。"
         "你需要用中文回答，简洁、准确、可执行。"
         "优先使用工具查询实时业务数据；工具结果比推测更可靠。"
         "不要编造房间、租客、账单、读数、收款记录。"
@@ -1107,7 +1176,7 @@ def _build_system_prompt(
         "账单仍在录入中或待发送、账单已收完、金额超过待收，或房间和楼栋不明确时，不能直接收款，要向用户说明需要先处理或补充什么。"
         "如果存在待确认操作，且用户通过文字表示确认、可以、录入、保存、执行，就调用 ai_confirm_pending_action；界面按钮会通过同一待确认协议直接执行。"
         "如果用户要求取消待确认操作，就调用 ai_cancel_pending_action。"
-        "当你要给用户多个建议、处理方案、下一步选择或“是否继续”的普通选项时，调用 ai_suggest_actions 返回可点击按钮；按钮 label 要短，prompt 要写成点击后可直接执行的完整意图。"
+        "当你要给用户建议、处理方案、下一步选择或询问用户是否继续业务流程时，即使只有一个选项，也必须调用 ai_suggest_actions 返回可点击按钮，不能只在文字末尾询问；按钮 label 要短，prompt 要写成点击后可直接执行的完整意图。"
         "如果某个选择会直接写入、覆盖、确认收款或修改合同，要优先生成待确认操作卡片，不能只给建议按钮。"
         "除 meter_reading_save_from_ai、bill_create_from_ai、contract_create_from_ai、contract_update_from_ai 和 payment_confirm_from_ai 这些待确认工具外，不能声称已经写入、发送账单、确认收款、新建或修改合同、覆盖读数。"
         "保存读数或生成账单后，要根据工具结果明确说明是否成功；如果工具提示需要确认、已有读数或已有账单，要如实提醒用户。"
@@ -1344,6 +1413,29 @@ def _cancel_pending_action(raw_args: Any, data: Dict[str, Any]) -> Dict[str, Any
     }
 
 
+def _pending_action_followup_suggestions(action: Dict[str, Any], action_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if not action_result.get("success") or action.get("type") != "save_meter_reading":
+        return []
+    preview = action.get("preview") if isinstance(action.get("preview"), dict) else {}
+    args = action.get("args") if isinstance(action.get("args"), dict) else {}
+    building = str(preview.get("building_name") or preview.get("building") or args.get("building_name") or "").strip()
+    month = str(preview.get("month") or args.get("month") or "").strip()
+    scope = (building + month).strip()
+    prompt = "\u7ee7\u7eed\u67e5\u770b" + scope + "\u8fd8\u6709\u54ea\u4e9b\u6c34\u7535\u8868\u6ca1\u6709\u8bfb\u6570" if scope else "\u7ee7\u7eed\u67e5\u770b\u672c\u6708\u8fd8\u6709\u54ea\u4e9b\u6c34\u7535\u8868\u6ca1\u6709\u8bfb\u6570"
+    return [
+        {
+            "label": "\u7ee7\u7eed\u5f55\u5165\u4e0b\u4e00\u5757\u8868",
+            "prompt": prompt,
+            "description": "\u56de\u5230\u672a\u8bfb\u6570\u6e05\u5355\uff0c\u63a5\u7740\u5904\u7406\u4e0b\u4e00\u95f4\u623f",
+        },
+        {
+            "label": "\u67e5\u770b\u672a\u8bfb\u8868",
+            "prompt": prompt,
+            "description": "\u5237\u65b0\u5f53\u524d\u672a\u5b8c\u6210\u7684\u6c34\u7535\u8868\u8fdb\u5ea6",
+        },
+    ]
+
+
 def _pending_action_command_response(data: Dict[str, Any], command: str) -> Dict[str, Any]:
     pending_actions = data.get("pending_actions") or []
     action_id = str(data.get("pending_action_id") or "")
@@ -1358,7 +1450,8 @@ def _pending_action_command_response(data: Dict[str, Any], command: str) -> Dict
             "action_result": {"success": False, "message": reply},
             "session_context": session_context,
             "skill_hits": [],
-            "response": {"type": "assistant_message", "content": reply, "pending_actions": pending_actions, "bill_images": [], "action_result": {"success": False, "message": reply}, "session_context": session_context},
+            "suggested_actions": [],
+            "response": {"type": "assistant_message", "content": reply, "pending_actions": pending_actions, "bill_images": [], "suggested_actions": [], "action_result": {"success": False, "message": reply}, "session_context": session_context},
         }
 
     if command == "confirm":
@@ -1384,6 +1477,7 @@ def _pending_action_command_response(data: Dict[str, Any], command: str) -> Dict
     bill_images = _collect_bill_images([tool_result])
     remaining_actions = _merge_pending_actions(pending_actions, [tool_result])
     session_context = _next_session_context(data, [tool_result])
+    suggested_actions = _pending_action_followup_suggestions(action, action_result)
     return {
         "reply": reply,
         "bill_images": bill_images,
@@ -1391,7 +1485,8 @@ def _pending_action_command_response(data: Dict[str, Any], command: str) -> Dict
         "action_result": action_result,
         "session_context": session_context,
         "skill_hits": [],
-        "response": {"type": "assistant_message", "content": reply, "pending_actions": remaining_actions, "bill_images": bill_images, "action_result": action_result, "session_context": session_context},
+        "suggested_actions": suggested_actions,
+        "response": {"type": "assistant_message", "content": reply, "pending_actions": remaining_actions, "bill_images": bill_images, "suggested_actions": suggested_actions, "action_result": action_result, "session_context": session_context},
     }
 
 
@@ -1435,6 +1530,63 @@ def _collect_suggested_actions(tool_results: List[Dict[str, Any]]) -> List[Dict[
                 "description": str(item.get("description") or "").strip(),
             })
     return suggestions
+
+
+def _infer_business_suggested_actions(reply: str) -> List[Dict[str, Any]]:
+    text = str(reply or "").strip()
+    if not text:
+        return []
+    parts = [part.strip() for part in re.split(r"(?<=[。！？?])|\n+", text) if part.strip()]
+    cue_pattern = re.compile(r"要不要|是否|要我|需要我|要现在|现在要|要(?=查看|查询|列出|生成|录入|绑定|发送|提醒|导出|处理|创建|修改|删除|保存|核对|分析)|继续|下一步|可以.{0,12}吗|吗[？?]?$")
+    missing_pattern = re.compile(r"请告诉|请提供|请补充|需要补充|哪个|哪一个|哪间|多少|什么时间|具体日期|具体金额|读数是(?:多少|几)")
+    action_rules = [
+        ("录入读数", re.compile(r"读数|抄表")),
+        ("生成账单图片", re.compile(r"账单图片|收据图片")),
+        ("生成账单", re.compile(r"账单")),
+        ("绑定表具", re.compile(r"绑定.{0,8}(?:水表|电表|表具)|(?:水表|电表|表具).{0,8}绑定")),
+        ("录入收款", re.compile(r"收款|交租|缴费")),
+        ("继续合同操作", re.compile(r"合同|签约|退租")),
+        ("发送账单", re.compile(r"发送|发账单")),
+        ("查看详情", re.compile(r"查看|查询|列出|明细|清单|汇总|统计|分析|核对")),
+        ("提醒租客", re.compile(r"提醒|通知")),
+        ("导出数据", re.compile(r"导出|下载")),
+        ("继续处理", re.compile(r"新增|添加|修改|删除|录入|生成|绑定|发送|创建|覆盖|恢复|保存|处理")),
+    ]
+    for question in reversed(parts):
+        cue_match = cue_pattern.search(question)
+        if not cue_match or missing_pattern.search(question):
+            continue
+        action_scope = question[cue_match.start():]
+        context = (text[-260:] + " " + question).strip()
+        label = ""
+        for candidate, pattern in action_rules:
+            if pattern.search(action_scope):
+                label = candidate
+                break
+        if not label:
+            for candidate, pattern in action_rules:
+                if pattern.search(context):
+                    label = candidate
+                    break
+        if not label:
+            continue
+        action_text = re.sub(
+            r"^[^，。！？?]{0,12}?(?:要不要|是否需要|是否|要我|需要我|要现在|现在要)",
+            "",
+            question,
+        ).strip()
+        action_text = re.sub(r"[吗呢吧。！？?]+$", "", action_text).strip()
+        if not action_text or action_text in {"继续", "继续处理", "下一步"}:
+            prompt = "继续刚才建议的业务操作。"
+        else:
+            prompt = "是的，继续" + action_text + "。"
+        return [{
+            "id": "auto_business_continue",
+            "label": label,
+            "prompt": prompt,
+            "description": "继续刚才的业务流程",
+        }]
+    return []
 
 
 def _collect_form_actions(tool_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1714,6 +1866,8 @@ def _finalize_chat_response(
         reply = (reply.rstrip() + "\n\n账单图片已生成，可在下方预览、复制或保存。").strip()
     if not reply:
         reply = GUIDED_HELP_REPLY
+    if not suggested_actions and not pending_actions and not form_actions:
+        suggested_actions = _infer_business_suggested_actions(reply)
 
     return {
         "reply": reply,

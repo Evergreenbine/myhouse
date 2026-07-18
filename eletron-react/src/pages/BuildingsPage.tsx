@@ -64,7 +64,7 @@ export class BuildingsPage extends React.Component<{}, State> {
 
     return (
       <div>
-        <div className="toolbar">
+        <div className="toolbar toolbar-end">
           <Button type="primary" size="sm" onClick={this.openAdd}>+ 添加楼栋</Button>
         </div>
         <div className="toolbar-divider" />

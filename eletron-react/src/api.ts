@@ -7,15 +7,39 @@ function getDefaultApiBase() {
 
 const defaultApiBase = getDefaultApiBase()
 const API = (import.meta.env.VITE_API_BASE_URL || defaultApiBase).replace(/\/$/, '')
+export const API_BASE = API
+export const AUTH_EXPIRED_EVENT = 'myhouse-auth-expired'
+const AUTH_TOKEN_KEY = 'myhouse_access_token'
 const REQUEST_TIMEOUT_MS = 90000
 const DEBUG_API = new URLSearchParams(window.location.search).has('debugApi')
+
+export function getAuthToken() {
+  return window.localStorage.getItem(AUTH_TOKEN_KEY) || ''
+}
+
+export function setAuthToken(token: string) {
+  if (token) window.localStorage.setItem(AUTH_TOKEN_KEY, token)
+  else window.localStorage.removeItem(AUTH_TOKEN_KEY)
+}
+
+export function clearAuthToken() {
+  window.localStorage.removeItem(AUTH_TOKEN_KEY)
+}
+
+export function getAuthHeaders(): Record<string, string> {
+  var token = getAuthToken()
+  var headers: Record<string, string> = {}
+  if (token) headers.Authorization = 'Bearer ' + token
+  return headers
+}
 
 export async function api(path: string, opts?: RequestInit) {
   const controller = new AbortController()
   const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   try {
-    const headers: Record<string, string> = {}
+    const headers: Record<string, string> = { ...getAuthHeaders() }
     if (opts?.body) headers['Content-Type'] = 'application/json'
+    if (opts?.headers) Object.assign(headers, opts.headers)
 
     const url = API + path
     if (DEBUG_API) console.log('[myhouse api]', url, opts?.method || 'GET')
@@ -31,6 +55,11 @@ export async function api(path: string, opts?: RequestInit) {
       data = text ? JSON.parse(text) : {}
     } catch {
       data = { error: r.ok ? '服务返回格式异常' : `接口请求失败：${r.status}` }
+    }
+    if (!r.ok && !data.error) data.error = data.detail || `接口请求失败：${r.status}`
+    if (r.status === 401 && path !== '/api/user/login' && path !== '/api/user/status') {
+      clearAuthToken()
+      window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT))
     }
     if (DEBUG_API) console.log('[myhouse api result]', url, r.status, data)
     return data

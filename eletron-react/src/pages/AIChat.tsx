@@ -4,8 +4,10 @@ import html2canvas from "html2canvas";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { DayPicker, Select, showToast } from "../components/ui";
-import { rental, api } from "../api";
+import { API_BASE, getAuthHeaders, rental, api } from "../api";
 import { formatChineseMoney } from "../utils/money";
+import { ASSISTANT_PROFILE_EVENT, DEFAULT_AI_AVATAR, DEFAULT_AI_NICKNAME, DEFAULT_USER_NICKNAME, normalizeAssistantProfile } from "../utils/assistantProfile";
+import type { AuthUser } from "./LoginPage";
 
 interface BillReceiptItem {
   name: string
@@ -162,11 +164,16 @@ interface AIChatState {
   activePreviewImage: string
   pendingActions: AIPendingAction[]
   pendingActionLoadingId: string
+  pendingActionLoadingCommand: "" | "confirm" | "cancel"
+  aiStatusText: string
   formValues: Record<string, Record<string, string>>
   sessionContext: AISessionContext
   meterBuildings: AIMeterBuilding[]
   meterRooms: Record<number, AIMeterRoom[]>
   formTenants: Record<number, AIFormTenant[]>
+  aiNickname: string
+  userNickname: string
+  aiAvatar: string
 }
 
 const QUICK_PROMPTS = [
@@ -185,7 +192,50 @@ function safeAssistantReply(value: any, fallback = AI_GUIDED_HELP_REPLY) {
   return text
 }
 
-export class AIChat extends React.Component<{}, AIChatState> {
+async function postSse(path: string, payload: any, onStatus: (text: string) => void) {
+  var response = await fetch(API_BASE + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok || !response.body) throw new Error("stream request failed")
+
+  var reader = response.body.getReader()
+  var decoder = new TextDecoder()
+  var buffer = ""
+  var result: any = null
+
+  var consume = (chunk: string) => {
+    var eventName = "message"
+    var dataLines: string[] = []
+    chunk.split(/\r?\n/).forEach(line => {
+      if (line.startsWith("event:")) eventName = line.slice(6).trim()
+      if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart())
+    })
+    if (!dataLines.length) return
+    var data = JSON.parse(dataLines.join("\n"))
+    if (eventName === "status") {
+      onStatus(String(data.text || ""))
+    } else if (eventName === "result") {
+      result = data
+    } else if (eventName === "error") {
+      throw new Error(String(data.message || "stream error"))
+    }
+  }
+
+  while (true) {
+    var read = await reader.read()
+    if (read.done) break
+    buffer += decoder.decode(read.value, { stream: true })
+    var parts = buffer.split(/\r?\n\r?\n/)
+    buffer = parts.pop() || ""
+    parts.forEach(consume)
+  }
+  if (buffer.trim()) consume(buffer)
+  return result || {}
+}
+
+export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatState> {
   state: AIChatState = {
     open: false,
     messages: [],
@@ -204,11 +254,16 @@ export class AIChat extends React.Component<{}, AIChatState> {
     activePreviewImage: "",
     pendingActions: [],
     pendingActionLoadingId: "",
+    pendingActionLoadingCommand: "",
+    aiStatusText: "",
     formValues: {},
     sessionContext: {},
     meterBuildings: [],
     meterRooms: {},
     formTenants: {},
+    aiNickname: DEFAULT_AI_NICKNAME,
+    userNickname: DEFAULT_USER_NICKNAME,
+    aiAvatar: DEFAULT_AI_AVATAR,
   }
   private bodyRef = React.createRef<HTMLDivElement>()
   private inputRef = React.createRef<HTMLInputElement>()
@@ -228,8 +283,39 @@ export class AIChat extends React.Component<{}, AIChatState> {
     if (context?.thread_id) this.aiThreadId = String(context.thread_id)
   }
 
+  callAIChat = async (data: Record<string, any>) => {
+    var payload = { table: "_ai", action: "chat", data }
+    this.setState({ aiStatusText: "\u6b63\u5728\u5f00\u59cb\u5904\u7406" })
+    try {
+      return await postSse("/api/ai/chat/stream", payload, text => {
+        if (text) this.setState({ aiStatusText: text })
+      })
+    } catch {
+      this.setState({ aiStatusText: "\u6b63\u5728\u67e5\u8be2\u6570\u636e\u5e76\u6574\u7406\u7ed3\u679c" })
+      return api("/api/rental", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      })
+    }
+  }
+
   componentDidMount() {
     this.loadHistory({ restoreLatest: true })
+    this.loadAssistantProfile()
+    window.addEventListener(ASSISTANT_PROFILE_EVENT, this.handleAssistantProfileUpdated as EventListener)
+  }
+
+  componentWillUnmount() {
+    window.removeEventListener(ASSISTANT_PROFILE_EVENT, this.handleAssistantProfileUpdated as EventListener)
+  }
+
+  loadAssistantProfile = async () => {
+    var cfg = await api("/api/user/config") || {}
+    this.setState(normalizeAssistantProfile(cfg))
+  }
+
+  handleAssistantProfileUpdated = (event: CustomEvent) => {
+    this.setState(normalizeAssistantProfile(event.detail || {}))
   }
 
   formatMoney = (value: any) => {
@@ -425,6 +511,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
     this.setState(s => {
       if (!s.open) {
         this.skipNextHistoryAutoRestore = false
+        this.loadAssistantProfile()
         setTimeout(() => { this.inputRef.current?.focus(); this.loadHistory({ restoreLatest: true }) }, 50)
       }
       return { open: !s.open }
@@ -434,7 +521,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
   newChat = () => {
     this.skipNextHistoryAutoRestore = true
     this.aiThreadId = this.makeThreadId()
-    this.setState({ messages: [], convId: 0, pendingActions: [], pendingActionLoadingId: "", attachments: [], attachmentPanelOpen: false, attachmentDragActive: false, formValues: {}, sessionContext: {} })
+    this.setState({ messages: [], convId: 0, pendingActions: [], pendingActionLoadingId: "", pendingActionLoadingCommand: "", attachments: [], attachmentPanelOpen: false, attachmentDragActive: false, formValues: {}, sessionContext: {} })
     setTimeout(() => this.inputRef.current?.focus(), 50)
   }
 
@@ -452,6 +539,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
       sidebarCollapsed: false,
       pendingActions: restoredPending,
       pendingActionLoadingId: "",
+      pendingActionLoadingCommand: "" as const,
       formValues: {},
       sessionContext: restoredContext,
     }
@@ -534,7 +622,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
       if (this.state.convId === id) {
         this.skipNextHistoryAutoRestore = true
         this.aiThreadId = this.makeThreadId()
-        this.setState({ messages: [], convId: 0, pendingActions: [], pendingActionLoadingId: "", attachments: [], attachmentPanelOpen: false, attachmentDragActive: false, loading: false })
+        this.setState({ messages: [], convId: 0, pendingActions: [], pendingActionLoadingId: "", pendingActionLoadingCommand: "", attachments: [], attachmentPanelOpen: false, attachmentDragActive: false, loading: false })
       }
       showToast("已删除")
     })
@@ -589,13 +677,10 @@ export class AIChat extends React.Component<{}, AIChatState> {
     if (this.state.loading || !input) return
     var convIdAtStart = this.state.convId
     var msgs = [...this.state.messages, { role: "user" as const, content: input }]
-    this.setState({ messages: msgs, loading: true })
+    this.setState({ messages: msgs, loading: true, aiStatusText: "\u6b63\u5728\u5f00\u59cb\u5904\u7406" })
     this.scrollBottom()
     try {
-      var res = await api("/api/rental", {
-        method: "POST",
-        body: JSON.stringify({ table: "_ai", action: "chat", data: { prompt: input, history: this.state.messages.slice(-10), pending_actions: this.state.pendingActions, session_context: { ...this.state.sessionContext, thread_id: this.aiThreadId }, chat_thread_id: this.aiThreadId, conversation_id: this.state.convId || "" } })
-      })
+      var res = await this.callAIChat({ prompt: input, history: this.state.messages.slice(-10), pending_actions: this.state.pendingActions, session_context: { ...this.state.sessionContext, thread_id: this.aiThreadId }, chat_thread_id: this.aiThreadId, conversation_id: this.state.convId || "" })
       var reply = safeAssistantReply(res?.response?.content || res?.reply)
       var nextPendingActions = res?.response?.pending_actions || res?.pending_actions || []
       var responseBillImages = res?.response?.bill_images || res?.bill_images || []
@@ -605,7 +690,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
       this.syncThreadIdFromContext(sessionContext)
       msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions, suggestedActions, formActions, sessionContext }]
       if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
-      this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions, sessionContext })
+      this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions, sessionContext, aiStatusText: "" })
       this.scrollBottom()
       var title = input.substring(0, 30)
       if (this.state.convId > 0 && this.deletedChatIds.has(this.state.convId)) return
@@ -617,7 +702,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
     } catch {
       if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
       msgs = [...msgs, { role: "assistant" as const, content: AI_GUIDED_HELP_REPLY }]
-      this.setState({ messages: msgs, loading: false })
+      this.setState({ messages: msgs, loading: false, aiStatusText: "" })
       this.scrollBottom()
     }
   }
@@ -632,11 +717,11 @@ export class AIChat extends React.Component<{}, AIChatState> {
   }
 
   runPendingAction = async (action: AIPendingAction, command: "confirm" | "cancel") => {
-    if (this.state.loading) return
+    if (this.state.loading || this.state.pendingActionLoadingId) return
     var pendingActions = this.state.pendingActions
     if (!pendingActions.some(item => item.id === action.id)) return
     var convIdAtStart = this.state.convId
-    this.setState({ loading: true, pendingActionLoadingId: action.id })
+    this.setState({ pendingActionLoadingId: action.id, pendingActionLoadingCommand: command })
     try {
       var res = await api("/api/rental", {
         method: "POST",
@@ -658,6 +743,8 @@ export class AIChat extends React.Component<{}, AIChatState> {
       var reply = safeAssistantReply(res?.response?.content || res?.reply, command === "cancel" ? "已取消这项操作" : AI_GUIDED_HELP_REPLY)
       var remainingActions = res?.response?.pending_actions || res?.pending_actions || []
       var responseBillImages = res?.response?.bill_images || res?.bill_images || []
+      var suggestedActions = res?.response?.suggested_actions || res?.suggested_actions || []
+      var formActions = res?.response?.form_actions || res?.form_actions || []
       var actionResult = res?.response?.action_result || res?.action_result || {}
       var sessionContext = res?.response?.session_context || res?.session_context || this.state.sessionContext
       this.syncThreadIdFromContext(sessionContext)
@@ -689,8 +776,16 @@ export class AIChat extends React.Component<{}, AIChatState> {
         var stillContainsAction = message.pendingActions?.some(item => item.id === action.id)
         return !wasLegacyDuplicate || stillContainsAction
       })
-      var messages = updatedMessages
-      this.setState({ messages, loading: false, pendingActionLoadingId: "", pendingActions: remainingActions, sessionContext })
+      var followUpPendingActions = remainingActions.filter((item: AIPendingAction) => (
+        item.id && !updatedMessages.some(message => message.pendingActions?.some(existing => existing.id === item.id))
+      ))
+      var shouldAppendFollowUp = actionSucceeded && command === "confirm" && (
+        Boolean(reply) || suggestedActions.length > 0 || formActions.length > 0 || followUpPendingActions.length > 0
+      )
+      var messages = shouldAppendFollowUp
+        ? [...updatedMessages, { role: "assistant" as const, content: reply, suggestedActions, formActions, pendingActions: followUpPendingActions, sessionContext }]
+        : updatedMessages
+      this.setState({ messages, pendingActionLoadingId: "", pendingActionLoadingCommand: "", pendingActions: remainingActions, sessionContext, aiStatusText: "" })
       await this.persistMessages(messages, action.label || "AI 操作")
     } catch {
       if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
@@ -702,9 +797,35 @@ export class AIChat extends React.Component<{}, AIChatState> {
           statusMessage: AI_GUIDED_HELP_REPLY,
         } : item),
       }))
-      this.setState({ messages: fallbackMessages, loading: false, pendingActionLoadingId: "" })
+      this.setState({ messages: fallbackMessages, pendingActionLoadingId: "", pendingActionLoadingCommand: "", aiStatusText: "" })
       await this.persistMessages(fallbackMessages, action.label || "AI 操作")
     }
+  }
+
+  getPendingActionKind = (action: AIPendingAction) => {
+    var preview = action.preview || {}
+    var args = action.args || {}
+    var meterType = String(preview.meter_type || args.meter_type || "").toLowerCase()
+    var raw = JSON.stringify([action.type, action.tool, action.label, preview, args]).toLowerCase()
+    if (action.type === "save_meter_reading" || raw.includes("meter")) {
+      if (meterType.includes("water") || raw.includes("\u6c34")) return "water"
+      if (meterType.includes("electric") || meterType.includes("power") || raw.includes("\u7535")) return "electric"
+      return "meter"
+    }
+    if (raw.includes("contract") || raw.includes("\u5408\u540c")) return "contract"
+    if (raw.includes("bill") || raw.includes("\u8d26\u5355")) return "bill"
+    if (raw.includes("payment") || raw.includes("\u6536\u6b3e")) return "payment"
+    return "default"
+  }
+
+  getPendingActionBadge = (kind: string) => {
+    if (kind === "water") return "\u6c34"
+    if (kind === "electric") return "\u26a1"
+    if (kind === "contract") return "\u5408"
+    if (kind === "bill") return "\u8d26"
+    if (kind === "payment") return "\u6536"
+    if (kind === "meter") return "\u8868"
+    return "\u5f85"
   }
 
   renderPendingAction = (action: AIPendingAction) => {
@@ -735,17 +856,22 @@ export class AIChat extends React.Component<{}, AIChatState> {
     var isPayment = action.type === "record_payment"
     var actionStatus = action.status || "pending"
     var actionFinished = actionStatus === "confirmed" || actionStatus === "cancelled"
+    var actionKind = this.getPendingActionKind(action)
+    var actionBadge = this.getPendingActionBadge(actionKind)
     var pendingTitle = isBill ? "待确认账单" : isCreateContract ? "待确认新建合同" : isContract ? "待确认合同修改" : isPayment ? "待确认收款" : "待确认读数"
     var finishedTitle = isBill ? "账单操作" : isCreateContract ? "合同新建" : isContract ? "合同修改" : isPayment ? "收款确认" : "读数录入"
     var actionTitle = actionFinished ? finishedTitle : pendingTitle
     var confirmText = isBill ? (preview.overwrite ? "确认覆盖" : "确认保存") : isCreateContract ? "确认新建" : isContract ? "确认修改" : isPayment ? "确认收款" : "确认录入"
     var statusText = actionStatus === "confirmed" ? "已确认" : actionStatus === "cancelled" ? "已取消" : actionStatus === "failed" ? "执行失败" : "需要确认"
+    var actionLoading = this.state.pendingActionLoadingId === action.id
+    var confirmLoading = actionLoading && this.state.pendingActionLoadingCommand === "confirm"
+    var cancelLoading = actionLoading && this.state.pendingActionLoadingCommand === "cancel"
     var changeItems = Array.isArray(preview.change_items) ? preview.change_items : []
     var otherFeeDetails = Array.isArray(preview.other_fee_details) ? preview.other_fee_details : []
     return (
-      <div className={'ai-pending-action ' + actionStatus} key={action.id}>
+      <div className={'ai-pending-action ' + actionStatus + ' ai-pending-action-' + actionKind} key={action.id}>
         <div className="ai-pending-action-title">
-          <span>{actionTitle}</span>
+          <span><i className="ai-pending-action-badge">{actionBadge}</i>{actionTitle}</span>
           <em className={'status-' + actionStatus}>{actionStatus === "confirmed" && <CheckOutlined />}{statusText}</em>
         </div>
         <div className="ai-pending-action-label">{action.label}</div>
@@ -780,11 +906,13 @@ export class AIChat extends React.Component<{}, AIChatState> {
         {action.statusMessage && <div className="ai-pending-action-error">{action.statusMessage}</div>}
         {!actionFinished && (
           <div className="ai-pending-action-buttons">
-            <button type="button" className="ai-pending-confirm" onClick={() => this.runPendingAction(action, "confirm")} disabled={this.state.loading}>
-              {this.state.pendingActionLoadingId === action.id ? <LoadingOutlined /> : <CheckOutlined />}{actionStatus === "failed" ? "重新" + confirmText : confirmText}
+            <button type="button" className={"ai-pending-confirm" + (confirmLoading ? " loading" : "")} onClick={() => this.runPendingAction(action, "confirm")} disabled={actionLoading}>
+              <CheckOutlined />{actionStatus === "failed" ? "重新" + confirmText : confirmText}
+              {confirmLoading && <span className="ai-button-loading-mask"><LoadingOutlined /></span>}
             </button>
-            <button type="button" className="ai-pending-cancel" onClick={() => this.runPendingAction(action, "cancel")} disabled={this.state.loading}>
+            <button type="button" className={"ai-pending-cancel" + (cancelLoading ? " loading" : "")} onClick={() => this.runPendingAction(action, "cancel")} disabled={actionLoading}>
               <CloseOutlined />取消
+              {cancelLoading && <span className="ai-button-loading-mask"><LoadingOutlined /></span>}
             </button>
           </div>
         )}
@@ -1362,7 +1490,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
       meterNumber: item.meterNumber,
     }))
     var msgs = [...this.state.messages, { role: "user" as const, content: userMsg, images: messageImages }]
-    this.setState({ messages: msgs, loading: true, attachments: [], attachmentPanelOpen: false, attachmentDragActive: false })
+    this.setState({ messages: msgs, loading: true, attachments: [], attachmentPanelOpen: false, attachmentDragActive: false, aiStatusText: "\u6b63\u5728\u5f00\u59cb\u5904\u7406" })
     this.scrollBottom()
 
     try {
@@ -1372,12 +1500,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
         return "\n[图片" + (index + 1) + " OCR未识别到读数: " + (item.error || "未知错误") + "]"
       }).join("")
       var chatPrompt = input + ocrResult
-      var res = await api("/api/rental", {
-        method: "POST",
-        body: JSON.stringify({
-          table: "_ai",
-          action: "chat",
-          data: {
+      var res = await this.callAIChat({
             prompt: chatPrompt,
             history: this.state.messages.slice(-10),
             pending_actions: this.state.pendingActions,
@@ -1399,8 +1522,6 @@ export class AIChat extends React.Component<{}, AIChatState> {
               tenant_id: item.tenantId,
               tenant_name: item.tenantName,
             })),
-          }
-        })
       })
       var reply = safeAssistantReply(res?.response?.content || res?.reply)
       var nextPendingActions = res?.response?.pending_actions || res?.pending_actions || []
@@ -1411,7 +1532,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
       this.syncThreadIdFromContext(sessionContext)
       msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions, suggestedActions, formActions, sessionContext }]
       if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
-      this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions, sessionContext })
+      this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions, sessionContext, aiStatusText: "" })
       this.scrollBottom()
       var title = input.substring(0, 30) || "图片识别"
       if (this.state.convId > 0 && this.deletedChatIds.has(this.state.convId)) return
@@ -1423,7 +1544,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
     } catch {
       if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
       msgs = [...msgs, { role: "assistant" as const, content: AI_GUIDED_HELP_REPLY }]
-      this.setState({ messages: msgs, loading: false })
+      this.setState({ messages: msgs, loading: false, aiStatusText: "" })
       this.scrollBottom()
     }
   }
@@ -1441,7 +1562,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
     return (
       <>
         <button id="ai-float-btn" className={s.loading && !s.open ? "running" : ""} onClick={this.toggle} title={s.loading && !s.open ? "AI 正在处理" : "AI 助手"}>
-          <span style={{fontSize:24}}><img src="/robot-avatar.jpg" className="ai-bot-avatar" /></span>
+          <span style={{fontSize:24}}><img src={s.aiAvatar} className="ai-bot-avatar" alt={s.aiNickname} /></span>
         </button>
 
         {s.open && (
@@ -1453,9 +1574,6 @@ export class AIChat extends React.Component<{}, AIChatState> {
           <div className={"ai-sidebar" + (s.sidebarCollapsed ? " collapsed" : "")} ref={this.sidebarRef}>
             <div className="ai-sidebar-header">
               <span className="ai-sidebar-title">对话记录</span>
-              <button className="ai-sidebar-collapse" onClick={() => this.setState({ sidebarCollapsed: !s.sidebarCollapsed })} title="收起侧栏">
-                {s.sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              </button>
             </div>
             <div className="ai-sidebar-body">
               <button className="ai-new-chat-btn" onClick={this.newChat}>
@@ -1522,8 +1640,8 @@ export class AIChat extends React.Component<{}, AIChatState> {
             <div className="ai-chat-body-v2" ref={this.bodyRef}>
               {s.messages.length === 0 && (
                   <div className="ai-welcome">
-                  <div className="ai-welcome-icon"><img src="/robot-avatar.jpg" className="ai-bot-avatar" /></div>
-                  <h2>你好，大王，我是哈基米</h2>
+                  <div className="ai-welcome-icon"><img src={s.aiAvatar} className="ai-bot-avatar" alt={s.aiNickname} /></div>
+                  <h2>你好，{s.userNickname}，我是{s.aiNickname}</h2>
                   <p>可以帮你查询租客信息、分析缴费情况、解答租房相关问题</p>
                   <p className="ai-welcome-hint">在下方输入你的问题开始对话</p>
                   <div className="ai-quick-prompts">
@@ -1539,7 +1657,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
                 if (m.role === "user") {
                   return (
                     <div key={i} className="ai-msg-v2 user">
-                      <div className="ai-msg-avatar">👤</div>
+                      <div className="ai-msg-avatar">{this.props.currentUser.avatar ? <img src={this.props.currentUser.avatar} className="ai-bot-avatar" alt={this.props.currentUser.display_name || this.props.currentUser.username} /> : "👤"}</div>
                       <div className="ai-msg-stack">
                         <div className="ai-msg-bubble user-bubble">
                           {m.content && <div>{m.content}</div>}
@@ -1570,7 +1688,7 @@ export class AIChat extends React.Component<{}, AIChatState> {
                 }
                 return (
                   <div key={i} className="ai-msg-v2 bot">
-                    <div className="ai-msg-avatar"><img src="/robot-avatar.jpg" className="ai-bot-avatar" /></div>
+                    <div className="ai-msg-avatar"><img src={s.aiAvatar} className="ai-bot-avatar" alt={s.aiNickname} /></div>
                     <div className="ai-msg-stack">
                       <div className="ai-msg-bubble bot-bubble">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -1592,9 +1710,14 @@ export class AIChat extends React.Component<{}, AIChatState> {
               })}
               {s.loading && !s.pendingActionLoadingId && (
                 <div className="ai-msg-v2 bot">
-                  <div className="ai-msg-avatar"><img src="/robot-avatar.jpg" className="ai-bot-avatar" /></div>
+                  <div className="ai-msg-avatar"><img src={s.aiAvatar} className="ai-bot-avatar" alt={s.aiNickname} /></div>
                   <div className="ai-msg-bubble bot-bubble ai-loading">
-                    <span className="ai-dot-typing" />
+                    <span className="ai-loading-text">{s.aiStatusText || "\u6b63\u5728\u67e5\u8be2\u6570\u636e\u5e76\u6574\u7406\u7ed3\u679c"}</span>
+                    <span className="ai-dot-typing" aria-hidden="true">
+                      <i />
+                      <i />
+                      <i />
+                    </span>
                   </div>
                 </div>
               )}

@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from local_db import init as init_db
 
 from app.routers import health, misc, rental, user
+from app.core import access_auth
 
 
 class Utf8JSONResponse(JSONResponse):
@@ -17,6 +18,7 @@ class Utf8JSONResponse(JSONResponse):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    access_auth.ensure_owner_account()
     yield
 
 
@@ -34,6 +36,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+PUBLIC_API_PATHS = {
+    "/api/status",
+    "/api/user/status",
+    "/api/user/login",
+}
+
+
+@app.middleware("http")
+async def jwt_auth_middleware(request: Request, call_next):
+    path = request.url.path
+    if request.method == "OPTIONS" or not path.startswith("/api/") or path in PUBLIC_API_PATHS:
+        return await call_next(request)
+    account = access_auth.decode_token(access_auth.token_from_headers(request.headers))
+    if not account:
+        return Utf8JSONResponse({"error": "登录已失效，请重新登录"}, status_code=401)
+    request.state.auth_user = account
+    return await call_next(request)
 
 
 app.include_router(health.router)

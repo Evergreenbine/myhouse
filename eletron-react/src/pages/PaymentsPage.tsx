@@ -26,6 +26,31 @@ interface PaymentEditForm {
   remark: string
 }
 
+const paymentSkeletonWidths = ['72%', '48%', '62%', '68%', '58%', '58%', '52%', '76%', '64%']
+
+function PaymentsLoadingTable() {
+  return (
+    <div className="payment-loading-table" aria-busy="true" aria-label="正在加载收款记录">
+      <div className="payment-loading-grid payment-loading-header">
+        {paymentSkeletonWidths.map((width, index) => (
+          <span key={index} className="payment-skeleton payment-skeleton-header" style={{ width }} />
+        ))}
+      </div>
+      {Array.from({ length: 5 }, (_, rowIndex) => (
+        <div className="payment-loading-grid payment-loading-row" key={rowIndex}>
+          {paymentSkeletonWidths.map((width, columnIndex) => (
+            <span
+              key={columnIndex}
+              className="payment-skeleton"
+              style={{ width: `${Math.max(34, Number.parseInt(width) - (rowIndex % 3) * 6)}%` }}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function PaymentsPage() {
   const { planYear, planMonth, selectedBuildingId, setSelectedBuildingId, setPlanYearMonth } = useUIStore()
   const [payments, setPayments] = useState<Payment[]>([])
@@ -166,7 +191,7 @@ export function PaymentsPage() {
         <div className="stat-card"><div>涉及房间</div><div className="stat-val" style={{color:'var(--blue)'}}>{roomCount}间</div></div>
       </div>
 
-      {loading ? <div className="text-sm text-[var(--text-third)] p-8">加载中...</div> :
+      {loading ? <PaymentsLoadingTable /> :
         payments.length === 0 ? <div className="text-center py-20 text-[var(--text-third)]">暂无收款记录</div> :
           <div className="bg-white rounded-lg border border-[var(--border-light)] overflow-hidden">
             <table className="w-full text-sm">

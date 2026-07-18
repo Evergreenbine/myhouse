@@ -144,7 +144,12 @@ def _translate_mysql_sql(sql):
     sql = sql.replace("datetime('now','localtime')", "NOW()")
     sql = sql.replace("date('now')", "CURDATE()")
     sql = re.sub(r"CAST\(([^)]+?)\s+AS\s+INTEGER\)", r"CAST(\1 AS UNSIGNED)", sql, flags=re.IGNORECASE)
-    sql = re.sub(r"(?<!`)\bkey\b(?!`)", "`key`", sql, flags=re.IGNORECASE)
+    sql = re.sub(
+        r"(?<!`)(?<!PRIMARY )(?<!UNIQUE )(?<!FOREIGN )\bkey\b(?!`)",
+        "`key`",
+        sql,
+        flags=re.IGNORECASE,
+    )
     sql = sql.replace("?", "%s")
     return sql
 
@@ -335,6 +340,23 @@ def init():
             c.execute("SELECT 1 FROM buildings LIMIT 1")
             try:
                 c.execute("ALTER TABLE contracts ADD COLUMN other_fee_details TEXT")
+            except Exception:
+                pass
+            c.execute("""CREATE TABLE IF NOT EXISTS family_accounts (
+                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                username VARCHAR(64) NOT NULL UNIQUE,
+                display_name VARCHAR(64) NOT NULL DEFAULT '',
+                password_hash VARCHAR(128) NOT NULL,
+                password_salt VARCHAR(64) NOT NULL,
+                role VARCHAR(20) NOT NULL DEFAULT 'family',
+                is_active TINYINT(1) NOT NULL DEFAULT 1,
+                avatar MEDIUMTEXT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                last_login_at DATETIME NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+            try:
+                c.execute("ALTER TABLE family_accounts ADD COLUMN avatar MEDIUMTEXT NULL")
             except Exception:
                 pass
             c.commit()
@@ -567,6 +589,137 @@ def load_app_user() -> dict:
     rows = c.execute("SELECT key, value FROM app_user").fetchall()
     c.close()
     return {r["key"]: r["value"] for r in rows}
+
+
+# === MySQL 家人账号 ===
+def _require_mysql_accounts():
+    if DB_BACKEND != "mysql":
+        raise RuntimeError("家人账号仅支持 MySQL")
+
+
+def _account_dict(row):
+    if not row:
+        return None
+    item = dict(row)
+    item["is_active"] = bool(item.get("is_active"))
+    return item
+
+
+def count_family_accounts():
+    _require_mysql_accounts()
+    c = _conn()
+    row = c.execute("SELECT COUNT(*) AS total FROM family_accounts").fetchone()
+    c.close()
+    return int(row["total"] if row else 0)
+
+
+def list_family_accounts():
+    _require_mysql_accounts()
+    c = _conn()
+    rows = c.execute(
+        "SELECT id, username, display_name, role, is_active, avatar, created_at, updated_at, last_login_at "
+        "FROM family_accounts ORDER BY CASE WHEN role='owner' THEN 0 ELSE 1 END, id"
+    ).fetchall()
+    c.close()
+    return [_account_dict(row) for row in rows]
+
+
+def get_family_account(account_id):
+    _require_mysql_accounts()
+    c = _conn()
+    row = c.execute("SELECT * FROM family_accounts WHERE id=?", (int(account_id),)).fetchone()
+    c.close()
+    return _account_dict(row)
+
+
+def get_family_account_by_username(username):
+    _require_mysql_accounts()
+    c = _conn()
+    row = c.execute(
+        "SELECT * FROM family_accounts WHERE LOWER(username)=LOWER(?) LIMIT 1",
+        (str(username or "").strip(),),
+    ).fetchone()
+    c.close()
+    return _account_dict(row)
+
+
+def create_family_account(username, display_name, password_hash, password_salt, role="family"):
+    _require_mysql_accounts()
+    c = _conn()
+    cur = c.execute(
+        "INSERT INTO family_accounts (username, display_name, password_hash, password_salt, role, is_active) "
+        "VALUES (?,?,?,?,?,1)",
+        (username, display_name, password_hash, password_salt, role),
+    )
+    c.commit()
+    account_id = cur.lastrowid
+    c.close()
+    return get_family_account(account_id)
+
+
+def update_family_account_profile(account_id, display_name, is_active):
+    _require_mysql_accounts()
+    c = _conn()
+    c.execute(
+        "UPDATE family_accounts SET display_name=?, is_active=?, updated_at=NOW() WHERE id=?",
+        (display_name, 1 if is_active else 0, int(account_id)),
+    )
+    c.commit()
+    c.close()
+    return get_family_account(account_id)
+
+
+def update_family_account_identity(account_id, username, display_name):
+    _require_mysql_accounts()
+    c = _conn()
+    c.execute(
+        "UPDATE family_accounts SET username=?, display_name=?, updated_at=NOW() WHERE id=?",
+        (username, display_name, int(account_id)),
+    )
+    c.commit()
+    c.close()
+    return get_family_account(account_id)
+
+
+def update_family_account_password(account_id, password_hash, password_salt):
+    _require_mysql_accounts()
+    c = _conn()
+    c.execute(
+        "UPDATE family_accounts SET password_hash=?, password_salt=?, updated_at=NOW() WHERE id=?",
+        (password_hash, password_salt, int(account_id)),
+    )
+    c.commit()
+    c.close()
+    return True
+
+
+def update_family_account_avatar(account_id, avatar):
+    _require_mysql_accounts()
+    c = _conn()
+    c.execute(
+        "UPDATE family_accounts SET avatar=?, updated_at=NOW() WHERE id=?",
+        (str(avatar or ""), int(account_id)),
+    )
+    c.commit()
+    c.close()
+    return get_family_account(account_id)
+
+
+def touch_family_account_login(account_id):
+    _require_mysql_accounts()
+    c = _conn()
+    c.execute("UPDATE family_accounts SET last_login_at=NOW() WHERE id=?", (int(account_id),))
+    c.commit()
+    c.close()
+
+
+def delete_family_account(account_id):
+    _require_mysql_accounts()
+    c = _conn()
+    c.execute("DELETE FROM family_accounts WHERE id=?", (int(account_id),))
+    c.commit()
+    c.close()
+    return True
 
 
 
