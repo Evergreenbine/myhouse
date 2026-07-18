@@ -188,7 +188,7 @@ def dispatch(table, action, data):
         if action == "latest":
             return db.get_latest_reading(data.get("meter_id"))
         if action == "monthly":
-            return db.get_monthly_meter_readings(data.get("type", "water"), data.get("building_id"), data.get("month", ""))
+            return db.get_monthly_meter_readings(data.get("type", "water"), data.get("building_id"), data.get("month", ""), data.get("meter_id"))
         if action == "save_monthly":
             return db.save_monthly_meter_reading(data.get("meter_id"), data.get("month", ""), data.get("reading", 0), data.get("photo", ""), data.get("remark", ""))
         if action == "overview":
@@ -196,7 +196,7 @@ def dispatch(table, action, data):
 
     if table == "bills":
         if action == "list":
-            return db.get_bills(data.get("month"), data.get("contract_id"))
+            return db.get_bills(data.get("month"), data.get("contract_id"), data.get("include_photos", False))
         if action == "get":
             return db.get_bill(data.get("id"))
         if action == "add":

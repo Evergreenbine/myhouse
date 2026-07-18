@@ -225,26 +225,16 @@ export class RentPlanPage extends React.Component<{}, State> {
     .filter(item => item.name && Number.isFinite(item.amount) && item.amount > 0)
 
   openDrawer = async (contract: Contract) => {
-    const bill = this.state.bills.find(b => Number(b.contract_id) === Number(contract.id))
+    const billSummary = this.state.bills.find(b => Number(b.contract_id) === Number(contract.id))
 
-    console.log(bill)
-    const [allWater, allElectric, waterMetersList, electricMetersList] = await Promise.all([
-      rental('readings', 'monthly', { type: 'water', month: this.billingMonth }),
-      rental('readings', 'monthly', { type: 'electric', month: this.billingMonth }),
-      rental('meters', 'list', { type: 'water' }),
-      rental('meters', 'list', { type: 'electric' }),
+    const [billDetail, waterRows, electricRows] = await Promise.all([
+      billSummary?.id ? rental('bills', 'get', { id: billSummary.id }) : Promise.resolve(billSummary),
+      contract.water_meter_id ? rental('readings', 'monthly', { type: 'water', month: this.billingMonth, meter_id: contract.water_meter_id }) : Promise.resolve([]),
+      contract.electric_meter_id ? rental('readings', 'monthly', { type: 'electric', month: this.billingMonth, meter_id: contract.electric_meter_id }) : Promise.resolve([]),
     ])
-    var wm = (allWater || []).find((m: any) => Number(m.id) === Number(contract.water_meter_id)) || null
-    var em = (allElectric || []).find((m: any) => Number(m.id) === Number(contract.electric_meter_id)) || null
-    // 如果 readings 里没有（还没有读数记录），从 meters 列表补充基本信息
-    if (!wm && contract.water_meter_id) {
-      const m = (waterMetersList || []).find((x: any) => Number(x.id) === Number(contract.water_meter_id))
-      if (m) wm = { id: m.id, meter_no: m.meter_no, reading: null, previous_reading: m.init_reading || 0, photo: '', usage: null, status: m.status || '' }
-    }
-    if (!em && contract.electric_meter_id) {
-      const m = (electricMetersList || []).find((x: any) => Number(x.id) === Number(contract.electric_meter_id))
-      if (m) em = { id: m.id, meter_no: m.meter_no, reading: null, previous_reading: m.init_reading || 0, photo: '', usage: null, status: m.status || '' }
-    }
+    const bill = billDetail || billSummary
+    var wm = (waterRows || [])[0] || null
+    var em = (electricRows || [])[0] || null
 
     const step = this.getBillStep(bill)
 

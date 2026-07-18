@@ -7,7 +7,12 @@ import sqlite3
 import os
 import json
 import re
-from datetime import datetime
+import threading
+import time
+import hashlib
+from datetime import datetime, date
+from decimal import Decimal
+from functools import wraps
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "local.db")
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "db_config.local.env")
@@ -33,6 +38,13 @@ DB_BACKEND = (
     or _LOCAL_DB_CONFIG.get("DB_BACKEND")
     or ("mysql" if _LOCAL_DB_CONFIG.get("MYSQL_HOST") else "sqlite")
 ).lower()
+_MYSQL_ENGINE = None
+_MYSQL_ENGINE_LOCK = threading.Lock()
+_REDIS_CLIENT = None
+_REDIS_LOCK = threading.Lock()
+_REDIS_UNAVAILABLE_UNTIL = 0
+_CACHE_MISS = object()
+_RENTAL_CACHE_PREFIX = "myhouse:rental"
 
 
 class _Row(dict):
@@ -55,6 +67,18 @@ class _MySQLCursor:
     def lastrowid(self):
         return self._cursor.lastrowid
 
+    def execute(self, sql, params=None):
+        translated = _translate_mysql_sql(sql)
+        if translated is None:
+            return self
+        try:
+            self._cursor.execute(translated, params or ())
+        except Exception:
+            self._owner._broken = True
+            raise
+        self._owner.lastrowid = self._cursor.lastrowid
+        return self
+
     def fetchone(self):
         row = self._cursor.fetchone()
         if row is None:
@@ -70,26 +94,45 @@ class _MySQLCursor:
     def __iter__(self):
         return iter(self.fetchall())
 
+    def close(self):
+        self._cursor.close()
+
 
 class _MySQLConnection:
-    def __init__(self, conn):
+    def __init__(self, conn, pooled=True):
         self._conn = conn
+        self._pooled = pooled
+        self._closed = False
+        self._broken = False
         self.lastrowid = None
 
     def execute(self, sql, params=None):
-        translated = _translate_mysql_sql(sql)
-        cursor = self._conn.cursor()
-        if translated is None:
-            return _MySQLCursor(cursor, self)
-        cursor.execute(translated, params or ())
-        self.lastrowid = cursor.lastrowid
-        return _MySQLCursor(cursor, self)
+        return self.cursor().execute(sql, params)
+
+    def cursor(self):
+        return _MySQLCursor(self._conn.cursor(), self)
 
     def commit(self):
         self._conn.commit()
 
     def close(self):
-        self._conn.close()
+        if self._closed:
+            return
+        self._closed = True
+        if self._broken:
+            try:
+                self._conn.invalidate()
+            except Exception:
+                pass
+        else:
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+        try:
+            self._conn.close()
+        except Exception:
+            pass
 
 
 def _translate_mysql_sql(sql):
@@ -120,18 +163,64 @@ def _mysql_settings():
     }
 
 
+def _config_value(key, default=""):
+    return os.environ.get(key) or _LOCAL_DB_CONFIG.get(key) or default
+
+
+def _int_config(key, default, minimum=None):
+    value = _config_value(key, str(default))
+    try:
+        number = int(value)
+    except ValueError:
+        number = default
+    if minimum is not None:
+        number = max(minimum, number)
+    return number
+
+
+def _mysql_engine():
+    global _MYSQL_ENGINE
+    if _MYSQL_ENGINE is not None:
+        return _MYSQL_ENGINE
+    with _MYSQL_ENGINE_LOCK:
+        if _MYSQL_ENGINE is not None:
+            return _MYSQL_ENGINE
+        try:
+            from sqlalchemy import create_engine
+            from sqlalchemy.engine import URL
+            from sqlalchemy.pool import QueuePool
+        except ImportError as exc:
+            raise RuntimeError("MySQL 模式需要安装 SQLAlchemy 和 PyMySQL：pip install SQLAlchemy PyMySQL") from exc
+        settings = _mysql_settings()
+        url = URL.create(
+            "mysql+pymysql",
+            username=settings["user"],
+            password=settings["password"],
+            host=settings["host"],
+            port=settings["port"],
+            database=settings["database"],
+        )
+        _MYSQL_ENGINE = create_engine(
+            url,
+            poolclass=QueuePool,
+            pool_pre_ping=True,
+            pool_size=_int_config("MYSQL_POOL_SIZE", 5, 1),
+            max_overflow=_int_config("MYSQL_MAX_OVERFLOW", 10, 0),
+            pool_recycle=_int_config("MYSQL_POOL_RECYCLE", 1800, 1),
+            pool_timeout=_int_config("MYSQL_POOL_TIMEOUT", 30, 1),
+            connect_args={"charset": "utf8mb4", "autocommit": False},
+            future=True,
+        )
+        return _MYSQL_ENGINE
+
+
 def _mysql_conn():
     try:
-        import pymysql
+        conn = _mysql_engine().raw_connection()
     except ImportError as exc:
         raise RuntimeError("MySQL 模式需要安装 PyMySQL：pip install PyMySQL") from exc
-    conn = pymysql.connect(
-        charset="utf8mb4",
-        autocommit=False,
-        cursorclass=pymysql.cursors.Cursor,
-        **_mysql_settings(),
-    )
     return _MySQLConnection(conn)
+
 
 def _conn():
     if DB_BACKEND == "mysql":
@@ -141,6 +230,103 @@ def _conn():
     c.row_factory = sqlite3.Row
     c.execute('PRAGMA foreign_keys=ON')
     return c
+
+
+def _json_default(value):
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    return str(value)
+
+
+def _redis_url():
+    return _config_value("REDIS_URL", "")
+
+
+def _cache_ttl_seconds():
+    return _int_config("CACHE_TTL_SECONDS", 20, 1)
+
+
+def _redis_client():
+    global _REDIS_CLIENT, _REDIS_UNAVAILABLE_UNTIL
+    if not _redis_url() or time.time() < _REDIS_UNAVAILABLE_UNTIL:
+        return None
+    if _REDIS_CLIENT is not None:
+        return _REDIS_CLIENT
+    with _REDIS_LOCK:
+        if _REDIS_CLIENT is not None:
+            return _REDIS_CLIENT
+        try:
+            import redis
+            _REDIS_CLIENT = redis.Redis.from_url(
+                _redis_url(),
+                decode_responses=True,
+                socket_connect_timeout=0.5,
+                socket_timeout=0.5,
+                health_check_interval=30,
+            )
+            _REDIS_CLIENT.ping()
+            return _REDIS_CLIENT
+        except Exception:
+            _REDIS_UNAVAILABLE_UNTIL = time.time() + 30
+            _REDIS_CLIENT = None
+            return None
+
+
+def _cache_key(name, args, kwargs):
+    raw = json.dumps({"name": name, "args": args, "kwargs": kwargs}, ensure_ascii=False, sort_keys=True, default=_json_default)
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()
+    return f"{_RENTAL_CACHE_PREFIX}:{name}:{digest}"
+
+
+def _cache_get(key):
+    client = _redis_client()
+    if client is None:
+        return _CACHE_MISS
+    try:
+        value = client.get(key)
+        if value is None:
+            return _CACHE_MISS
+        return json.loads(value)
+    except Exception:
+        return _CACHE_MISS
+
+
+def _cache_set(key, value, ttl=None):
+    client = _redis_client()
+    if client is None:
+        return
+    try:
+        client.setex(key, int(ttl or _cache_ttl_seconds()), json.dumps(value, ensure_ascii=False, default=_json_default))
+    except Exception:
+        pass
+
+
+def _cached_rental(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        key = _cache_key(func.__name__, args, kwargs)
+        cached = _cache_get(key)
+        if cached is not _CACHE_MISS:
+            return cached
+        value = func(*args, **kwargs)
+        _cache_set(key, value)
+        return value
+    return wrapper
+
+
+def clear_rental_cache():
+    client = _redis_client()
+    if client is None:
+        return
+    try:
+        keys = list(client.scan_iter(f"{_RENTAL_CACHE_PREFIX}:*"))
+        if keys:
+            client.delete(*keys)
+    except Exception:
+        pass
+
 
 def init():
     if DB_BACKEND == "mysql":
@@ -497,8 +683,10 @@ def add_building(name, address=''):
     c = _conn()
     cur = c.execute("INSERT INTO buildings (name, address) VALUES (?,?)", (name, address))
     c.commit(); pk = cur.lastrowid; c.close()
+    clear_rental_cache()
     return pk
 
+@_cached_rental
 def get_buildings():
     c = _conn()
     rows = c.execute("SELECT * FROM buildings ORDER BY id").fetchall()
@@ -515,18 +703,22 @@ def update_building(bid, name, address):
     c = _conn()
     c.execute("UPDATE buildings SET name=?,address=? WHERE id=?", (name, address, bid))
     c.commit(); c.close()
+    clear_rental_cache()
 
 def delete_building(bid):
     c = _conn()
     c.execute("DELETE FROM buildings WHERE id=?", (bid,))
     c.commit(); c.close()
+    clear_rental_cache()
 
 def add_room(building_id, room_number, floor=1, status='idle'):
     c = _conn()
     cur = c.execute("INSERT INTO rooms (building_id, room_number, floor, status) VALUES (?,?,?,?)", (building_id, room_number, floor, status))
     c.commit(); pk = cur.lastrowid; c.close()
+    clear_rental_cache()
     return pk
 
+@_cached_rental
 def get_rooms(building_id=None):
     c = _conn()
     if building_id:
@@ -546,11 +738,13 @@ def update_room(rid, building_id, room_number, floor=1, status='idle'):
     c = _conn()
     c.execute("UPDATE rooms SET building_id=?,room_number=?,floor=?,status=? WHERE id=?", (building_id, room_number, floor, status, rid))
     c.commit(); c.close()
+    clear_rental_cache()
 
 def add_tenant(name, phone='', id_card='', status='active', building_id=None, room_id=None):
     c = _conn()
     cur = c.execute("INSERT INTO tenants (name, phone, id_card, status, building_id, room_id) VALUES (?,?,?,?,?,?)", (name, phone, id_card, status, building_id, room_id))
     c.commit(); pk = cur.lastrowid; c.close()
+    clear_rental_cache()
     return pk
 
 def get_tenants(active_only=True, building_id=None):
@@ -580,11 +774,13 @@ def update_tenant(tid, name, phone, id_card, status='active', building_id=None, 
     c = _conn()
     c.execute("UPDATE tenants SET name=?,phone=?,id_card=?,status=?,building_id=?,room_id=? WHERE id=?", (name, phone, id_card, status, building_id, room_id, tid))
     c.commit(); c.close()
+    clear_rental_cache()
 
 def set_tenant_status(tid, status):
     c = _conn()
     c.execute("UPDATE tenants SET status=? WHERE id=?", (status, tid))
     c.commit(); c.close()
+    clear_rental_cache()
 
 def add_contract(tenant_id, room_id, start_date, end_date='',
                  monthly_rent=0, water_price=0, electric_price=0,
@@ -602,8 +798,10 @@ def add_contract(tenant_id, room_id, start_date, end_date='',
     if room_id:
         c.execute("UPDATE rooms SET status=? WHERE id=?", ("rented" if status == "active" else "idle", room_id))
     c.commit(); pk = cur.lastrowid; c.close()
+    clear_rental_cache()
     return pk
 
+@_cached_rental
 def get_contracts(active_only=True, building_id=None):
     c = _conn()
     sql = ("SELECT c.*,t.name AS tenant_name,t.phone AS tenant_phone,"
@@ -652,6 +850,7 @@ def update_contract(cid, tenant_id, room_id, start_date, end_date='',
     if room_id:
         c.execute("UPDATE rooms SET status=? WHERE id=?", ("rented" if status == "active" else "idle", room_id))
     c.commit(); c.close()
+    clear_rental_cache()
 
 def end_contract(cid, end_date=''):
     c = _conn()
@@ -663,14 +862,17 @@ def end_contract(cid, end_date=''):
     if row and row["room_id"]:
         c.execute("UPDATE rooms SET status='idle' WHERE id=?", (row["room_id"],))
     c.commit(); c.close()
+    clear_rental_cache()
 
 def add_meter(room_id, mtype, meter_no='', init_reading=0.0, photo=''):
     c = _conn()
     cur = c.execute("INSERT INTO meters (room_id,type,meter_no,init_reading,photo) VALUES (?,?,?,?,?)",
               (room_id, mtype, meter_no, init_reading, photo))
     c.commit(); pk = cur.lastrowid; c.close()
+    clear_rental_cache()
     return pk
 
+@_cached_rental
 def get_meters(room_id=None, building_id=None, mtype=None):
     c = _conn()
     wh = []
@@ -709,12 +911,14 @@ def update_meter(mid, room_id, mtype, meter_no='', init_reading=0.0, photo=None)
         c.execute("UPDATE meters SET room_id=?,type=?,meter_no=?,init_reading=? WHERE id=?",
                   (room_id, mtype, meter_no, init_reading, mid))
     c.commit(); c.close()
+    clear_rental_cache()
 
 def add_reading(meter_id, reading_date, reading, photo='', remark=''):
     c = _conn()
     c.execute("INSERT INTO meter_readings (meter_id,reading_date,reading,photo,remark) VALUES (?,?,?,?,?)",
               (meter_id, reading_date, reading, photo, remark))
     c.commit(); pk = c.lastrowid; c.close()
+    clear_rental_cache()
     return pk
 
 def get_readings(meter_id=None, limit=100):
@@ -732,13 +936,17 @@ def get_latest_reading(meter_id):
     c.close()
     return dict(r) if r else None
 
-def get_monthly_meter_readings(mtype='water', building_id=None, month=''):
+@_cached_rental
+def get_monthly_meter_readings(mtype='water', building_id=None, month='', meter_id=None):
     month = (month or '')[:7]
     c = _conn()
     params = [mtype]
     sql = ("SELECT m.*,r.building_id,r.room_number,r.floor,b.name AS building_name "
            "FROM meters m JOIN rooms r ON m.room_id=r.id "
            "JOIN buildings b ON r.building_id=b.id WHERE m.type=?")
+    if meter_id:
+        sql += " AND m.id=?"
+        params.append(meter_id)
     if building_id:
         sql += " AND r.building_id=?"
         params.append(building_id)
@@ -802,6 +1010,7 @@ def save_monthly_meter_reading(meter_id, month, reading, photo='', remark=''):
         )
         pk = cur.lastrowid
     c.commit(); c.close()
+    clear_rental_cache()
     return {"id": pk, "success": True}
 
 def _month_range(start_month, end_month):
@@ -872,9 +1081,11 @@ def add_bill(contract_id, billing_month, rent_amount, water_fee=0,
          water_photo, electric_photo))
     pk = cur.lastrowid
     conn.commit(); conn.close()
+    clear_rental_cache()
     return pk
 
-def get_bills(month=None, contract_id=None):
+@_cached_rental
+def get_bills(month=None, contract_id=None, include_photos=True):
     c = _conn()
     where, params = [], []
     if month:
@@ -882,7 +1093,14 @@ def get_bills(month=None, contract_id=None):
     if contract_id:
         where.append("b.contract_id=?"); params.append(contract_id)
     wh = (" WHERE " + " AND ".join(where)) if where else ''
-    sql = ("SELECT b.*,t.name AS tenant_name,r.room_number,bld.id AS building_id,bld.name AS building_name "
+    bill_columns = (
+        "b.*" if include_photos else
+        "b.id,b.contract_id,b.billing_month,b.rent_amount,b.water_fee,b.electric_fee,"
+        "b.other_fee,b.other_fee_details,b.total_amount,b.remark,b.status,"
+        "b.water_last_reading,b.water_current_reading,"
+        "b.electric_last_reading,b.electric_current_reading"
+    )
+    sql = ("SELECT " + bill_columns + ",t.name AS tenant_name,r.room_number,bld.id AS building_id,bld.name AS building_name "
            "FROM bills b "
            "JOIN contracts c ON b.contract_id=c.id "
            "JOIN tenants t ON c.tenant_id=t.id "
@@ -940,11 +1158,13 @@ def update_bill(bid, contract_id=None, billing_month=None, rent_amount=None,
         params.append(bid)
         c.execute("UPDATE bills SET "+",".join(sets)+" WHERE id=?", params)
     c.commit(); c.close()
+    clear_rental_cache()
 
 def update_bill_status(bid, status):
     c = _conn()
     c.execute("UPDATE bills SET status=? WHERE id=?", (status, bid))
     c.commit(); c.close()
+    clear_rental_cache()
 
 def add_payment(bill_id, amount, pay_date=None, pay_method='', remark=''):
     if pay_date is None:
@@ -954,6 +1174,7 @@ def add_payment(bill_id, amount, pay_date=None, pay_method='', remark=''):
                     (bill_id, amount, pay_date, pay_method, remark))
     c.commit(); pk = cur.lastrowid; c.close()
     _update_bill_payment_status(bill_id)
+    clear_rental_cache()
     return pk
 
 def update_payment(pid, amount=None, pay_date=None, pay_method=None, remark=None):
@@ -972,6 +1193,7 @@ def update_payment(pid, amount=None, pay_date=None, pay_method=None, remark=None
         c.execute("UPDATE payments SET " + ",".join(sets) + " WHERE id=?", params)
     c.commit(); c.close()
     _update_bill_payment_status(row["bill_id"])
+    clear_rental_cache()
     return {"success": True}
 
 def get_payments(bill_id=None, month=None, building_id=None, keyword='', start_date=None, end_date=None, pay_method=None):
@@ -1018,6 +1240,7 @@ def delete_payment(pid):
     c.commit(); c.close()
     if bill_id:
         _update_bill_payment_status(bill_id)
+    clear_rental_cache()
 
 def _update_bill_payment_status(bill_id):
     c = _conn()
@@ -1031,6 +1254,7 @@ def _update_bill_payment_status(bill_id):
     else:
         c.execute("UPDATE bills SET status='unpaid' WHERE id=?", (bill_id,))
     c.commit(); c.close()
+    clear_rental_cache()
 
 # === AI 知识库 ===
 def save_knowledge(title, content, category=""):
