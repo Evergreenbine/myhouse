@@ -464,10 +464,23 @@ export class RentPlanPage extends React.Component<{}, State> {
   copyReceipt = async () => {
     var canvas = await this.receiptToCanvas()
     if (!canvas) { showToast('复制失败，请手动截图'); return }
+    if (window.electronClipboard?.writeImage) {
+      const result = await window.electronClipboard.writeImage(canvas.toDataURL('image/png'))
+      showToast(result.success ? '已复制到剪贴板' : (result.message || '复制失败'))
+      return
+    }
+    if (!navigator.clipboard || typeof ClipboardItem === 'undefined') {
+      showToast('当前环境不支持复制图片，请使用保存图片')
+      return
+    }
     canvas.toBlob(async (blob: Blob | null) => {
       if (!blob) { showToast('复制失败'); return }
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-      showToast('已复制到剪贴板')
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+        showToast('已复制到剪贴板')
+      } catch {
+        showToast('浏览器限制复制图片，请使用保存图片')
+      }
     }, 'image/png')
   }
 
