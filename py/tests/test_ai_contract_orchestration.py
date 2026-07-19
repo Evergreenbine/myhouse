@@ -150,6 +150,63 @@ class ContractOrchestrationTests(unittest.TestCase):
     def test_meter_history_backfill_text_confirms_pending_action(self):
         self.assertTrue(ai_orchestrator._looks_like_pending_action_text_confirm("把6月底的读数补录到历史记录"))
 
+    def test_meter_reading_query_extracts_room_building_and_month(self):
+        data = {"prompt": "6月份 石潭布302房的水电表读数是多少", "session_context": {}}
+        with patch.object(ai_orchestrator.db, "get_buildings", return_value=BUILDINGS):
+            args = ai_orchestrator._meter_reading_query_args(data)
+
+        self.assertEqual(args["building_id"], 2)
+        self.assertEqual(args["room_number"], "302")
+        self.assertEqual(args["month"], "2026-06")
+        self.assertNotIn("meter_type", args)
+
+    def test_meter_reading_query_response_reports_existing_values(self):
+        data = {"prompt": "6月份 石潭布302房的水电表读数是多少", "session_context": {}}
+        tool_result = {
+            "ok": True,
+            "tool": "meter_reading_get_room_reading",
+            "data": {
+                "month": "2026-06",
+                "found": True,
+                "rows": [
+                    {
+                        "meter_type": "water",
+                        "building": "石潭布",
+                        "room_number": "302",
+                        "reading": 1126.0,
+                        "previous_reading": 0.0,
+                        "previous_date": "",
+                    },
+                    {
+                        "meter_type": "electric",
+                        "building": "石潭布",
+                        "room_number": "302",
+                        "reading": 7758.0,
+                        "previous_reading": 0.0,
+                        "previous_date": "",
+                    },
+                ],
+            },
+        }
+        with patch.object(ai_orchestrator.db, "get_buildings", return_value=BUILDINGS), \
+             patch.object(ai_orchestrator, "execute_tool", return_value=tool_result) as execute_mock, \
+             patch.object(ai_orchestrator, "_detect_intent", return_value={
+                 "name": "meter_reading",
+                 "workflow": "meter_reading",
+                 "confidence": 1.0,
+                 "fields": {"month": "2026-06", "room_number": "302", "building_id": 2},
+             }):
+            result = ai_orchestrator._meter_reading_query_response(data)
+
+        execute_mock.assert_called_once_with("meter_reading_get_room_reading", {
+            "room_number": "302",
+            "month": "2026-06",
+            "building_id": 2,
+        })
+        self.assertIn("水表：1126", result["reply"])
+        self.assertIn("电表：7758", result["reply"])
+        self.assertEqual(result["pending_actions"], [])
+
     def test_colloquial_contract_request_extracts_building_and_room(self):
         prompt = "石潭布302帮我建个合同"
         with patch.object(ai_orchestrator.db, "get_buildings", return_value=BUILDINGS):

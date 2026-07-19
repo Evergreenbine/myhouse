@@ -1325,6 +1325,105 @@ def _meter_reading_fallback(data: Dict[str, Any]) -> Dict[str, Any] | None:
     return _finalize_chat_response("已识别到水电表读数，请核对下方待确认操作。", data, tool_results, skill_hits)
 
 
+def _looks_like_meter_reading_query(prompt: str) -> bool:
+    text = str(prompt or "").strip()
+    if not text:
+        return False
+    meter_words = ("水电表", "水电", "水表", "电表", "读数")
+    query_words = ("多少", "是多少", "几", "查", "查询", "看看", "有没有")
+    write_words = ("录入", "补录", "保存", "写入", "确认", "改", "修改")
+    return any(word in text for word in meter_words) and any(word in text for word in query_words) and not any(word in text for word in write_words)
+
+
+def _meter_reading_query_args(data: Dict[str, Any]) -> Dict[str, Any]:
+    prompt = str(data.get("prompt") or "")
+    if not _looks_like_meter_reading_query(prompt):
+        return {}
+    fields = _context_location_fields(_session_context(data))
+    fields.update(_location_fields_from_text(prompt))
+    room_number = str(fields.get("room_number") or "").strip()
+    month = _month_hint(prompt) or _bill_context_month(_session_context(data))
+    if not room_number or not month:
+        return {}
+    args: Dict[str, Any] = {
+        "room_number": room_number,
+        "month": month,
+    }
+    if fields.get("building_id") not in {None, ""}:
+        args["building_id"] = fields.get("building_id")
+    if "水表" in prompt and "电表" not in prompt and "水电" not in prompt:
+        args["meter_type"] = "water"
+    elif "电表" in prompt and "水表" not in prompt and "水电" not in prompt:
+        args["meter_type"] = "electric"
+    return args
+
+
+def _format_meter_number(value: Any) -> str:
+    if value in {None, ""}:
+        return "--"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return str(int(number)) if number.is_integer() else str(number)
+
+
+def _meter_reading_query_response(data: Dict[str, Any]) -> Dict[str, Any] | None:
+    args = _meter_reading_query_args(data)
+    if not args:
+        return None
+    tool_result = execute_tool("meter_reading_get_room_reading", args)
+    payload = tool_result.get("data") if isinstance(tool_result, dict) else {}
+    rows = payload.get("rows") if isinstance(payload, dict) else []
+    rows = rows if isinstance(rows, list) else []
+    month = str((payload or {}).get("month") or args.get("month") or "")
+    room_number = str(args.get("room_number") or "")
+    building = ""
+    for row in rows:
+        if isinstance(row, dict) and row.get("building"):
+            building = str(row.get("building") or "")
+            break
+    title = (month + " " + (building + room_number if building else room_number) + " 水电表读数").strip()
+    lines = [title + "："]
+    by_type = {str(row.get("meter_type") or ""): row for row in rows if isinstance(row, dict)}
+    wanted_types = [str(args.get("meter_type"))] if args.get("meter_type") else ["water", "electric"]
+    labels = {"water": "水表", "electric": "电表"}
+    for meter_type in wanted_types:
+        row = by_type.get(meter_type)
+        label = labels.get(meter_type, meter_type)
+        if row and row.get("reading") not in {None, ""}:
+            current = _format_meter_number(row.get("reading"))
+            previous = _format_meter_number(row.get("previous_reading"))
+            previous_date = str(row.get("previous_date") or "")
+            suffix = f"，上次 {previous}"
+            if previous_date:
+                suffix += f"（{previous_date}）"
+            lines.append(f"- {label}：{current}{suffix}")
+        else:
+            lines.append(f"- {label}：未录入")
+    reply = "\n".join(lines)
+    session_context = _next_session_context(data, [tool_result])
+    return {
+        "reply": reply,
+        "pending_actions": [],
+        "bill_images": [],
+        "analysis_cards": [],
+        "suggested_actions": [],
+        "form_actions": [],
+        "session_context": session_context,
+        "response": {
+            "type": "assistant_message",
+            "content": reply,
+            "pending_actions": [],
+            "bill_images": [],
+            "analysis_cards": [],
+            "suggested_actions": [],
+            "form_actions": [],
+            "session_context": session_context,
+        },
+    }
+
+
 def _looks_like_bill_create_with_upload(data: Dict[str, Any]) -> bool:
     if not _uploaded_images_from_data(data):
         return False
@@ -2562,6 +2661,9 @@ def _chat_linear(data: Dict[str, Any]) -> Dict[str, Any]:
     bill_fallback = _bill_create_fallback(data)
     if bill_fallback:
         return bill_fallback
+    meter_query = _meter_reading_query_response(data)
+    if meter_query:
+        return meter_query
     meter_fallback = _meter_reading_fallback(data)
     if meter_fallback:
         return meter_fallback
@@ -2605,6 +2707,8 @@ def _graph_route(state: AIChatGraphState) -> str:
         return "greeting"
     if _bill_create_followup_args(data):
         return "bill_create"
+    if _meter_reading_query_args(data):
+        return "meter_reading"
     intent = _detect_intent(data)
     workflow = str(intent.get("workflow") or "")
     _trace_state(state, "route", {"intent": intent})
@@ -2668,7 +2772,7 @@ def _graph_contract_form_node(state: AIChatGraphState) -> AIChatGraphState:
 def _graph_meter_reading_node(state: AIChatGraphState) -> AIChatGraphState:
     data = state.get("data") or {}
     _trace_state(state, "meter_reading", {"prompt": data.get("prompt"), "session_context": _session_context(data)})
-    return {"result": _meter_reading_fallback(data) or _chat_linear(data)}
+    return {"result": _meter_reading_query_response(data) or _meter_reading_fallback(data) or _chat_linear(data)}
 
 
 def _graph_bill_create_node(state: AIChatGraphState) -> AIChatGraphState:
