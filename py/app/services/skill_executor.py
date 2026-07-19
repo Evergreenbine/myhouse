@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import inspect
+import html as html_lib
 import json
 import hashlib
 import re
@@ -33,6 +34,9 @@ METER_TYPE_LABELS = {
     "electric": "电表",
 }
 
+WATER_COST_PRICE = 2.1
+ELECTRIC_COST_PRICE = 0.6
+
 _UNSET = object()
 
 CONTRACT_UPDATE_LABELS = {
@@ -45,6 +49,22 @@ CONTRACT_UPDATE_LABELS = {
     "water_meter_id": "水表绑定",
     "electric_meter_id": "电表绑定",
     "other_fee_details": "其它费用",
+}
+
+ROOM_UPDATE_LABELS = {
+    "building_id": "楼栋",
+    "room_number": "房间号",
+    "room_type": "户型",
+    "floor": "楼层",
+    "status": "状态",
+}
+
+METER_UPDATE_LABELS = {
+    "room_id": "所属房间",
+    "type": "表具类型",
+    "meter_no": "表号",
+    "init_reading": "初始读数",
+    "photo": "照片",
 }
 
 
@@ -369,6 +389,27 @@ def _resolve_tenant_for_contract(
     return None, "未找到该租户，请先在租户页面新增租户"
 
 
+def _create_tenant_for_contract(
+    tenant_name: Any = None,
+    tenant_phone: Any = None,
+    tenant_id_card: Any = None,
+    building_id: Any = None,
+    room_id: Any = None,
+) -> Optional[Dict[str, Any]]:
+    name = str(tenant_name or "").strip()
+    if not name:
+        return None
+    tenant_id = db.add_tenant(
+        name,
+        str(tenant_phone or "").strip(),
+        str(tenant_id_card or "").strip(),
+        "active",
+        _int_or_none(building_id),
+        str(room_id) if room_id not in {None, ""} else None,
+    )
+    return db.get_tenant(tenant_id)
+
+
 def _resolve_room_for_contract(
     room_id: Any = None,
     room_number: Any = None,
@@ -444,6 +485,7 @@ def _contract_create_form_action(
         "prompt_template": (
             "请根据以下表单内容新建合同："
             "楼栋名称 {building_name}，房间号 {room_number}，租户姓名 {tenant_name}，"
+            "租客手机号 {tenant_phone}，证件号 {tenant_id_card}，"
             "合同开始日期 {start_date}，合同结束日期 {end_date}，月租 {monthly_rent}，"
             "水费单价 {water_unit_price}，电费单价 {electric_unit_price}，保证金 {deposit}，"
             "其它费用 {other_fee_details}。"
@@ -454,6 +496,8 @@ def _contract_create_form_action(
             {"name": "building_name", "label": "楼栋", "type": "text", "required": False, "placeholder": "例如 石潭布"},
             {"name": "room_number", "label": "房间号", "type": "text", "required": True, "placeholder": "例如 202"},
             {"name": "tenant_name", "label": "租客姓名", "type": "text", "required": True, "placeholder": "请输入租客姓名"},
+            {"name": "tenant_phone", "label": "租客手机号", "type": "text", "required": False, "placeholder": "可选"},
+            {"name": "tenant_id_card", "label": "证件号", "type": "text", "required": False, "placeholder": "可选"},
             {"name": "monthly_rent", "label": "月租金额", "type": "number", "required": True, "placeholder": "例如 700"},
             {"name": "start_date", "label": "合同开始日期", "type": "date", "required": True, "placeholder": "YYYY-MM-DD"},
             {"name": "end_date", "label": "合同结束日期", "type": "date", "required": False, "placeholder": "YYYY-MM-DD，可空"},
@@ -537,11 +581,15 @@ def _rent_plan_row(contract: Dict[str, Any], month: str) -> Dict[str, Any]:
 
 def rent_plan_list_month_status(month: Any = None, building_id: Any = None) -> Dict[str, Any]:
     month = _normalize_month(month)
-    contracts = db.get_contracts(True, _int_or_none(building_id)) or []
+    building_id_int = _int_or_none(building_id)
+    contracts = db.get_contracts(True, building_id_int) or []
     rows = [_rent_plan_row(contract, month) for contract in contracts]
     counts: Dict[str, int] = {}
     for row in rows:
         counts[row["status"]] = counts.get(row["status"], 0) + 1
+    meter_rows = _meter_rows_for_month(month, building_id_int)["rows"]
+    building_name = _building_name_for_id(building_id_int)
+    revenue_card = _utility_revenue_card(month, building_name, rows, meter_rows)
     return {
         "month": month,
         "total_contracts": len(contracts),
@@ -553,6 +601,8 @@ def rent_plan_list_month_status(month: Any = None, building_id: Any = None) -> D
             "status_labels": {k: _status_label(k) for k in counts},
         },
         "rows": rows,
+        "analysis_cards": [revenue_card],
+        "dashboard_html": revenue_card["html"],
     }
 
 
@@ -607,37 +657,57 @@ def meter_reading_list_month_status(
     month: Any = None,
     building_id: Any = None,
 ) -> Dict[str, Any]:
-    month = _normalize_month(month)
+    data = _meter_rows_for_month(month, building_id, meter_type)
     result = []
-    for mtype in _meter_types(meter_type):
-        rows = db.get_monthly_meter_readings(mtype, _int_or_none(building_id), month) or []
+    for section in data["sections"]:
         normalized_rows = []
-        for row in rows:
+        for row in section.get("rows") or []:
             normalized_rows.append({
-                "meter_id": row.get("id"),
-                "meter_type": mtype,
-                "meter_type_label": METER_TYPE_LABELS.get(mtype, mtype),
-                "building": row.get("building_name", ""),
+                "meter_id": row.get("meter_id"),
+                "meter_type": row.get("meter_type"),
+                "meter_type_label": row.get("meter_type_label"),
+                "building": row.get("building", ""),
                 "room_number": row.get("room_number", ""),
                 "meter_no": row.get("meter_no", ""),
-                "month": month,
-                "status": "recorded" if row.get("reading") is not None else "missing",
-                "status_label": _status_label("recorded" if row.get("reading") is not None else "missing"),
+                "tenant_name": row.get("tenant_name", ""),
+                "contract_id": row.get("contract_id"),
+                "month": data["month"],
+                "status": row.get("status"),
+                "status_label": row.get("status_label"),
                 "reading": row.get("reading"),
                 "previous_reading": row.get("previous_reading"),
                 "usage": row.get("usage"),
                 "has_photo": bool(row.get("photo")),
+                "photo": row.get("photo") or "",
                 "remark": row.get("remark", ""),
+                "cost_price": row.get("cost_price"),
+                "cost_amount": row.get("cost_amount"),
             })
         result.append({
-            "meter_type": mtype,
-            "meter_type_label": METER_TYPE_LABELS.get(mtype, mtype),
+            "meter_type": section.get("meter_type"),
+            "meter_type_label": section.get("meter_type_label"),
             "total": len(normalized_rows),
-            "recorded": sum(1 for r in normalized_rows if r["status"] == "recorded"),
-            "missing": sum(1 for r in normalized_rows if r["status"] == "missing"),
+            "recorded": section.get("recorded", 0),
+            "missing": section.get("missing", 0),
             "rows": normalized_rows,
         })
-    return {"month": month, "items": result}
+    building_name = _building_name_for_id(building_id)
+    analysis_cards = []
+    if data["photo_items"]:
+        analysis_cards.append(_meter_photo_gallery_card(data["month"], data["photo_items"]))
+    analysis_cards.append({
+        "id": f"meter_analysis_{data['month']}",
+        "type": "html",
+        "title": f"{data['month']} 水电分析看板",
+        "description": "查看本月录入、照片覆盖和用量变化。",
+        "html": _meter_dashboard_html(data["month"], building_name, data["sections"]),
+    })
+    return {
+        "month": data["month"],
+        "items": result,
+        "analysis_cards": analysis_cards,
+        "dashboard_html": _meter_dashboard_html(data["month"], building_name, data["sections"]),
+    }
 
 
 def meter_reading_get_room_reading(
@@ -654,7 +724,35 @@ def meter_reading_get_room_reading(
     if not matches:
         for item in data["items"]:
             matches.extend([row for row in item["rows"] if room_text and room_text in str(row.get("room_number", ""))])
-    return {"month": data["month"], "found": bool(matches), "rows": matches}
+    photo_items = []
+    for row in matches:
+        photo = row.get("photo")
+        if not photo:
+            continue
+        photo_items.append({
+            "id": f"{row.get('meter_type') or ''}-{row.get('meter_id') or ''}-{row.get('room_number') or ''}",
+            "photo": photo,
+            "title": "{} · {}".format(row.get("meter_type_label") or "", row.get("room_number") or "").strip(" ·"),
+            "room_number": row.get("room_number") or "",
+            "tenant_name": row.get("tenant_name") or "",
+            "meter_no": row.get("meter_no") or "",
+            "reading": row.get("reading"),
+            "previous_reading": row.get("previous_reading"),
+            "usage": row.get("usage"),
+            "month": data["month"],
+        })
+    analysis_cards = []
+    if photo_items:
+        meter_label = str(meter_type or "").strip()
+        meter_title = "水电表照片" if not meter_label else ("水表照片" if meter_label == "water" else "电表照片")
+        analysis_cards.append({
+            "id": f"room_meter_photos_{data['month']}_{room_text}",
+            "type": "photo_gallery",
+            "title": f"{room_text} {data['month']} {meter_title}",
+            "description": "如果这户本月有照片，会在这里直接展示。",
+            "items": photo_items,
+        })
+    return {"month": data["month"], "found": bool(matches), "rows": matches, "analysis_cards": analysis_cards}
 
 
 def meter_reading_list_missing(
@@ -688,6 +786,342 @@ def meter_reading_check_anomalies(
                     "row": row,
                 })
     return {"month": data["month"], "issue_count": len(issues), "issues": issues}
+
+
+def _escape_html(value: Any) -> str:
+    return html_lib.escape(str(value or ""), quote=True)
+
+
+def _active_contracts_by_room(building_id: Any = None) -> Dict[str, Dict[str, Any]]:
+    mapping: Dict[str, Dict[str, Any]] = {}
+    for contract in db.get_contracts(True, _int_or_none(building_id)) or []:
+        room_number = str(contract.get("room_number") or "").strip()
+        if room_number and room_number not in mapping:
+            mapping[room_number] = contract
+    return mapping
+
+
+def _building_name_for_id(building_id: Any = None) -> str:
+    bid = _int_or_none(building_id)
+    if not bid:
+        return ""
+    for building in db.get_buildings() or []:
+        if _int_or_none(building.get("id")) == bid:
+            return str(building.get("name") or "")
+    return ""
+
+
+def _meter_rows_for_month(month: Any, building_id: Any = None, meter_type: Any = None) -> Dict[str, Any]:
+    target_month = _normalize_month(month)
+    contracts_by_room = _active_contracts_by_room(building_id)
+    meter_types = _meter_types(meter_type)
+    sections: List[Dict[str, Any]] = []
+    all_rows: List[Dict[str, Any]] = []
+    photo_items: List[Dict[str, Any]] = []
+    issue_rows: List[Dict[str, Any]] = []
+    for mtype in meter_types:
+        rows = db.get_monthly_meter_readings(mtype, _int_or_none(building_id), target_month) or []
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            room_number = str(row.get("room_number") or "").strip()
+            contract = contracts_by_room.get(room_number) or {}
+            item = dict(row)
+            item["meter_id"] = item.get("id")
+            item["meter_type"] = mtype
+            item["meter_type_label"] = METER_TYPE_LABELS.get(mtype, mtype)
+            item["building"] = item.get("building_name", "")
+            item["tenant_name"] = contract.get("tenant_name", "")
+            item["contract_id"] = contract.get("id")
+            item["water_unit_price"] = _num(contract.get("water_unit_price"))
+            item["electric_unit_price"] = _num(contract.get("electric_unit_price"))
+            raw_usage = item.get("usage")
+            item["usage"] = raw_usage
+            item["reading"] = item.get("reading")
+            item["previous_reading"] = item.get("previous_reading")
+            item["has_photo"] = bool(item.get("photo"))
+            item["cost_price"] = WATER_COST_PRICE if mtype == "water" else ELECTRIC_COST_PRICE
+            item["cost_amount"] = round(_num(raw_usage) * item["cost_price"], 2) if raw_usage is not None else 0.0
+            items.append(item)
+            all_rows.append(item)
+            if item.get("photo"):
+                photo_items.append({
+                    "id": f"{mtype}-{item.get('meter_id')}-{room_number}",
+                    "photo": item.get("photo"),
+                    "title": "{} · {}".format(item.get("meter_type_label") or "", room_number).strip(" ·"),
+                    "room_number": room_number,
+                    "tenant_name": item.get("tenant_name") or "",
+                    "meter_no": item.get("meter_no") or "",
+                    "reading": item.get("reading"),
+                    "previous_reading": item.get("previous_reading"),
+                    "usage": item.get("usage"),
+                    "month": target_month,
+                })
+        sections.append({
+            "meter_type": mtype,
+            "meter_type_label": METER_TYPE_LABELS.get(mtype, mtype),
+            "rows": items,
+            "recorded": sum(1 for item in items if item.get("status") == "recorded"),
+            "missing": sum(1 for item in items if item.get("status") == "missing"),
+            "photo_count": sum(1 for item in items if item.get("photo")),
+            "usage_total": round(sum(_num(item.get("usage")) for item in items if item.get("usage") is not None), 2),
+            "cost_total": round(sum(_num(item.get("cost_amount")) for item in items), 2),
+        })
+        issue_rows.extend([item for item in items if item.get("usage") is not None and item.get("previous_reading") is not None and _num(item.get("reading")) < _num(item.get("previous_reading"))])
+    return {
+        "month": target_month,
+        "building_id": _int_or_none(building_id),
+        "sections": sections,
+        "rows": all_rows,
+        "photo_items": photo_items,
+        "issue_rows": issue_rows,
+    }
+
+
+def _meter_photo_gallery_card(month: str, photo_items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {
+        "id": f"meter_photo_gallery_{month}",
+        "type": "photo_gallery",
+        "title": f"{month} 月度表具照片",
+        "description": "有照片的水表或电表读数会集中展示在这里。",
+        "items": photo_items[:12],
+    }
+
+
+def _meter_dashboard_html(month: str, building_name: str, sections: List[Dict[str, Any]]) -> str:
+    total_recorded = sum(_num(section.get("recorded")) for section in sections)
+    total_missing = sum(_num(section.get("missing")) for section in sections)
+    total_photo = sum(_num(section.get("photo_count")) for section in sections)
+    total_usage = sum(_num(section.get("usage_total")) for section in sections)
+    total_cost = sum(_num(section.get("cost_total")) for section in sections)
+    top_rows = sorted(
+        [row for section in sections for row in (section.get("rows") or []) if isinstance(row, dict)],
+        key=lambda item: (_num(item.get("usage")), _num(item.get("cost_amount"))),
+        reverse=True,
+    )[:8]
+
+    def stat_card(label: str, value: str, hint: str = "") -> str:
+        return (
+            '<div class="dash-stat"><span>{label}</span><strong>{value}</strong>{hint}</div>'
+            .format(label=_escape_html(label), value=_escape_html(value), hint=(f'<em>{_escape_html(hint)}</em>' if hint else ""))
+        )
+
+    section_html = []
+    for section in sections:
+        rows = section.get("rows") or []
+        bar_total = max(sum(_num(item.get("usage")) for item in rows if item.get("usage") is not None), 1)
+        row_html = []
+        for row in sorted(rows, key=lambda item: (_num(item.get("usage")), _num(item.get("cost_amount"))), reverse=True)[:8]:
+            usage = _num(row.get("usage"))
+            bar_width = min(100, round(usage / bar_total * 100)) if bar_total else 0
+            row_html.append(
+                "<tr>"
+                f"<td><b>{_escape_html(row.get('room_number'))}</b><div class='dash-sub'>{_escape_html(row.get('tenant_name') or '无租客')}</div></td>"
+                f"<td>{_escape_html(row.get('meter_no') or '')}</td>"
+                f"<td>{_escape_html(row.get('previous_reading') or '')}</td>"
+                f"<td><b>{_escape_html(row.get('reading') or '')}</b></td>"
+                f"<td>{_escape_html(usage if row.get('usage') is not None else '')}<div class='dash-bar'><i style='width:{bar_width}%'></i></div></td>"
+                f"<td>{_escape_html(_money(row.get('cost_amount')))}</td>"
+                f"<td>{'有照片' if row.get('photo') else '无'}</td>"
+                "</tr>"
+            )
+        section_html.append(
+            f"""
+            <section class="dash-section">
+              <div class="dash-section-head">
+                <h3>{_escape_html(section.get('meter_type_label') or '')}</h3>
+                <span>{_escape_html(section.get('recorded') or 0)} 已录入 / {_escape_html(section.get('missing') or 0)} 未录入</span>
+              </div>
+              <table>
+                <thead><tr><th>房间</th><th>表号</th><th>上月</th><th>本月</th><th>用量</th><th>成本</th><th>照片</th></tr></thead>
+                <tbody>{''.join(row_html) or '<tr><td colspan="7">暂无数据</td></tr>'}</tbody>
+              </table>
+            </section>
+            """
+        )
+
+    table_rows = []
+    for row in top_rows:
+        table_rows.append(
+            "<tr>"
+            f"<td>{_escape_html(row.get('meter_type_label') or '')}</td>"
+            f"<td><b>{_escape_html(row.get('room_number'))}</b></td>"
+            f"<td>{_escape_html(row.get('tenant_name') or '无租客')}</td>"
+            f"<td>{_escape_html(row.get('previous_reading') or '')}</td>"
+            f"<td><b>{_escape_html(row.get('reading') or '')}</b></td>"
+            f"<td>{_escape_html(row.get('usage') or '')}</td>"
+            f"<td>{_escape_html(_money(row.get('cost_amount')))}</td>"
+            "</tr>"
+        )
+
+    return f"""
+    <div class="meter-dashboard">
+      <style>
+        .meter-dashboard{{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#F8FBFF;color:#0F172A;padding:16px;box-sizing:border-box}}
+        .meter-head{{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:14px}}
+        .meter-head h2{{margin:0;font-size:18px;line-height:1.3}}
+        .meter-head p{{margin:6px 0 0;color:#64748B;font-size:12px;line-height:1.5}}
+        .meter-grid{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}}
+        .dash-stat{{background:#fff;border:1px solid #DBEAFE;border-radius:8px;padding:12px 12px 10px;box-shadow:0 2px 8px rgba(15,23,42,.04)}}
+        .dash-stat span{{display:block;font-size:11px;color:#64748B}}
+        .dash-stat strong{{display:block;margin-top:6px;font-size:22px;line-height:1.2;color:#0F172A}}
+        .dash-stat em{{display:block;margin-top:4px;font-style:normal;font-size:11px;color:#94A3B8}}
+        .dash-section{{margin-top:14px;background:#fff;border:1px solid #E2E8F0;border-radius:8px;overflow:hidden}}
+        .dash-section-head{{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:12px 14px;border-bottom:1px solid #E2E8F0;background:#F8FAFC}}
+        .dash-section-head h3{{margin:0;font-size:14px;color:#0F172A}}
+        .dash-section-head span{{font-size:12px;color:#64748B}}
+        .dash-section table{{width:100%;border-collapse:collapse;font-size:12px}}
+        .dash-section th,.dash-section td{{padding:9px 10px;border-bottom:1px solid #E2E8F0;text-align:left;vertical-align:top}}
+        .dash-section th{{font-weight:600;color:#475569;background:#FBFDFF}}
+        .dash-section td b{{color:#0F172A}}
+        .dash-sub{{margin-top:2px;font-size:11px;color:#94A3B8}}
+        .dash-bar{{width:100%;height:6px;margin-top:6px;background:#E2E8F0;border-radius:999px;overflow:hidden}}
+        .dash-bar i{{display:block;height:100%;background:linear-gradient(90deg,#3B82F6,#14B8A6);border-radius:999px}}
+        .meter-grid-top{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}}
+        .meter-note{{margin-top:10px;font-size:11px;color:#64748B}}
+        @media (max-width:860px){{.meter-grid,.meter-grid-top{{grid-template-columns:repeat(2,minmax(0,1fr))}}}}
+      </style>
+      <div class="meter-head">
+        <div>
+          <h2>{_escape_html(building_name or "全部楼栋")} · {month} 水电分析看板</h2>
+          <p>聚焦本月表具录入、照片覆盖、异常读数和用量变化，方便快速看出哪几户波动明显。</p>
+        </div>
+      </div>
+      <div class="meter-grid-top">
+        {stat_card("已录入表具", f"{int(total_recorded)} 个", "本月有读数的表具")}
+        {stat_card("未录入表具", f"{int(total_missing)} 个", "还需要补录")}
+        {stat_card("带照片表具", f"{int(total_photo)} 个", "图片更容易回看")}
+        {stat_card("总用量 / 成本", f"{_money(total_usage)} / {_money(total_cost)}", "按固定成本口径")}
+      </div>
+      {''.join(section_html) or '<div class="dash-section"><div class="dash-section-head"><h3>水电表</h3><span>暂无数据</span></div></div>'}
+      <section class="dash-section">
+        <div class="dash-section-head">
+          <h3>本月用量变化较大</h3>
+          <span>优先关注这些房间</span>
+        </div>
+        <table>
+          <thead><tr><th>类型</th><th>房间</th><th>租客</th><th>上月</th><th>本月</th><th>用量</th><th>成本</th></tr></thead>
+          <tbody>{''.join(table_rows) or '<tr><td colspan="7">暂无数据</td></tr>'}</tbody>
+        </table>
+      </section>
+      <div class="meter-note">成本口径：水 2.1，电 0.6。</div>
+    </div>
+    """
+
+
+def _utility_revenue_html(month: str, building_name: str, plan_rows: List[Dict[str, Any]], meter_rows: List[Dict[str, Any]]) -> str:
+    meter_by_room: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for row in meter_rows:
+        room_number = str(row.get("room_number") or "").strip()
+        mtype = str(row.get("meter_type") or "").strip()
+        if room_number and mtype:
+            meter_by_room[(room_number, mtype)] = row
+
+    total_receivable = 0.0
+    total_paid = 0.0
+    total_cost = 0.0
+    rooms: List[Dict[str, Any]] = []
+    for row in plan_rows:
+        if not isinstance(row, dict):
+            continue
+        utility_amount = round(_num(row.get("components", {}).get("water_fee")) + _num(row.get("components", {}).get("electric_fee")), 2)
+        bill_total = _num(row.get("receivable"))
+        paid_for_bill = _num(row.get("paid"))
+        utility_ratio = utility_amount / bill_total if bill_total > 0 else 0
+        utility_paid = min(utility_amount, paid_for_bill * utility_ratio) if utility_amount > 0 else 0.0
+        water_row = meter_by_room.get((str(row.get("room_number") or "").strip(), "water"))
+        electric_row = meter_by_room.get((str(row.get("room_number") or "").strip(), "electric"))
+        water_usage = _num((water_row or {}).get("usage"))
+        electric_usage = _num((electric_row or {}).get("usage"))
+        cost = round(
+            water_usage * WATER_COST_PRICE + electric_usage * ELECTRIC_COST_PRICE,
+            2,
+        )
+        profit = round(utility_paid - cost, 2)
+        rooms.append({
+            "room_number": row.get("room_number"),
+            "tenant": row.get("tenant"),
+            "utility_amount": utility_amount,
+            "utility_paid": utility_paid,
+            "cost": cost,
+            "profit": profit,
+            "water_usage": water_usage,
+            "electric_usage": electric_usage,
+        })
+        total_receivable += utility_amount
+        total_paid += utility_paid
+        total_cost += cost
+
+    profit_total = round(total_paid - total_cost, 2)
+    top_rooms = sorted(rooms, key=lambda item: abs(_num(item.get("profit"))), reverse=True)[:8]
+    rows_html = []
+    for row in top_rooms:
+        rows_html.append(
+            "<tr>"
+            f"<td><b>{_escape_html(row.get('room_number'))}</b></td>"
+            f"<td>{_escape_html(row.get('tenant') or '无租客')}</td>"
+            f"<td>{_escape_html(_money(row.get('utility_amount')))}</td>"
+            f"<td>{_escape_html(_money(row.get('utility_paid')))}</td>"
+            f"<td>{_escape_html(_money(row.get('cost')))}</td>"
+            f"<td><b>{_escape_html(_money(row.get('profit')))}</b></td>"
+            "</tr>"
+        )
+    return f"""
+    <div class="meter-dashboard">
+      <style>
+        .meter-dashboard{{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#F8FBFF;color:#0F172A;padding:16px;box-sizing:border-box}}
+        .meter-head{{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:14px}}
+        .meter-head h2{{margin:0;font-size:18px;line-height:1.3}}
+        .meter-head p{{margin:6px 0 0;color:#64748B;font-size:12px;line-height:1.5}}
+        .meter-grid-top{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}}
+        .dash-stat{{background:#fff;border:1px solid #DBEAFE;border-radius:8px;padding:12px 12px 10px;box-shadow:0 2px 8px rgba(15,23,42,.04)}}
+        .dash-stat span{{display:block;font-size:11px;color:#64748B}}
+        .dash-stat strong{{display:block;margin-top:6px;font-size:22px;line-height:1.2;color:#0F172A}}
+        .dash-stat em{{display:block;margin-top:4px;font-style:normal;font-size:11px;color:#94A3B8}}
+        .dash-section{{margin-top:14px;background:#fff;border:1px solid #E2E8F0;border-radius:8px;overflow:hidden}}
+        .dash-section-head{{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:12px 14px;border-bottom:1px solid #E2E8F0;background:#F8FAFC}}
+        .dash-section-head h3{{margin:0;font-size:14px;color:#0F172A}}
+        .dash-section-head span{{font-size:12px;color:#64748B}}
+        .dash-section table{{width:100%;border-collapse:collapse;font-size:12px}}
+        .dash-section th,.dash-section td{{padding:9px 10px;border-bottom:1px solid #E2E8F0;text-align:left;vertical-align:top}}
+        .dash-section th{{font-weight:600;color:#475569;background:#FBFDFF}}
+        .dash-note{{margin-top:10px;font-size:11px;color:#64748B}}
+        @media (max-width:860px){{.meter-grid-top{{grid-template-columns:repeat(2,minmax(0,1fr))}}}}
+      </style>
+      <div class="meter-head">
+        <div>
+          <h2>{_escape_html(building_name or "全部楼栋")} · {month} 收益看板</h2>
+          <p>这里按水 2.1、电 0.6 的成本口径，快速看每户水电收入、实收、成本和利润。</p>
+        </div>
+      </div>
+      <div class="meter-grid-top">
+        <div class="dash-stat"><span>水电应收</span><strong>{_escape_html(_money(total_receivable))}</strong><em>账单里水费+电费总和</em></div>
+        <div class="dash-stat"><span>水电实收</span><strong>{_escape_html(_money(total_paid))}</strong><em>按收款比例估算</em></div>
+        <div class="dash-stat"><span>水电成本</span><strong>{_escape_html(_money(total_cost))}</strong><em>按实际用量计算</em></div>
+        <div class="dash-stat"><span>水电收益</span><strong>{_escape_html(_money(profit_total))}</strong><em>实收减成本</em></div>
+      </div>
+      <section class="dash-section">
+        <div class="dash-section-head">
+          <h3>本月收益变化较大房间</h3>
+          <span>优先看这些户</span>
+        </div>
+        <table>
+          <thead><tr><th>房间</th><th>租客</th><th>应收</th><th>实收</th><th>成本</th><th>收益</th></tr></thead>
+          <tbody>{''.join(rows_html) or '<tr><td colspan="6">暂无数据</td></tr>'}</tbody>
+        </table>
+      </section>
+      <div class="dash-note">收益看板会随着账单实收和表具用量变化一起更新。</div>
+    </div>
+    """
+
+
+def _utility_revenue_card(month: str, building_name: str, plan_rows: List[Dict[str, Any]], meter_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {
+        "id": f"utility_revenue_{month}",
+        "type": "html",
+        "title": f"{month} 收益看板",
+        "description": "按水 2.1、电 0.6 的成本口径计算本月水电收益。",
+        "html": _utility_revenue_html(month, building_name, plan_rows, meter_rows),
+    }
 
 
 def _clean_room_text(room_number: Any) -> str:
@@ -1439,6 +1873,40 @@ def _meter_binding_text(meter_id: Any) -> str:
     return str(meter.get("meter_no") or ("表具 ID " + str(mid)))
 
 
+def _room_status_label(status: Any) -> str:
+    text = str(status or "").strip()
+    if text == "rented":
+        return "在租"
+    if text == "idle":
+        return "闲置"
+    return text or "未填写"
+
+
+def _room_change_text(field: str, value: Any) -> str:
+    if field == "status":
+        return _room_status_label(value)
+    if field == "floor":
+        return str(value or "未填写") + " 楼"
+    return str(value or "未填写")
+
+
+def _meter_type_label(meter_type: Any) -> str:
+    text = str(meter_type or "").strip().lower()
+    if text in {"water", "水", "水表"}:
+        return "水表"
+    if text in {"electric", "电", "电表"}:
+        return "电表"
+    return str(meter_type or "未填写")
+
+
+def _meter_change_text(field: str, value: Any) -> str:
+    if field == "type":
+        return _meter_type_label(value)
+    if field == "init_reading":
+        return _money(value) if isinstance(value, (int, float)) else str(value or "未填写")
+    return str(value or "未填写")
+
+
 def _contract_change_text(field: str, value: Any) -> str:
     if field in {"monthly_rent", "water_unit_price", "electric_unit_price", "deposit"}:
         return "¥" + _money(value)
@@ -1584,6 +2052,8 @@ def contract_update_from_ai(
 def contract_create_from_ai(
     tenant_id: Any = None,
     tenant_name: Any = None,
+    tenant_phone: Any = None,
+    tenant_id_card: Any = None,
     room_id: Any = None,
     room_number: Any = None,
     building_id: Any = None,
@@ -1602,6 +2072,8 @@ def contract_create_from_ai(
     form_values = {
         "building_name": resolved_building_name or str(building_name or "").strip(),
         "tenant_name": str(tenant_name or "").strip(),
+        "tenant_phone": str(tenant_phone or "").strip(),
+        "tenant_id_card": str(tenant_id_card or "").strip(),
         "room_number": str(room_number or "").strip(),
         "start_date": str(start_date or "").strip(),
         "end_date": str(end_date or "").strip(),
@@ -1651,21 +2123,31 @@ def contract_create_from_ai(
             "form_action": _contract_create_form_action(form_values, missing_fields, "新建合同还缺少必要信息，请补充后提交。"),
         }
 
-    tenant, error = _resolve_tenant_for_contract(tenant_id, tenant_name, resolved_building_id)
-    if not tenant:
-        return {
-            "success": False,
-            "requires_form": True,
-            "message": error,
-            "form_action": _contract_create_form_action(form_values, ["tenant_name"], error),
-        }
-    room, error = _resolve_room_for_contract(room_id, room_number, resolved_building_id)
+    tenant, tenant_error = _resolve_tenant_for_contract(tenant_id, tenant_name, resolved_building_id)
+    room, room_error = _resolve_room_for_contract(room_id, room_number, resolved_building_id)
     if not room:
         return {
             "success": False,
             "requires_form": True,
-            "message": error,
-            "form_action": _contract_create_form_action(form_values, ["room_number"], error),
+            "message": room_error,
+            "form_action": _contract_create_form_action(form_values, ["room_number"], room_error),
+        }
+    if not tenant:
+        if tenant_error.startswith("匹配到多个"):
+            return {
+                "success": False,
+                "requires_form": True,
+                "message": tenant_error,
+                "form_action": _contract_create_form_action(form_values, ["tenant_name"], tenant_error),
+            }
+        tenant = {
+            "id": None,
+            "name": form_values["tenant_name"],
+            "phone": form_values["tenant_phone"],
+            "id_card": form_values["tenant_id_card"],
+            "building_id": resolved_building_id or room.get("building_id"),
+            "room_id": str(room.get("id")),
+            "status": "active",
         }
 
     existing_contract = _find_active_contract(room_number=room.get("room_number"), building_id=room.get("building_id"))
@@ -1708,6 +2190,9 @@ def contract_create_from_ai(
 
     contract_payload = {
         "tenant_id": tenant.get("id"),
+        "tenant_name": tenant.get("name"),
+        "tenant_phone": tenant.get("phone"),
+        "tenant_id_card": tenant.get("id_card"),
         "room_id": room.get("id"),
         "start_date": normalized_start,
         "end_date": normalized_end or "",
@@ -1743,6 +2228,9 @@ def contract_create_from_ai(
             "building_name": room.get("building_name"),
             "room_number": room.get("room_number"),
             "tenant_name": tenant.get("name"),
+            "tenant_phone": tenant.get("phone"),
+            "tenant_id_card": tenant.get("id_card"),
+            "room_type": room.get("room_type"),
             "change_items": change_items,
         },
     )
@@ -1761,15 +2249,24 @@ def contract_create_from_ai(
 def confirm_create_contract(contract: Any = None) -> Dict[str, Any]:
     if not isinstance(contract, dict):
         return {"success": False, "message": "确认新建合同时缺少合同内容"}
-    tenant = db.get_tenant(_int_or_none(contract.get("tenant_id")))
     room = db.get_room(_int_or_none(contract.get("room_id")))
-    if not tenant:
-        return {"success": False, "message": "确认新建合同时未找到租户"}
     if not room:
         return {"success": False, "message": "确认新建合同时未找到房间"}
     existing_contract = _find_active_contract(room_number=room.get("room_number"), building_id=room.get("building_id"))
     if existing_contract and _int_or_none(existing_contract.get("room_id")) == _int_or_none(room.get("id")):
         return {"success": False, "message": "该房间已有有效合同，无法新建。"}
+
+    tenant = db.get_tenant(_int_or_none(contract.get("tenant_id")))
+    if not tenant:
+        tenant = _create_tenant_for_contract(
+            tenant_name=contract.get("tenant_name"),
+            tenant_phone=contract.get("tenant_phone"),
+            tenant_id_card=contract.get("tenant_id_card"),
+            building_id=room.get("building_id"),
+            room_id=room.get("id"),
+        )
+    if not tenant:
+        return {"success": False, "message": "确认新建合同时未找到租户"}
 
     start_date, error = _normalize_contract_date(contract.get("start_date"))
     if error:
@@ -1807,8 +2304,8 @@ def confirm_create_contract(contract: Any = None) -> Dict[str, Any]:
     db.update_tenant(
         tenant.get("id"),
         tenant.get("name") or "",
-        tenant.get("phone") or "",
-        tenant.get("id_card") or "",
+        str(contract.get("tenant_phone") or tenant.get("phone") or ""),
+        str(contract.get("tenant_id_card") or tenant.get("id_card") or ""),
         "active",
         room.get("building_id"),
         str(room.get("id")),
@@ -1870,6 +2367,7 @@ def _contract_summary(contract: Dict[str, Any]) -> Dict[str, Any]:
         "contract_id": contract.get("id"),
         "building_name": contract.get("building_name"),
         "room_number": contract.get("room_number"),
+        "room_type": contract.get("room_type"),
         "tenant_name": contract.get("tenant_name"),
         "tenant_phone": contract.get("tenant_phone"),
         "start_date": contract.get("start_date"),
@@ -1980,6 +2478,316 @@ def contract_tenant_list_empty_rooms(building_id: Any = None) -> Dict[str, Any]:
         if room.get("id") not in active_room_ids:
             rows.append(room)
     return {"count": len(rows), "rows": rows}
+
+
+def _room_with_building(room: Dict[str, Any]) -> Dict[str, Any]:
+    result = dict(room or {})
+    if result.get("building_name"):
+        return result
+    bid = _int_or_none(result.get("building_id"))
+    building = next((item for item in (db.get_buildings() or []) if _int_or_none(item.get("id")) == bid), None)
+    if building:
+        result["building_name"] = building.get("name")
+    return result
+
+
+def _resolve_room_for_update(
+    room_id: Any = None,
+    room_number: Any = None,
+    building_id: Any = None,
+) -> tuple[Optional[Dict[str, Any]], str]:
+    rid = _int_or_none(room_id)
+    if rid:
+        room = db.get_room(rid)
+        return (_room_with_building(room), "") if room else (None, "未找到该房间")
+    room, error = _resolve_room_for_contract(room_id, room_number, building_id)
+    return (_room_with_building(room), "") if room else (None, error)
+
+
+def _room_status_label(status: Any) -> str:
+    text = str(status or "").strip()
+    if text == "rented":
+        return "在租"
+    if text == "idle":
+        return "闲置"
+    return text or "未填写"
+
+
+def _room_change_text(field: str, value: Any) -> str:
+    if field == "status":
+        return _room_status_label(value)
+    if field == "floor":
+        return str(value or "未填写") + " 楼"
+    return str(value or "未填写")
+
+
+def _validate_room_changes(room: Dict[str, Any], requested: Dict[str, Any]) -> tuple[Optional[Dict[str, Any]], str]:
+    changes: Dict[str, Any] = {}
+    for field, raw in requested.items():
+        if field == "room_number":
+            value = str(raw or "").strip()
+            if not value:
+                return None, "房间号不能为空"
+            changes[field] = value
+        elif field == "room_type":
+            value = str(raw or "").strip()
+            if not value:
+                return None, "户型不能为空"
+            if len(value) > 32:
+                return None, "户型不能超过 32 个字符"
+            changes[field] = value
+        elif field == "floor":
+            value = _int_or_none(raw)
+            if value is None or value < 0 or value > 200:
+                return None, "楼层应为 0 到 200 之间的整数"
+            changes[field] = value
+        elif field == "status":
+            text = str(raw or "").strip().lower()
+            status_map = {"idle": "idle", "闲置": "idle", "空置": "idle", "rented": "rented", "在租": "rented", "已租": "rented"}
+            if text not in status_map:
+                return None, "房间状态只能是闲置或在租"
+            changes[field] = status_map[text]
+
+    if not changes:
+        return None, "请说明要修改房间号、楼层、户型或状态中的哪一项"
+
+    if "room_number" in changes:
+        building_id = _int_or_none(room.get("building_id"))
+        duplicate = [
+            item for item in db.get_rooms(building_id) or []
+            if str(item.get("room_number") or "").strip() == changes["room_number"]
+            and _int_or_none(item.get("id")) != _int_or_none(room.get("id"))
+        ]
+        if duplicate:
+            return None, "该楼栋已存在同名房间号"
+    return changes, ""
+
+
+def room_update_from_ai(
+    room_id: Any = None,
+    room_number: Any = None,
+    building_id: Any = None,
+    new_room_number: Any = _UNSET,
+    room_type: Any = _UNSET,
+    floor: Any = _UNSET,
+    status: Any = _UNSET,
+) -> Dict[str, Any]:
+    room, error = _resolve_room_for_update(room_id, room_number, building_id)
+    if not room:
+        return {"success": False, "message": error}
+
+    supplied = {"room_number": new_room_number, "room_type": room_type, "floor": floor, "status": status}
+    requested = {key: value for key, value in supplied.items() if value is not _UNSET}
+    changes, error = _validate_room_changes(room, requested)
+    if not changes:
+        return {"success": False, "message": error}
+
+    actual_changes = {}
+    change_items = []
+    for field, after in changes.items():
+        before = room.get(field)
+        unchanged = _int_or_none(before) == _int_or_none(after) if field == "floor" else str(before or "") == str(after or "")
+        if unchanged:
+            continue
+        actual_changes[field] = after
+        change_items.append({
+            "field": field,
+            "label": ROOM_UPDATE_LABELS[field],
+            "before": _room_change_text(field, before),
+            "after": _room_change_text(field, after),
+        })
+
+    if not actual_changes:
+        return {"success": False, "message": "房间当前内容已经是你指定的值，无需修改"}
+
+    action = _pending_action(
+        "update_room",
+        "修改{} {}：{}".format(room.get("building_name") or "", room.get("room_number") or "", "、".join(item["label"] for item in change_items)).strip(),
+        "confirm_update_room",
+        {"room_id": room.get("id"), "changes": actual_changes},
+        {
+            "building_name": room.get("building_name"),
+            "room_number": room.get("room_number"),
+            "room_type": room.get("room_type"),
+            "change_items": change_items,
+        },
+    )
+    return {
+        "success": True,
+        "requires_confirmation": True,
+        "action": "room_update_prepared",
+        "room": room,
+        "changes": actual_changes,
+        "pending_action": action,
+        "message": "房间修改内容已准备，请用户确认后再写入。",
+    }
+
+
+def confirm_update_room(room_id: Any, changes: Any = None) -> Dict[str, Any]:
+    room = db.get_room(_int_or_none(room_id))
+    if not room:
+        return {"success": False, "message": "确认修改时未找到该房间"}
+    if not isinstance(changes, dict):
+        return {"success": False, "message": "确认修改时缺少房间变更内容"}
+    normalized, error = _validate_room_changes(_room_with_building(room), changes)
+    if not normalized:
+        return {"success": False, "message": error}
+    db.update_room(
+        room.get("id"),
+        room.get("building_id"),
+        normalized.get("room_number", room.get("room_number") or ""),
+        normalized.get("floor", room.get("floor") or 1),
+        normalized.get("status", room.get("status") or "idle"),
+        normalized.get("room_type", room.get("room_type") or "单间"),
+    )
+    updated = _room_with_building(db.get_room(room.get("id")) or {})
+    return {
+        "success": True,
+        "action": "room_updated",
+        "room_id": room.get("id"),
+        "changed_fields": list(normalized.keys()),
+        "room": updated,
+        "message": "房间已更新",
+    }
+
+
+def _resolve_meter_for_update(
+    meter_id: Any = None,
+    room_number: Any = None,
+    meter_type: Any = None,
+    building_id: Any = None,
+) -> tuple[Optional[Dict[str, Any]], str]:
+    mid = _int_or_none(meter_id)
+    if mid:
+        meter = db.get_meter(mid)
+        return (meter, "") if meter else (None, "未找到该表具")
+
+    normalized_type = _normalize_meter_type(meter_type)
+    if not normalized_type:
+        return None, "请说明要修改水表还是电表"
+    room, error = _resolve_room_for_update(room_number=room_number, building_id=building_id)
+    if not room:
+        return None, error
+    matches = [item for item in db.get_meters(room.get("id"), room.get("building_id"), normalized_type) or [] if str(item.get("type") or "") == normalized_type]
+    if len(matches) == 1:
+        return matches[0], ""
+    if len(matches) > 1:
+        names = "、".join("{}(ID {})".format(item.get("meter_no") or _meter_type_label(item.get("type")), item.get("id")) for item in matches[:8])
+        return None, "匹配到多个表具，请补充表具 ID：" + names
+    return None, "未找到该房间对应的" + _meter_type_label(normalized_type)
+
+
+def _validate_meter_changes(meter: Dict[str, Any], requested: Dict[str, Any]) -> tuple[Optional[Dict[str, Any]], str]:
+    changes: Dict[str, Any] = {}
+    for field, raw in requested.items():
+        if field == "meter_no":
+            changes[field] = str(raw or "").strip()
+        elif field == "init_reading":
+            value = _float_or_none(raw)
+            if value is None or value < 0:
+                return None, "初始读数应为大于等于 0 的数字"
+            changes[field] = round(value, 4)
+    if not changes:
+        return None, "请说明要修改表号或初始读数"
+    return changes, ""
+
+
+def _meter_change_text(field: str, value: Any) -> str:
+    if field == "init_reading":
+        return _money(value)
+    return str(value or "未填写")
+
+
+def meter_update_from_ai(
+    meter_id: Any = None,
+    room_number: Any = None,
+    meter_type: Any = None,
+    building_id: Any = None,
+    meter_no: Any = _UNSET,
+    init_reading: Any = _UNSET,
+) -> Dict[str, Any]:
+    meter, error = _resolve_meter_for_update(meter_id, room_number, meter_type, building_id)
+    if not meter:
+        return {"success": False, "message": error}
+    supplied = {"meter_no": meter_no, "init_reading": init_reading}
+    requested = {key: value for key, value in supplied.items() if value is not _UNSET}
+    changes, error = _validate_meter_changes(meter, requested)
+    if not changes:
+        return {"success": False, "message": error}
+
+    actual_changes = {}
+    change_items = []
+    for field, after in changes.items():
+        before = meter.get(field)
+        unchanged = abs(_num(before) - _num(after)) < 0.0001 if field == "init_reading" else str(before or "") == str(after or "")
+        if unchanged:
+            continue
+        actual_changes[field] = after
+        change_items.append({
+            "field": field,
+            "label": METER_UPDATE_LABELS[field],
+            "before": _meter_change_text(field, before),
+            "after": _meter_change_text(field, after),
+        })
+    if not actual_changes:
+        return {"success": False, "message": "表具当前内容已经是你指定的值，无需修改"}
+
+    action = _pending_action(
+        "update_meter",
+        "修改{} {} {}：{}".format(
+            meter.get("building_name") or "",
+            meter.get("room_number") or "",
+            _meter_type_label(meter.get("type")),
+            "、".join(item["label"] for item in change_items),
+        ).strip(),
+        "confirm_update_meter",
+        {"meter_id": meter.get("id"), "changes": actual_changes},
+        {
+            "building_name": meter.get("building_name"),
+            "room_number": meter.get("room_number"),
+            "meter_type": meter.get("type"),
+            "meter_type_label": _meter_type_label(meter.get("type")),
+            "meter_no": meter.get("meter_no"),
+            "change_items": change_items,
+        },
+    )
+    return {
+        "success": True,
+        "requires_confirmation": True,
+        "action": "meter_update_prepared",
+        "meter": meter,
+        "changes": actual_changes,
+        "pending_action": action,
+        "message": "表具修改内容已准备，请用户确认后再写入。",
+    }
+
+
+def confirm_update_meter(meter_id: Any, changes: Any = None) -> Dict[str, Any]:
+    meter = db.get_meter(_int_or_none(meter_id))
+    if not meter:
+        return {"success": False, "message": "确认修改时未找到该表具"}
+    if not isinstance(changes, dict):
+        return {"success": False, "message": "确认修改时缺少表具变更内容"}
+    normalized, error = _validate_meter_changes(meter, changes)
+    if not normalized:
+        return {"success": False, "message": error}
+    db.update_meter(
+        meter.get("id"),
+        meter.get("room_id"),
+        meter.get("type") or "water",
+        normalized.get("meter_no", meter.get("meter_no") or ""),
+        normalized.get("init_reading", meter.get("init_reading") or 0),
+        None,
+    )
+    updated = db.get_meter(meter.get("id"))
+    return {
+        "success": True,
+        "action": "meter_updated",
+        "meter_id": meter.get("id"),
+        "changed_fields": list(normalized.keys()),
+        "meter": updated,
+        "message": "表具已更新",
+    }
 
 
 def _payment_records(building_id: Any = None) -> List[Dict[str, Any]]:
@@ -2265,6 +3073,8 @@ ROOM_PROP = {"type": "string", "description": "房间号，例如 101"}
 TENANT_PROP = {"type": "string", "description": "租户/租客姓名；用户只提到租户时可用"}
 BILL_ID_PROP = {"type": "integer", "description": "账单 ID"}
 CONTRACT_ID_PROP = {"type": "integer", "description": "合同 ID"}
+ROOM_ID_PROP = {"type": "integer", "description": "房间 ID"}
+METER_ID_PROP = {"type": "integer", "description": "表具 ID"}
 METER_TYPE_PROP = {"type": "string", "enum": ["water", "electric"], "description": "水表 water，电表 electric；不传表示全部"}
 OTHER_FEE_DETAILS_PROP = {
     "type": "array",
@@ -2356,9 +3166,28 @@ TOOL_SCHEMAS = [
         "electric_meter_id": {"type": "integer", "description": "新的电表 ID，必须属于合同房间"},
         "other_fee_details": OTHER_FEE_DETAILS_PROP,
     }),
-    _tool_schema("contract_create_from_ai", "准备新建租房合同。按租户和房间定位，返回待确认操作，不直接写库。", {
-        "tenant_id": {"type": "integer", "description": "租户 ID；如果只知道姓名，可传 tenant_name"},
+    _tool_schema("room_update_from_ai", "准备修改房间信息。可改房间号、楼层、户型或状态；返回待确认操作，不直接写库。", {
+        "room_id": ROOM_ID_PROP,
+        "room_number": ROOM_PROP,
+        "building_id": BUILDING_PROP,
+        "new_room_number": {"type": "string", "description": "新的房间号"},
+        "room_type": {"type": "string", "description": "新的户型"},
+        "floor": {"type": "integer", "description": "新的楼层"},
+        "status": {"type": "string", "enum": ["idle", "rented", "闲置", "在租", "已租", "空置"], "description": "新的房间状态"},
+    }),
+    _tool_schema("meter_update_from_ai", "准备修改表具初始信息。可改表号或初始读数；返回待确认操作，不直接写库。", {
+        "meter_id": METER_ID_PROP,
+        "room_number": ROOM_PROP,
+        "meter_type": METER_TYPE_PROP,
+        "building_id": BUILDING_PROP,
+        "meter_no": {"type": "string", "description": "新的表号"},
+        "init_reading": {"type": "number", "description": "新的初始读数"},
+    }),
+    _tool_schema("contract_create_from_ai", "准备新建租房合同。可选择已有租户，也可根据租客姓名、手机号和证件号准备新租户；返回待确认操作，不直接写库。", {
+        "tenant_id": {"type": "integer", "description": "已有租户 ID；如果要新建租户，不传 tenant_id，改传 tenant_name"},
         "tenant_name": TENANT_PROP,
+        "tenant_phone": {"type": "string", "description": "新租户手机号，可选"},
+        "tenant_id_card": {"type": "string", "description": "新租户证件号，可选"},
         "room_id": {"type": "integer", "description": "房间 ID；如果只知道房间号，可传 room_number"},
         "room_number": ROOM_PROP,
         "building_id": BUILDING_PROP,
@@ -2416,6 +3245,10 @@ _HANDLERS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "contract_tenant_list_empty_rooms": contract_tenant_list_empty_rooms,
     "contract_update_from_ai": contract_update_from_ai,
     "confirm_update_contract": confirm_update_contract,
+    "room_update_from_ai": room_update_from_ai,
+    "confirm_update_room": confirm_update_room,
+    "meter_update_from_ai": meter_update_from_ai,
+    "confirm_update_meter": confirm_update_meter,
     "contract_create_from_ai": contract_create_from_ai,
     "confirm_create_contract": confirm_create_contract,
     "payment_list_paid": payment_list_paid,

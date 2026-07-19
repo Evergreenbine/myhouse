@@ -1,13 +1,57 @@
 import os
 import json
-import tempfile
 import unittest
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import local_db as db
 from app.services import ai_orchestrator
 from app.services import rental_dispatcher
+from app.services.ai_memory import build_memory_layers
+from app.services.business_knowledge import search_business_knowledge
 from app.services.skill_executor import _contract_create_form_action, execute_tool
+
+
+@contextmanager
+def mysql_test_transaction():
+    engine = db._mysql_engine()
+    raw = engine.raw_connection()
+    original_conn = db._conn
+    original_cache_get = db._cache_get
+    original_cache_set = db._cache_set
+    original_clear_cache = db.clear_rental_cache
+
+    def _cache_get(_key):
+        return db._CACHE_MISS
+
+    def _cache_set(_key, _value, ttl=None):
+        return None
+
+    def _test_conn():
+        conn = db._MySQLConnection(raw, pooled=False)
+        conn.commit = lambda: None
+        conn.close = lambda: None
+        return conn
+
+    db._conn = _test_conn
+    db._cache_get = _cache_get
+    db._cache_set = _cache_set
+    db.clear_rental_cache = lambda: None
+    try:
+        yield
+    finally:
+        try:
+            raw.rollback()
+        except Exception:
+            pass
+        try:
+            raw.close()
+        except Exception:
+            pass
+        db._conn = original_conn
+        db._cache_get = original_cache_get
+        db._cache_set = original_cache_set
+        db.clear_rental_cache = original_clear_cache
 
 
 BUILDINGS = [
@@ -17,6 +61,11 @@ BUILDINGS = [
 
 
 class ContractOrchestrationTests(unittest.TestCase):
+    def test_greeting_uses_friendly_reply(self):
+        result = ai_orchestrator._chat_linear({"prompt": "你好", "history": [], "session_context": {}})
+        self.assertIn("你好，我在", result["reply"])
+        self.assertIn("查某个月水电表", result["reply"])
+
     def test_colloquial_contract_request_extracts_building_and_room(self):
         prompt = "石潭布302帮我建个合同"
         with patch.object(ai_orchestrator.db, "get_buildings", return_value=BUILDINGS):
@@ -261,20 +310,187 @@ class ContractOrchestrationTests(unittest.TestCase):
         self.assertEqual(call_json.call_count, 1)
 
 
+class RoomMeterUpdateTests(unittest.TestCase):
+    def test_room_update_from_ai_prepares_pending_action_and_confirms(self):
+        with mysql_test_transaction():
+                db.init()
+                building_id = db.add_building("测试楼栋")
+                room_id = db.add_room(building_id, "201", floor=1, status="rented", room_type="单间")
+
+                prepared = execute_tool("room_update_from_ai", {
+                    "room_id": room_id,
+                    "new_room_number": "202",
+                    "room_type": "一房一厅",
+                    "floor": 3,
+                    "status": "闲置",
+                })["data"]
+                confirmed = execute_tool("confirm_update_room", prepared["pending_action"]["args"])["data"]
+                room = db.get_room(room_id)
+
+        self.assertTrue(prepared["success"])
+        self.assertTrue(prepared["requires_confirmation"])
+        self.assertEqual(prepared["changes"]["room_number"], "202")
+        self.assertTrue(confirmed["success"])
+        self.assertEqual(room["room_number"], "202")
+        self.assertEqual(room["room_type"], "一房一厅")
+        self.assertEqual(room["floor"], 3)
+        self.assertEqual(room["status"], "idle")
+
+    def test_meter_update_from_ai_prepares_pending_action_and_confirms(self):
+        with mysql_test_transaction():
+                db.init()
+                building_id = db.add_building("测试楼栋")
+                room_id = db.add_room(building_id, "201")
+                meter_id = db.add_meter(room_id, "water", meter_no="W-0001", init_reading=0)
+
+                prepared = execute_tool("meter_update_from_ai", {
+                    "meter_id": meter_id,
+                    "meter_no": "W-1001",
+                    "init_reading": 12.5,
+                })["data"]
+                confirmed = execute_tool("confirm_update_meter", prepared["pending_action"]["args"])["data"]
+                meter = db.get_meter(meter_id)
+
+        self.assertTrue(prepared["success"])
+        self.assertTrue(prepared["requires_confirmation"])
+        self.assertEqual(prepared["changes"]["meter_no"], "W-1001")
+        self.assertTrue(confirmed["success"])
+        self.assertEqual(meter["meter_no"], "W-1001")
+        self.assertAlmostEqual(float(meter["init_reading"]), 12.5, places=4)
+
+    def test_room_and_meter_update_prompts_route_to_dedicated_workflows(self):
+        room_prompt = "把301房间户型改成一房一厅，楼层改成3楼"
+        meter_prompt = "把301水表初始读数改成12.5，表号改成W-1001"
+
+        with patch.object(ai_orchestrator.db, "get_buildings", return_value=BUILDINGS):
+            room_intent = ai_orchestrator._detect_intent({"prompt": room_prompt, "session_context": {}})
+            meter_intent = ai_orchestrator._detect_intent({"prompt": meter_prompt, "session_context": {}})
+            room_plan = ai_orchestrator._tool_plan_for_intent(room_intent, {})
+            meter_plan = ai_orchestrator._tool_plan_for_intent(meter_intent, {})
+            system_prompt = ai_orchestrator._build_system_prompt(
+                room_prompt,
+                "",
+                "",
+                "",
+                "",
+                session_context={},
+                intent=room_intent,
+                tool_plan=room_plan,
+            )
+
+        self.assertEqual(room_intent["workflow"], "room_manage")
+        self.assertEqual(meter_intent["workflow"], "meter_manage")
+        self.assertIn("room_update_from_ai", room_plan["allowed_tools"])
+        self.assertIn("meter_update_from_ai", meter_plan["allowed_tools"])
+        self.assertIn("room_update_from_ai", system_prompt)
+        self.assertIn("meter_update_from_ai", system_prompt)
+
+    def test_room_update_detects_common_room_type_phrases(self):
+        prompt = "测试楼栋201改成一房一厅"
+
+        with patch.object(ai_orchestrator.db, "get_buildings", return_value=[{"id": 1, "name": "测试楼栋"}]):
+            intent = ai_orchestrator._detect_intent({"prompt": prompt, "session_context": {}})
+            fields = ai_orchestrator._extract_common_fields(prompt)
+
+        self.assertEqual(intent["workflow"], "room_manage")
+        self.assertEqual(fields["room_number"], "201")
+        self.assertEqual(fields["room_type"], "一房一厅")
+
+    def test_monthly_meter_status_exposes_photo_cards_and_dashboard_html(self):
+        with mysql_test_transaction():
+                db.init()
+                building_id = db.add_building("测试楼栋")
+                room_id = db.add_room(building_id, "201")
+                tenant_id = db.add_tenant("测试租客", building_id=building_id, room_id=str(room_id))
+                contract_id = db.add_contract(
+                    tenant_id,
+                    room_id,
+                    "2026-07-01",
+                    monthly_rent=800,
+                    water_price=4,
+                    electric_price=1,
+                )
+                water_meter = db.add_meter(room_id, "water", meter_no="W-001", init_reading=10)
+                electric_meter = db.add_meter(room_id, "electric", meter_no="E-001", init_reading=100)
+                db.save_monthly_meter_reading(water_meter, "2026-07", 18, "data:image/png;base64,waterphoto", "water")
+                db.save_monthly_meter_reading(electric_meter, "2026-07", 120, "data:image/png;base64,electricphoto", "electric")
+                bill_id = db.add_bill(
+                    contract_id,
+                    "2026-07",
+                    800,
+                    water_fee=32,
+                    electric_fee=20,
+                    water_last=10,
+                    water_curr=18,
+                    electric_last=100,
+                    electric_curr=120,
+                )
+                db.add_payment(bill_id, 852, "2026-07-18")
+
+                meter_result = execute_tool("meter_reading_list_month_status", {
+                    "month": "2026-07",
+                    "building_id": building_id,
+                })["data"]
+                rent_result = execute_tool("rent_plan_list_month_status", {
+                    "month": "2026-07",
+                    "building_id": building_id,
+                })["data"]
+                final = ai_orchestrator._finalize_chat_response(
+                    "",
+                    {"prompt": "看看7月水电表和收益看板", "session_context": {"thread_id": "transient"}},
+                    [{"ok": True, "tool": "meter_reading_list_month_status", "data": meter_result}],
+                    [],
+                )
+
+        self.assertTrue(meter_result["analysis_cards"])
+        self.assertEqual(meter_result["analysis_cards"][0]["type"], "photo_gallery")
+        self.assertEqual(meter_result["analysis_cards"][0]["items"][0]["photo"], "data:image/png;base64,waterphoto")
+        self.assertEqual(meter_result["analysis_cards"][1]["type"], "html")
+        self.assertIn("水电分析看板", meter_result["analysis_cards"][1]["html"])
+        self.assertEqual(rent_result["analysis_cards"][0]["type"], "html")
+        self.assertIn("收益看板", rent_result["dashboard_html"])
+        self.assertTrue(final["analysis_cards"])
+        self.assertIn("分析看板", final["reply"])
+
+    def test_room_meter_reading_exposes_photo_card_when_photo_exists(self):
+        with mysql_test_transaction():
+                db.init()
+                building_id = db.add_building("测试楼栋")
+                room_id = db.add_room(building_id, "201")
+                tenant_id = db.add_tenant("测试租客", building_id=building_id, room_id=str(room_id))
+                db.add_contract(
+                    tenant_id,
+                    room_id,
+                    "2026-07-01",
+                    monthly_rent=800,
+                    water_price=4,
+                    electric_price=1,
+                )
+                water_meter = db.add_meter(room_id, "water", meter_no="W-001", init_reading=10)
+                db.save_monthly_meter_reading(water_meter, "2026-07", 18, "data:image/png;base64,waterphoto", "water")
+
+                room_result = execute_tool("meter_reading_get_room_reading", {
+                    "room_number": "201",
+                    "meter_type": "water",
+                    "month": "2026-07",
+                    "building_id": building_id,
+                })["data"]
+
+        self.assertTrue(room_result["found"])
+        self.assertTrue(room_result["analysis_cards"])
+        self.assertEqual(room_result["analysis_cards"][0]["type"], "photo_gallery")
+        self.assertEqual(room_result["analysis_cards"][0]["items"][0]["photo"], "data:image/png;base64,waterphoto")
+
+
 class ContractPersistenceTests(unittest.TestCase):
     def test_ai_thread_state_and_trace_persist_in_local_db(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            original_path = db.DB_PATH
-            db.DB_PATH = os.path.join(temp_dir, "local.db")
-            try:
+        with mysql_test_transaction():
                 db.init()
                 db.save_ai_thread_state("thread-test", {"session_context": {"active_workflow": "contract_create"}})
                 db.append_ai_trace("thread-test", "route", {"next": "contract_form"})
 
                 state = db.load_ai_thread_state("thread-test")
                 traces = db.load_ai_trace("thread-test")
-            finally:
-                db.DB_PATH = original_path
 
         self.assertEqual(state["session_context"]["active_workflow"], "contract_create")
         self.assertEqual(traces[0]["event"], "route")
@@ -291,24 +507,59 @@ class ContractPersistenceTests(unittest.TestCase):
         self.assertEqual(payload["electric_price"], 1.2)
 
     def test_active_contract_marks_room_as_rented(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            original_path = db.DB_PATH
-            db.DB_PATH = os.path.join(temp_dir, "local.db")
-            try:
+        with mysql_test_transaction():
+            db.init()
+            building_id = db.add_building("测试楼栋")
+            room_id = db.add_room(building_id, "201")
+            tenant_id = db.add_tenant("测试租客", building_id=building_id, room_id=str(room_id))
+            db.add_contract(tenant_id, room_id, "2026-07-01", monthly_rent=800)
+            self.assertEqual(db.get_room(room_id)["status"], "rented")
+
+    def test_contract_queries_include_room_type(self):
+        with mysql_test_transaction():
                 db.init()
                 building_id = db.add_building("测试楼栋")
-                room_id = db.add_room(building_id, "201")
+                room_id = db.add_room(building_id, "301", room_type="商铺")
                 tenant_id = db.add_tenant("测试租客", building_id=building_id, room_id=str(room_id))
-                db.add_contract(tenant_id, room_id, "2026-07-01", monthly_rent=800)
-                self.assertEqual(db.get_room(room_id)["status"], "rented")
-            finally:
-                db.DB_PATH = original_path
+                contract_id = db.add_contract(tenant_id, room_id, "2026-07-01", monthly_rent=1200)
+
+                contract = db.get_contract(contract_id)
+                contracts = db.get_contracts(True, building_id)
+
+        self.assertEqual(contract["room_type"], "商铺")
+        self.assertEqual(contracts[0]["room_type"], "商铺")
+
+    def test_ai_contract_create_prepares_new_tenant_until_confirmed(self):
+        with mysql_test_transaction():
+                db.init()
+                building_id = db.add_building("测试楼栋")
+                db.add_room(building_id, "302", room_type="一房一厅")
+
+                prepared = execute_tool("contract_create_from_ai", {
+                    "building_id": building_id,
+                    "room_number": "302",
+                    "tenant_name": "新租客",
+                    "tenant_phone": "13800000000",
+                    "start_date": "2026-07-01",
+                    "monthly_rent": 900,
+                })["data"]
+                tenants_before_confirm = db.get_tenants(True, building_id)
+                confirmed = execute_tool(
+                    "confirm_create_contract",
+                    prepared["pending_action"]["args"],
+                )["data"]
+                tenant = db.get_tenant(confirmed["contract"]["tenant_id"])
+
+        self.assertTrue(prepared["success"])
+        self.assertTrue(prepared["requires_confirmation"])
+        self.assertEqual(tenants_before_confirm, [])
+        self.assertTrue(confirmed["success"])
+        self.assertEqual(confirmed["contract"]["tenant_name"], "新租客")
+        self.assertEqual(confirmed["contract"]["room_type"], "一房一厅")
+        self.assertEqual(tenant["phone"], "13800000000")
 
     def test_contract_other_fees_default_into_bill_draft(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            original_path = db.DB_PATH
-            db.DB_PATH = os.path.join(temp_dir, "local.db")
-            try:
+        with mysql_test_transaction():
                 db.init()
                 building_id = db.add_building("测试楼栋")
                 room_id = db.add_room(building_id, "201")
@@ -327,8 +578,6 @@ class ContractPersistenceTests(unittest.TestCase):
                     "month": "2026-07",
                 })
                 draft = result["data"]
-            finally:
-                db.DB_PATH = original_path
 
         self.assertTrue(draft["success"])
         self.assertEqual(draft["draft"]["other_fee_details"], other_fees)
@@ -360,6 +609,37 @@ class ContractPersistenceTests(unittest.TestCase):
         self.assertEqual(meter_args[0]["room_number"], "301")
         self.assertEqual(meter_args[0]["month"], "2026-06")
         self.assertEqual({item["meter_type"] for item in meter_args}, {"water", "electric"})
+
+    def test_eval_cases_cover_core_ai_workflows(self):
+        case_path = os.path.join(os.path.dirname(__file__), "ai_eval_cases.json")
+        with open(case_path, "r", encoding="utf-8") as f:
+            cases = json.load(f)
+
+        self.assertTrue(cases)
+        for case in cases:
+            intent = ai_orchestrator._detect_intent({"prompt": case["prompt"], "session_context": {}})
+            self.assertEqual(intent["workflow"], case["workflow"], msg=case["prompt"])
+
+    def test_memory_layers_and_business_knowledge_smoke(self):
+        layers = build_memory_layers(
+            session_context={
+                "thread_id": "thread-1",
+                "active_workflow": "contract_create",
+                "room_number": "201",
+                "tenant_name": "张三",
+            },
+            prompt="帮我新建合同，合同里要有户型，还能直接新建租户",
+            intent={"workflow": "contract_create", "confidence": 0.98},
+            workflow_state={"name": "contract_create", "status": "active"},
+            tool_plan={"workflow": "contract_create", "steps": ["a", "b"]},
+            pending_actions=[{"id": "1", "type": "create_contract", "label": "新建合同"}],
+        )
+        hits = search_business_knowledge("合同里要有户型，还能直接新建租户", top_k=2)
+
+        self.assertIn("short_term", layers)
+        self.assertIn("workflow_state", layers)
+        self.assertIn("pending_actions", layers)
+        self.assertTrue(hits)
 
 
 if __name__ == "__main__":

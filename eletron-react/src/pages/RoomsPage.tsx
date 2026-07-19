@@ -3,8 +3,10 @@ import { rental } from '../api'
 import { Modal, Button, Input, showToast } from '../components/ui'
 import { resolveBuildingId, useUIStore } from '../store'
 
-interface Room { id: number; room_number: string; floor: number; status: string; building_name: string; building_id: number }
+interface Room { id: number; room_number: string; room_type?: string; floor: number; status: string; building_name: string; building_id: number }
 interface Building { id: number; name: string; rent_day?: number }
+
+const ROOM_TYPES = ['单间', '一房一厅', '商铺']
 
 interface State {
   rooms: Record<number, Room[]>
@@ -14,6 +16,7 @@ interface State {
   modal: boolean
   editId: number | null
   roomNumber: string
+  roomType: string
   floor: string
   buildingId: string
   status: 'idle' | 'rented'
@@ -28,6 +31,7 @@ export class RoomsPage extends React.Component<{}, State> {
     modal: false,
     editId: null,
     roomNumber: '',
+    roomType: '单间',
     floor: '1',
     buildingId: '',
     status: 'idle',
@@ -63,7 +67,7 @@ export class RoomsPage extends React.Component<{}, State> {
 
   openAdd = () => {
     this.setState({
-      editId: null, roomNumber: '', floor: '1',
+      editId: null, roomNumber: '', roomType: '单间', floor: '1',
       buildingId: String(this.state.curBid || ''), status: 'idle', modal: true,
     })
   }
@@ -71,16 +75,16 @@ export class RoomsPage extends React.Component<{}, State> {
     const r = await rental('rooms', 'get', { id })
     if (r && !r.error) {
       this.setState({
-        editId: id, roomNumber: r.room_number || '', floor: String(r.floor || 1),
+        editId: id, roomNumber: r.room_number || '', roomType: r.room_type || '单间', floor: String(r.floor || 1),
         buildingId: String(r.building_id || ''), status: r.status === 'rented' ? 'rented' : 'idle', modal: true,
       })
     }
   }
 
   save = async () => {
-    const { roomNumber, floor, buildingId, status, editId, curBid } = this.state
+    const { roomNumber, roomType, floor, buildingId, status, editId, curBid } = this.state
     if (!roomNumber.trim()) { showToast('请输入房间号'); return }
-    const data = { room_number: roomNumber.trim(), floor: parseInt(floor) || 1, building_id: parseInt(buildingId), status }
+    const data = { room_number: roomNumber.trim(), room_type: roomType || '单间', floor: parseInt(floor) || 1, building_id: parseInt(buildingId), status }
     const res = editId
       ? await rental('rooms', 'update', { ...data, id: editId })
       : await rental('rooms', 'add', data)
@@ -95,7 +99,7 @@ export class RoomsPage extends React.Component<{}, State> {
   }
 
   render() {
-    const { rooms, buildings, curBid, loading, modal, editId, roomNumber, floor, buildingId, status } = this.state
+    const { rooms, buildings, curBid, loading, modal, editId, roomNumber, roomType, floor, buildingId, status } = this.state
 
     if (buildings.length === 0) return (
       <div>
@@ -127,13 +131,14 @@ export class RoomsPage extends React.Component<{}, State> {
           ) : (
             <div className="table-wrap">
               <table>
-                <thead><tr><th>房间号</th><th className="status-cell">状态</th></tr></thead>
+                <thead><tr><th>房间号</th><th>户型</th><th className="status-cell">状态</th></tr></thead>
                 <tbody>
                   {curRooms.map((r: Room) => {
                     const rented = r.status === 'rented'
                     return (
                       <tr key={r.id}>
                         <td><span className="name-link" onClick={() => this.openEdit(r.id)}>{r.room_number}</span></td>
+                        <td>{r.room_type || '单间'}</td>
                         <td className="status-cell">
                           <span className={'status-dot ' + (rented ? 'rented' : 'idle')} title={rented ? '在租' : '闲置'} />
                         </td>
@@ -171,6 +176,21 @@ export class RoomsPage extends React.Component<{}, State> {
             <div className="form-group">
               <label>房间号</label>
               <Input value={roomNumber} onChange={v => this.setState({ roomNumber: v })} placeholder="如：101" />
+            </div>
+            <div className="form-group">
+              <label>户型</label>
+              <div className="room-type-segment">
+                {ROOM_TYPES.map(type => (
+                  <button
+                    key={type}
+                    type="button"
+                    className={roomType === type ? 'active' : ''}
+                    onClick={() => this.setState({ roomType: type })}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="form-group">
               <label>状态</label>

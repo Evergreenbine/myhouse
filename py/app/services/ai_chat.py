@@ -7,12 +7,16 @@ from ai_knowledge import init_knowledge_base, search_knowledge
 from ai_service import PROVIDERS, ai_svc
 
 from app.services.ai_context import build_rental_ai_context
+from app.services.business_knowledge import format_business_knowledge_hits, search_business_knowledge
 
 
 GUIDED_HELP_REPLY = (
-    "我还不能确定你遇到的具体问题。请告诉我：你正在做什么（查询、录入读数、生成账单或收款），"
-    "涉及哪个楼栋、房间和月份，以及现在卡在哪一步或页面显示了什么。"
-    "我会根据这些信息告诉你下一步怎么处理。"
+    "我还不能确定你遇到的具体问题。你可以直接说要查什么、改什么或录什么，我会接着帮你处理。"
+)
+
+GREETING_REPLY = (
+    "你好，我在。你可以直接说：查某个月水电表、看收益看板、建合同、改房间户型，"
+    "或者录入读数和收款。"
 )
 
 
@@ -25,6 +29,16 @@ def _safe_ai_reply(content):
     if not text or any(marker.lower() in text.lower() for marker in technical_markers):
         return GUIDED_HELP_REPLY
     return text
+
+
+def _looks_like_greeting(prompt):
+    text = str(prompt or "").strip().lower()
+    if not text:
+        return False
+    greetings = ("你好", "您好", "嗨", "在吗", "hello", "hi", "哈喽", "早上好", "晚上好")
+    if text in greetings:
+        return True
+    return len(text) <= 8 and any(word in text for word in greetings)
 
 
 def test_provider(data):
@@ -87,14 +101,23 @@ def chat(data):
 
     try:
         prompt = data.get("prompt", "")
+        if _looks_like_greeting(prompt):
+            response = {"type": "assistant_message", "content": GREETING_REPLY, "pending_actions": [], "bill_images": []}
+            if orchestrator_error:
+                response["orchestrator_error"] = orchestrator_error
+            return {"reply": GREETING_REPLY, "orchestrator_error": orchestrator_error, "response": response}
         history = data.get("history", [])
         relevant = search_knowledge(prompt, top_k=3)
+        business_hits = search_business_knowledge(prompt, top_k=3)
         knowledge_text = ""
         if relevant:
             knowledge_text = "\n\n相关系统API参考：\n" + "\n".join([
                 "### " + r["title"] + "\n" + r["content"]
                 for r in relevant
             ])
+        business_text = ""
+        if business_hits:
+            business_text = "\n\n相关业务规则参考：\n" + format_business_knowledge_hits(business_hits)
 
         data_context = build_rental_ai_context(prompt)
         profile = db.load_app_user() or {}
@@ -109,12 +132,15 @@ def chat(data):
             "识别或解释机械式电表时，黑色数字窗口从左到右是整数位，可能超过4位；标0.1/0.01、红色数字、红框小窗或白底小窗通常是小数位，租房抄表默认忽略小数，只录整数。"
             "例如黑色整数位2088、右侧0.1小数位9，应按2088处理，不要按20889处理。"
             "识别或解释机械式水表时，优先读取长方形数字窗整数位，忽略下方小圆盘小数位，并去掉前导零；例如00712按712处理。"
+            "房间修改里的 room_type 就是户型；如果用户说一房一厅、单间、开间、套间等，也要当作户型修改，不要说系统没有户型字段。"
             "回答简洁实用，首行先给结论，后面用简短分组和紧凑表格。"
             "不要频繁使用 Markdown 大标题、横线和表情符号；除非确实需要，不要输出 ##、---。"
             "\n\n实时系统数据：\n" + data_context
         )
         if knowledge_text:
             system_prompt += knowledge_text
+        if business_text:
+            system_prompt += business_text
 
         messages = [{"role": "system", "content": system_prompt}]
         for h in history:

@@ -39,6 +39,35 @@ interface BillReceiptImage {
   }
 }
 
+interface AIAnalysisPhoto {
+  id?: string
+  photo?: string
+  title?: string
+  room_number?: string
+  tenant_name?: string
+  meter_no?: string
+  reading?: number | string | null
+  previous_reading?: number | string | null
+  usage?: number | string | null
+  month?: string
+}
+
+interface AIAnalysisCard {
+  id?: string
+  type: "html" | "photo_gallery"
+  title: string
+  description?: string
+  html?: string
+  items?: AIAnalysisPhoto[]
+}
+
+interface AIProcessStep {
+  key: string
+  label: string
+  state: "active" | "done"
+  detail?: string
+}
+
 interface AIPendingAction {
   id: string
   type: string
@@ -108,6 +137,7 @@ interface AIMeterBuilding {
 interface AIMeterRoom {
   id: number
   room_number: string
+  room_type?: string
   building_id: number
   tenant_id?: number | null
   tenant_name?: string
@@ -143,6 +173,7 @@ interface AIMessage {
   pendingActions?: AIPendingAction[]
   suggestedActions?: AISuggestedAction[]
   formActions?: AIFormAction[]
+  analysisCards?: AIAnalysisCard[]
   sessionContext?: AISessionContext
 }
 
@@ -166,6 +197,7 @@ interface AIChatState {
   pendingActionLoadingId: string
   pendingActionLoadingCommand: "" | "confirm" | "cancel"
   aiStatusText: string
+  processSteps: AIProcessStep[]
   formValues: Record<string, Record<string, string>>
   sessionContext: AISessionContext
   meterBuildings: AIMeterBuilding[]
@@ -183,7 +215,7 @@ const QUICK_PROMPTS = [
   { label: "收款异常", prompt: "本月有没有部分收款、待发送、待收款的账单？请分别列出来。" },
 ]
 
-const AI_GUIDED_HELP_REPLY = "我还不能确定你遇到的具体问题。请告诉我你正在做什么（查询、录入读数、生成账单或收款），涉及哪个楼栋、房间和月份，以及现在卡在哪一步或页面显示了什么。我会根据这些信息告诉你下一步怎么处理。"
+const AI_GUIDED_HELP_REPLY = "我还不能确定你遇到的具体问题。你可以直接说要查什么、改什么或录什么，我会接着帮你处理。"
 
 function safeAssistantReply(value: any, fallback = AI_GUIDED_HELP_REPLY) {
   var text = String(value || "").trim()
@@ -192,7 +224,7 @@ function safeAssistantReply(value: any, fallback = AI_GUIDED_HELP_REPLY) {
   return text
 }
 
-async function postSse(path: string, payload: any, onStatus: (text: string) => void) {
+async function postSse(path: string, payload: any, onStatus: (event: string, text: string, payload: any) => void) {
   var response = await fetch(API_BASE + path, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...getAuthHeaders() },
@@ -215,7 +247,7 @@ async function postSse(path: string, payload: any, onStatus: (text: string) => v
     if (!dataLines.length) return
     var data = JSON.parse(dataLines.join("\n"))
     if (eventName === "status") {
-      onStatus(String(data.text || ""))
+      onStatus(String(data.event || ""), String(data.text || ""), data.payload || {})
     } else if (eventName === "result") {
       result = data
     } else if (eventName === "error") {
@@ -256,6 +288,7 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
     pendingActionLoadingId: "",
     pendingActionLoadingCommand: "",
     aiStatusText: "",
+    processSteps: [],
     formValues: {},
     sessionContext: {},
     meterBuildings: [],
@@ -275,6 +308,22 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
   private tenantOptionsLoading = new Set<number>()
   private aiThreadId = "client:" + Date.now().toString(36) + ":" + Math.random().toString(36).slice(2)
 
+  private processStepLabels: Record<string, string> = {
+    graph_start: "正在理解你的问题",
+    semantic_intent: "正在识别你想做什么",
+    route: "正在判断业务流程",
+    prepare_context: "正在整理业务背景",
+    call_model: "正在思考下一步",
+    run_tools: "正在查询业务数据",
+    finalize: "正在整理回复",
+    graph_end: "已完成",
+    pending_command: "正在处理你的确认",
+    contract_form: "正在整理合同信息",
+    meter_reading: "正在处理水电表读数",
+    rent_only_summary: "正在汇总账单信息",
+    empty_prompt: "请先补充一点内容",
+  }
+
   makeThreadId = () => {
     return "client:" + Date.now().toString(36) + ":" + Math.random().toString(36).slice(2)
   }
@@ -283,12 +332,71 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
     if (context?.thread_id) this.aiThreadId = String(context.thread_id)
   }
 
+  getProcessLabel = (event: string, text: string, payload: any) => {
+    if (event === "graph_start" && payload && typeof payload === "object") {
+      var prompt = String(payload.prompt || "")
+      var monthMatch = prompt.match(/(20\d{2})\D{0,3}([01]?\d)\s*月/)
+      if (monthMatch && (prompt.includes("水电") || prompt.includes("水表") || prompt.includes("电表"))) {
+        return "正在查 " + monthMatch[1] + "-" + String(monthMatch[2]).padStart(2, "0") + " 的水电表"
+      }
+    }
+    if (event === "meter_reading" && payload && typeof payload === "object") {
+      var promptText = String(payload.prompt || "")
+      var meterMonth = promptText.match(/(20\d{2})\D{0,3}([01]?\d)\s*月/)
+      if (meterMonth && (promptText.includes("水电") || promptText.includes("水表") || promptText.includes("电表"))) {
+        return "正在查 " + meterMonth[1] + "-" + String(meterMonth[2]).padStart(2, "0") + " 的水电表"
+      }
+    }
+    if (event === "run_tools" && payload && typeof payload === "object") {
+      var results = Array.isArray(payload.results) ? payload.results : []
+      var toolNames = results.map((item: any) => String(item.tool || "")).filter(Boolean)
+      if (toolNames.includes("meter_reading_list_month_status") && toolNames.includes("rent_plan_list_month_status")) {
+        return "正在整理收益看板"
+      }
+      if (toolNames.includes("meter_reading_list_month_status")) {
+        return "正在整理水电表照片和明细"
+      }
+    }
+    return this.processStepLabels[event] || text || "正在处理"
+  }
+
+  updateProcessSteps = (event: string, text: string, payload: any) => {
+    const label = this.getProcessLabel(event, text, payload)
+    const detail = payload && typeof payload === "object"
+      ? String(payload.reply || payload.text || payload.message || payload.workflow || payload.intent?.workflow || "").trim()
+      : ""
+    this.setState(state => {
+      const next = (state.processSteps || []).map(step => step.state === "active" ? { ...step, state: "done" as const } : step)
+      if (event === "graph_end") {
+        if (next.length === 0) {
+          return { processSteps: [{ key: event || "graph_end", label: label || "已完成", state: "done" as const, detail: detail }] }
+        }
+        const finished = next.map(step => ({ ...step, state: "done" as const }))
+        finished.push({ key: event || "graph_end", label: label || "已完成", state: "done" as const, detail: detail })
+        return { processSteps: finished.slice(-5) }
+      }
+      const key = event || label
+      const existing = next.findIndex(step => step.key === key)
+      if (existing >= 0) {
+        next[existing] = { ...next[existing], label, state: "active", detail }
+      } else {
+        next.push({ key, label, state: "active", detail })
+      }
+      return { processSteps: next.slice(-5) }
+    })
+  }
+
+  clearProcessSteps = () => {
+    this.setState({ processSteps: [] })
+  }
+
   callAIChat = async (data: Record<string, any>) => {
     var payload = { table: "_ai", action: "chat", data }
-    this.setState({ aiStatusText: "\u6b63\u5728\u5f00\u59cb\u5904\u7406" })
+    this.setState({ aiStatusText: "\u6b63\u5728\u5f00\u59cb\u5904\u7406", processSteps: [] })
     try {
-      return await postSse("/api/ai/chat/stream", payload, text => {
+      return await postSse("/api/ai/chat/stream", payload, (event, text, stepPayload) => {
         if (text) this.setState({ aiStatusText: text })
+        if (event) this.updateProcessSteps(event, text, stepPayload)
       })
     } catch {
       this.setState({ aiStatusText: "\u6b63\u5728\u67e5\u8be2\u6570\u636e\u5e76\u6574\u7406\u7ed3\u679c" })
@@ -507,6 +615,58 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
     )
   }
 
+  renderAnalysisPhotoGallery = (items: AIAnalysisPhoto[] = []) => {
+    if (!items.length) return null
+    return (
+      <div className="ai-analysis-photo-grid">
+        {items.map((item, index) => (
+          <div key={item.id || `${index}`} className="ai-analysis-photo-card">
+            <button type="button" className="ai-analysis-photo" onClick={() => item.photo && this.setState({ activePreviewImage: item.photo })} title="查看照片">
+              {item.photo ? <img src={item.photo} alt={item.title || item.room_number || "表具照片"} /> : <div className="ai-analysis-photo-empty">无照片</div>}
+            </button>
+            <div className="ai-analysis-photo-meta">
+              <strong>{item.title || item.room_number || "表具"}</strong>
+              <span>{item.tenant_name || "无租客"}{item.month ? " · " + item.month : ""}</span>
+              <span>{item.reading !== null && item.reading !== undefined ? "读数 " + item.reading : ""}{item.usage !== null && item.usage !== undefined ? " · 用量 " + item.usage : ""}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  renderAnalysisCard = (card: AIAnalysisCard, key: string) => {
+    if (!card) return null
+    return (
+      <div className="ai-analysis-card" key={key}>
+        <div className="ai-analysis-card-head">
+          <div>
+            <strong>{card.title}</strong>
+            {card.description && <span>{card.description}</span>}
+          </div>
+        </div>
+        {card.type === "photo_gallery" ? this.renderAnalysisPhotoGallery(card.items || []) : (
+          <iframe
+            className="ai-analysis-iframe"
+            title={card.title}
+            srcDoc={card.html || "<!doctype html><html><body style='margin:0;font-family:sans-serif;background:#F8FBFF;color:#0F172A;padding:16px;'>暂无看板</body></html>"}
+            sandbox=""
+          />
+        )}
+      </div>
+    )
+  }
+
+  renderAnalysisCards = (cards: AIAnalysisCard[] = []) => {
+    const validCards = cards.filter(card => card && (card.type === "photo_gallery" ? (card.items || []).length > 0 : Boolean(card.html)))
+    if (!validCards.length) return null
+    return <div className="ai-analysis-list">{validCards.map((card, index) => this.renderAnalysisCard(card, card.id || `analysis-${index}`))}</div>
+  }
+
+  renderProcessSteps = (steps: AIProcessStep[] = []) => {
+    return null
+  }
+
   toggle = () => {
     this.setState(s => {
       if (!s.open) {
@@ -521,7 +681,7 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
   newChat = () => {
     this.skipNextHistoryAutoRestore = true
     this.aiThreadId = this.makeThreadId()
-    this.setState({ messages: [], convId: 0, pendingActions: [], pendingActionLoadingId: "", pendingActionLoadingCommand: "", attachments: [], attachmentPanelOpen: false, attachmentDragActive: false, formValues: {}, sessionContext: {} })
+    this.setState({ messages: [], convId: 0, pendingActions: [], pendingActionLoadingId: "", pendingActionLoadingCommand: "", attachments: [], attachmentPanelOpen: false, attachmentDragActive: false, formValues: {}, sessionContext: {}, processSteps: [], aiStatusText: "" })
     setTimeout(() => this.inputRef.current?.focus(), 50)
   }
 
@@ -622,7 +782,7 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
       if (this.state.convId === id) {
         this.skipNextHistoryAutoRestore = true
         this.aiThreadId = this.makeThreadId()
-        this.setState({ messages: [], convId: 0, pendingActions: [], pendingActionLoadingId: "", pendingActionLoadingCommand: "", attachments: [], attachmentPanelOpen: false, attachmentDragActive: false, loading: false })
+        this.setState({ messages: [], convId: 0, pendingActions: [], pendingActionLoadingId: "", pendingActionLoadingCommand: "", attachments: [], attachmentPanelOpen: false, attachmentDragActive: false, loading: false, processSteps: [], aiStatusText: "" })
       }
       showToast("已删除")
     })
@@ -633,7 +793,7 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
       await rental("_ai", "archive_chat", { id })
       if (this.state.convId === id) {
         this.aiThreadId = this.makeThreadId()
-        this.setState({ messages: [], convId: 0, pendingActions: [] })
+        this.setState({ messages: [], convId: 0, pendingActions: [], processSteps: [], aiStatusText: "" })
       }
       showToast("已归档")
     })
@@ -677,20 +837,21 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
     if (this.state.loading || !input) return
     var convIdAtStart = this.state.convId
     var msgs = [...this.state.messages, { role: "user" as const, content: input }]
-    this.setState({ messages: msgs, loading: true, aiStatusText: "\u6b63\u5728\u5f00\u59cb\u5904\u7406" })
+    this.setState({ messages: msgs, loading: true, aiStatusText: "\u6b63\u5728\u5f00\u59cb\u5904\u7406", processSteps: [] })
     this.scrollBottom()
     try {
       var res = await this.callAIChat({ prompt: input, history: this.state.messages.slice(-10), pending_actions: this.state.pendingActions, session_context: { ...this.state.sessionContext, thread_id: this.aiThreadId }, chat_thread_id: this.aiThreadId, conversation_id: this.state.convId || "" })
       var reply = safeAssistantReply(res?.response?.content || res?.reply)
       var nextPendingActions = res?.response?.pending_actions || res?.pending_actions || []
       var responseBillImages = res?.response?.bill_images || res?.bill_images || []
+      var analysisCards = res?.response?.analysis_cards || res?.analysis_cards || []
       var suggestedActions = res?.response?.suggested_actions || res?.suggested_actions || []
       var formActions = res?.response?.form_actions || res?.form_actions || []
       var sessionContext = res?.response?.session_context || res?.session_context || this.state.sessionContext
       this.syncThreadIdFromContext(sessionContext)
-      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions, suggestedActions, formActions, sessionContext }]
+      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, analysisCards, pendingActions: nextPendingActions, suggestedActions, formActions, sessionContext }]
       if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
-      this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions, sessionContext, aiStatusText: "" })
+      this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions, sessionContext, aiStatusText: "", processSteps: (this.state.processSteps || []).map(step => ({ ...step, state: "done" })) })
       this.scrollBottom()
       var title = input.substring(0, 30)
       if (this.state.convId > 0 && this.deletedChatIds.has(this.state.convId)) return
@@ -702,7 +863,7 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
     } catch {
       if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
       msgs = [...msgs, { role: "assistant" as const, content: AI_GUIDED_HELP_REPLY }]
-      this.setState({ messages: msgs, loading: false, aiStatusText: "" })
+      this.setState({ messages: msgs, loading: false, aiStatusText: "", processSteps: [] })
       this.scrollBottom()
     }
   }
@@ -743,6 +904,7 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
       var reply = safeAssistantReply(res?.response?.content || res?.reply, command === "cancel" ? "已取消这项操作" : AI_GUIDED_HELP_REPLY)
       var remainingActions = res?.response?.pending_actions || res?.pending_actions || []
       var responseBillImages = res?.response?.bill_images || res?.bill_images || []
+      var analysisCards = res?.response?.analysis_cards || res?.analysis_cards || []
       var suggestedActions = res?.response?.suggested_actions || res?.suggested_actions || []
       var formActions = res?.response?.form_actions || res?.form_actions || []
       var actionResult = res?.response?.action_result || res?.action_result || {}
@@ -763,6 +925,7 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
           ...message,
           sessionContext,
           billImages: responseBillImages.length > 0 ? [...(message.billImages || []), ...responseBillImages] : message.billImages,
+          analysisCards: analysisCards.length > 0 ? [...(message.analysisCards || []), ...analysisCards] : message.analysisCards,
           pendingActions: message.pendingActions?.map(item => item.id === action.id ? {
             ...item,
             status: actionStatus,
@@ -780,12 +943,12 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
         item.id && !updatedMessages.some(message => message.pendingActions?.some(existing => existing.id === item.id))
       ))
       var shouldAppendFollowUp = actionSucceeded && command === "confirm" && (
-        Boolean(reply) || suggestedActions.length > 0 || formActions.length > 0 || followUpPendingActions.length > 0
+        Boolean(reply) || suggestedActions.length > 0 || formActions.length > 0 || analysisCards.length > 0 || followUpPendingActions.length > 0
       )
       var messages = shouldAppendFollowUp
-        ? [...updatedMessages, { role: "assistant" as const, content: reply, suggestedActions, formActions, pendingActions: followUpPendingActions, sessionContext }]
+        ? [...updatedMessages, { role: "assistant" as const, content: reply, suggestedActions, formActions, analysisCards, pendingActions: followUpPendingActions, sessionContext }]
         : updatedMessages
-      this.setState({ messages, pendingActionLoadingId: "", pendingActionLoadingCommand: "", pendingActions: remainingActions, sessionContext, aiStatusText: "" })
+      this.setState({ messages, pendingActionLoadingId: "", pendingActionLoadingCommand: "", pendingActions: remainingActions, sessionContext, aiStatusText: "", processSteps: [] })
       await this.persistMessages(messages, action.label || "AI 操作")
     } catch {
       if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
@@ -797,7 +960,7 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
           statusMessage: AI_GUIDED_HELP_REPLY,
         } : item),
       }))
-      this.setState({ messages: fallbackMessages, pendingActionLoadingId: "", pendingActionLoadingCommand: "", aiStatusText: "" })
+      this.setState({ messages: fallbackMessages, pendingActionLoadingId: "", pendingActionLoadingCommand: "", aiStatusText: "", processSteps: [] })
       await this.persistMessages(fallbackMessages, action.label || "AI 操作")
     }
   }
@@ -833,6 +996,7 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
     var fields = [
       ["楼栋", preview.building_name || preview.building],
       ["房间", preview.room_number],
+      ["户型", preview.room_type],
       ["租客", preview.tenant_name],
       ["月份", preview.month],
       ["类型", preview.meter_type_label || preview.meter_type],
@@ -1070,6 +1234,84 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
     }, 0)
   }
 
+  getOtherFeeRows = (value: any) => {
+    if (Array.isArray(value)) {
+      var rows = value.map((item: any) => ({
+        name: String(item?.name || item?.project_name || "").trim(),
+        amount: String(item?.amount ?? "").trim(),
+      })).filter(item => item.name || item.amount)
+      return rows.length ? rows : [{ name: "", amount: "" }]
+    }
+    var text = String(value || "").trim()
+    if (!text) return [{ name: "", amount: "" }]
+    try {
+      var parsed = JSON.parse(text)
+      if (Array.isArray(parsed)) {
+        var parsedRows = parsed.map((item: any) => ({
+          name: String(item?.name || item?.project_name || "").trim(),
+          amount: String(item?.amount ?? "").trim(),
+        })).filter(item => item.name || item.amount)
+        if (parsedRows.length) return parsedRows
+      }
+    } catch {}
+    var matches = [...text.matchAll(/([\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z_-]{0,12})\s*(?:费|费用)?\s*[:：=]?\s*(\d+(?:\.\d+)?)/g)]
+    if (matches.length) {
+      return matches.map(match => ({
+        name: String(match[1] || "").trim().replace(/(费|费用)$/, "") + "费",
+        amount: String(match[2] || "").trim(),
+      }))
+    }
+    return [{ name: text, amount: "" }]
+  }
+
+  serializeOtherFeeRows = (rows: Array<{ name: string, amount: string }>) => {
+    var list = (rows || [])
+      .map(row => ({
+        name: String(row.name || "").trim(),
+        amount: String(row.amount || "").trim(),
+      }))
+      .filter(row => row.name && row.amount)
+      .map(row => ({ name: row.name, amount: Number(row.amount) }))
+      .filter(row => row.name && !Number.isNaN(row.amount) && row.amount > 0)
+    return list.length ? list : ""
+  }
+
+  updateOtherFeeRows = (form: AIFormAction, index: number, rows: Array<{ name: string, amount: string }>) => {
+    var key = this.getFormKey(form, index)
+    var current = this.getFormValues(form, index)
+    this.setState(s => ({
+      formValues: {
+        ...s.formValues,
+        [key]: { ...current, other_fee_details: JSON.stringify(rows) },
+      },
+    }))
+  }
+
+  updateOtherFeeRow = (form: AIFormAction, index: number, rowIndex: number, field: "name" | "amount", value: string) => {
+    var values = this.getFormValues(form, index)
+    var rows = this.getOtherFeeRows(values.other_fee_details)
+    rows[rowIndex] = { ...rows[rowIndex], [field]: value }
+    this.updateOtherFeeRows(form, index, rows)
+  }
+
+  addOtherFeeRow = (form: AIFormAction, index: number) => {
+    var values = this.getFormValues(form, index)
+    var rows = this.getOtherFeeRows(values.other_fee_details)
+    rows.push({ name: "", amount: "" })
+    this.updateOtherFeeRows(form, index, rows)
+  }
+
+  removeOtherFeeRow = (form: AIFormAction, index: number, rowIndex: number) => {
+    var values = this.getFormValues(form, index)
+    var rows = this.getOtherFeeRows(values.other_fee_details)
+    if (rows.length <= 1) {
+      this.updateOtherFeeRows(form, index, [{ name: "", amount: "" }])
+      return
+    }
+    rows.splice(rowIndex, 1)
+    this.updateOtherFeeRows(form, index, rows)
+  }
+
   runFormAction = (form: AIFormAction, index: number) => {
     if (this.state.loading) return
     var values = this.getFormValues(form, index)
@@ -1080,14 +1322,17 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
     }
     var prompt = form.prompt_template || ""
     if (form.type === "create_contract") {
+      var otherFeeRows = this.serializeOtherFeeRows(this.getOtherFeeRows(values.other_fee_details))
+      var otherFeeText = otherFeeRows ? JSON.stringify(otherFeeRows) : ""
       prompt = "请根据以下表单内容新建合同："
         + "楼栋ID " + (values.building_id || "") + "，楼栋名称 " + (values.building_name || "") + "，"
         + "房间ID " + (values.room_id || "") + "，房间号 " + (values.room_number || "") + "，"
         + "租户ID " + (values.tenant_id || "") + "，租户姓名 " + (values.tenant_name || "") + "，"
+        + "租客手机号 " + (values.tenant_phone || "") + "，证件号 " + (values.tenant_id_card || "") + "，"
         + "合同开始日期 " + (values.start_date || "") + "，合同结束日期 " + (values.end_date || "") + "，"
         + "月租 " + (values.monthly_rent || "") + "，水费单价 " + (values.water_unit_price || "") + "，"
         + "电费单价 " + (values.electric_unit_price || "") + "，保证金 " + (values.deposit || "") + "，"
-        + "其它费用 " + (values.other_fee_details || "") + "。"
+        + "其它费用 " + otherFeeText + "。"
     }
     Object.keys(values).forEach(key => {
       prompt = prompt.split("{" + key + "}").join(values[key] || "")
@@ -1112,7 +1357,7 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
           var selectedBuildingId = selectedBuilding?.id || 0
           var roomOptions = selectedBuilding ? (this.state.meterRooms[selectedBuilding.id] || []) : []
           var tenantOptions = selectedBuilding ? (this.state.formTenants[selectedBuilding.id] || []) : []
-          var roomSelectOptions = roomOptions.map(room => ({ value: String(room.id), label: room.room_number }))
+          var roomSelectOptions = roomOptions.map(room => ({ value: String(room.id), label: room.room_type ? `${room.room_number} · ${room.room_type}` : room.room_number }))
           if (!values.room_id && values.room_number && !roomSelectOptions.some(option => option.value === values.room_number)) {
             roomSelectOptions = [{ value: values.room_number, label: values.room_number }, ...roomSelectOptions]
           }
@@ -1124,55 +1369,123 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
             setTimeout(() => this.loadTenantsForBuilding(selectedBuildingId), 0)
           }
           this.syncFormTenantFromRoom(form, index, values)
+          const renderField = (field: AIFormField) => {
+            if (form.type === "create_contract" && field.name === "building_name") {
+              return (
+                <Select
+                  value={selectedBuilding ? String(selectedBuilding.id) : values.building_id || values.building_name || ""}
+                  placeholder={field.placeholder || "选择楼栋"}
+                  options={this.state.meterBuildings.map(building => ({ value: String(building.id), label: building.name }))}
+                  onChange={value => this.updateFormBuilding(form, index, value)}
+                />
+              )
+            }
+            if (form.type === "create_contract" && field.name === "room_number") {
+              return (
+                <Select
+                  value={values.room_id || values.room_number || ""}
+                  placeholder={selectedBuilding ? (field.placeholder || "选择房间") : "请先选择楼栋"}
+                  options={roomSelectOptions}
+                  onChange={value => this.updateFormRoom(form, index, value)}
+                />
+              )
+            }
+            if (form.type === "create_contract" && field.name === "tenant_name") {
+              return (
+                <>
+                  <input
+                    list={`ai-contract-tenants-${this.getFormKey(form, index)}`}
+                    type="text"
+                    value={values.tenant_name || ""}
+                    placeholder={selectedBuilding ? (field.placeholder || "选择或输入租客姓名") : "请先选择楼栋"}
+                    onChange={e => this.updateFormTenant(form, index, e.target.value)}
+                    disabled={this.state.loading}
+                  />
+                  <datalist id={`ai-contract-tenants-${this.getFormKey(form, index)}`}>
+                    {tenantSelectOptions.map(option => <option key={option.value} value={option.label} />)}
+                  </datalist>
+                </>
+              )
+            }
+            if (field.name === "other_fee_details") {
+              var rows = this.getOtherFeeRows(values.other_fee_details)
+              return (
+                <div className="ai-other-fee-editor">
+                  <table className="ai-other-fee-table">
+                    <thead>
+                      <tr><th>费用名称</th><th>金额</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, rowIndex) => (
+                        <tr key={rowIndex}>
+                          <td>
+                            <input
+                              type="text"
+                              value={row.name}
+                              placeholder="例如 网费"
+                              onChange={e => this.updateOtherFeeRow(form, index, rowIndex, "name", e.target.value)}
+                              disabled={this.state.loading}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              value={row.amount}
+                              placeholder="例如 50"
+                              onChange={e => this.updateOtherFeeRow(form, index, rowIndex, "amount", e.target.value)}
+                              disabled={this.state.loading}
+                            />
+                          </td>
+                          <td className="ai-other-fee-op">
+                            <button type="button" onClick={() => this.removeOtherFeeRow(form, index, rowIndex)} disabled={this.state.loading || rows.length === 1}>删</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="ai-other-fee-footer">
+                    <button type="button" onClick={() => this.addOtherFeeRow(form, index)} disabled={this.state.loading}>+ 添加一项</button>
+                  </div>
+                </div>
+              )
+            }
+            if (field.type === "date") {
+              return (
+                <DayPicker
+                  value={values[field.name] || ""}
+                  onChange={value => this.updateFormValue(form, index, field.name, value)}
+                  ariaLabel={field.label}
+                />
+              )
+            }
+            return (
+              <input
+                type={field.type === "number" ? "number" : "text"}
+                value={values[field.name] || ""}
+                placeholder={field.placeholder || ""}
+                onChange={e => this.updateFormValue(form, index, field.name, e.target.value)}
+                disabled={this.state.loading}
+              />
+            )
+          }
           return (
             <div className="ai-form-action" key={this.getFormKey(form, index)}>
               <div className="ai-form-action-head">
                 <span>{form.title || "补充信息"}</span>
                 {form.description && <em>{form.description}</em>}
               </div>
-              <div className="ai-form-action-grid">
-                {form.fields.map(field => (
-                  <label className={missingSet.has(field.name) ? "missing" : ""} key={field.name}>
-                    <span>{field.label}{field.required && <b>*</b>}</span>
-                    {form.type === "create_contract" && field.name === "building_name" ? (
-                      <Select
-                        value={selectedBuilding ? String(selectedBuilding.id) : values.building_id || values.building_name || ""}
-                        placeholder={field.placeholder || "选择楼栋"}
-                        options={this.state.meterBuildings.map(building => ({ value: String(building.id), label: building.name }))}
-                        onChange={value => this.updateFormBuilding(form, index, value)}
-                      />
-                    ) : form.type === "create_contract" && field.name === "room_number" ? (
-                      <Select
-                        value={values.room_id || values.room_number || ""}
-                        placeholder={selectedBuilding ? (field.placeholder || "选择房间") : "请先选择楼栋"}
-                        options={roomSelectOptions}
-                        onChange={value => this.updateFormRoom(form, index, value)}
-                      />
-                    ) : form.type === "create_contract" && field.name === "tenant_name" ? (
-                      <Select
-                        value={values.tenant_id || values.tenant_name || ""}
-                        placeholder={selectedBuilding ? (field.placeholder || "选择租客") : "请先选择楼栋"}
-                        options={tenantSelectOptions}
-                        onChange={value => this.updateFormTenant(form, index, value)}
-                      />
-                    ) : field.type === "date" ? (
-                      <DayPicker
-                        value={values[field.name] || ""}
-                        onChange={value => this.updateFormValue(form, index, field.name, value)}
-                        ariaLabel={field.label}
-                      />
-                    ) : (
-                      <input
-                        type={field.type === "number" ? "number" : "text"}
-                        value={values[field.name] || ""}
-                        placeholder={field.placeholder || ""}
-                        onChange={e => this.updateFormValue(form, index, field.name, e.target.value)}
-                        disabled={this.state.loading}
-                      />
-                    )}
-                  </label>
-                ))}
-              </div>
+              <table className="ai-form-action-table">
+                <tbody>
+                  {form.fields.map(field => (
+                    <tr className={missingSet.has(field.name) ? "missing" : ""} key={field.name}>
+                      <th>
+                        <span>{field.label}{field.required && <b>*</b>}</span>
+                      </th>
+                      <td>{renderField(field)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
               <div className="ai-form-action-buttons">
                 <button type="button" onClick={() => this.runFormAction(form, index)} disabled={this.state.loading}>
                   <CheckOutlined />{form.submit_label === "生成确认卡" ? "提交表单" : (form.submit_label || "提交表单")}
@@ -1234,6 +1547,7 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
         return [building.id, (rooms || []).map((room: any) => ({
           id: Number(room.id),
           room_number: String(room.room_number || ""),
+          room_type: String(room.room_type || ""),
           building_id: Number(building.id),
           tenant_id: contractByRoom[Number(room.id)]?.tenant_id || null,
           tenant_name: contractByRoom[Number(room.id)]?.tenant_name || "",
@@ -1490,7 +1804,7 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
       meterNumber: item.meterNumber,
     }))
     var msgs = [...this.state.messages, { role: "user" as const, content: userMsg, images: messageImages }]
-    this.setState({ messages: msgs, loading: true, attachments: [], attachmentPanelOpen: false, attachmentDragActive: false, aiStatusText: "\u6b63\u5728\u5f00\u59cb\u5904\u7406" })
+    this.setState({ messages: msgs, loading: true, attachments: [], attachmentPanelOpen: false, attachmentDragActive: false, aiStatusText: "\u6b63\u5728\u5f00\u59cb\u5904\u7406", processSteps: [] })
     this.scrollBottom()
 
     try {
@@ -1526,13 +1840,14 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
       var reply = safeAssistantReply(res?.response?.content || res?.reply)
       var nextPendingActions = res?.response?.pending_actions || res?.pending_actions || []
       var responseBillImages = res?.response?.bill_images || res?.bill_images || []
+      var analysisCards = res?.response?.analysis_cards || res?.analysis_cards || []
       var suggestedActions = res?.response?.suggested_actions || res?.suggested_actions || []
       var formActions = res?.response?.form_actions || res?.form_actions || []
       var sessionContext = res?.response?.session_context || res?.session_context || this.state.sessionContext
       this.syncThreadIdFromContext(sessionContext)
-      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, pendingActions: nextPendingActions, suggestedActions, formActions, sessionContext }]
+      msgs = [...this.replaceExistingBillImages(msgs, responseBillImages), { role: "assistant" as const, content: reply, billImages: responseBillImages, analysisCards, pendingActions: nextPendingActions, suggestedActions, formActions, sessionContext }]
       if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
-      this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions, sessionContext, aiStatusText: "" })
+      this.setState({ messages: msgs, loading: false, pendingActions: nextPendingActions, sessionContext, aiStatusText: "", processSteps: (this.state.processSteps || []).map(step => ({ ...step, state: "done" })) })
       this.scrollBottom()
       var title = input.substring(0, 30) || "图片识别"
       if (this.state.convId > 0 && this.deletedChatIds.has(this.state.convId)) return
@@ -1544,7 +1859,7 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
     } catch {
       if (convIdAtStart > 0 && this.deletedChatIds.has(convIdAtStart)) return
       msgs = [...msgs, { role: "assistant" as const, content: AI_GUIDED_HELP_REPLY }]
-      this.setState({ messages: msgs, loading: false, aiStatusText: "" })
+      this.setState({ messages: msgs, loading: false, aiStatusText: "", processSteps: [] })
       this.scrollBottom()
     }
   }
@@ -1695,6 +2010,7 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
                           {m.content}
                         </ReactMarkdown>
                         {m.billImages && m.billImages.map((image, j) => this.renderBillImage(image, i + "-" + j))}
+                        {this.renderAnalysisCards(m.analysisCards || [])}
                         {this.renderPendingActions(m.pendingActions || [])}
                         {this.renderFormActions(m.formActions || [])}
                         {this.renderSuggestedActions(m.suggestedActions || [])}
@@ -1711,13 +2027,17 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
               {s.loading && !s.pendingActionLoadingId && (
                 <div className="ai-msg-v2 bot">
                   <div className="ai-msg-avatar"><img src={s.aiAvatar} className="ai-bot-avatar" alt={s.aiNickname} /></div>
-                  <div className="ai-msg-bubble bot-bubble ai-loading">
-                    <span className="ai-loading-text">{s.aiStatusText || "\u6b63\u5728\u67e5\u8be2\u6570\u636e\u5e76\u6574\u7406\u7ed3\u679c"}</span>
-                    <span className="ai-dot-typing" aria-hidden="true">
-                      <i />
-                      <i />
-                      <i />
-                    </span>
+                  <div className="ai-msg-stack">
+                    <div className="ai-msg-bubble bot-bubble ai-loading">
+                      <div className="ai-loading-head">
+                        <span className="ai-loading-text">{s.aiStatusText || "\u6b63\u5728\u67e5\u8be2\u6570\u636e\u5e76\u6574\u7406\u7ed3\u679c"}</span>
+                        <span className="ai-dot-typing" aria-hidden="true">
+                          <i />
+                          <i />
+                          <i />
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}

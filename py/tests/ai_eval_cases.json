@@ -1,0 +1,12 @@
+[
+  {"prompt": "帮我新建一个合同，合同里要有户型，还能直接新建租户", "workflow": "contract_create"},
+  {"prompt": "把 2026-07 的水电分析看板给我看看", "workflow": "meter_analysis"},
+  {"prompt": "查一下 2026-07 201 房间的水表照片和读数", "workflow": "meter_reading"},
+  {"prompt": "这个房间退租后改成闲置", "workflow": "room_manage"},
+  {"prompt": "帮我改一下表具初始读数和表号", "workflow": "meter_manage"},
+  {"prompt": "按 2026-07 生成账单，其他费用里加网费和卫生费", "workflow": "bill_create"},
+  {"prompt": "确认 2026-07 这个房间的收款", "workflow": "payment"},
+  {"prompt": "本月哪些房间还有未录入的水电表", "workflow": "meter_reading"},
+  {"prompt": "我想修改合同的水电单价和其它费用", "workflow": "contract_manage"},
+  {"prompt": "这个月水电收益为什么变化大", "workflow": "meter_analysis"}
+]

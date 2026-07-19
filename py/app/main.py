@@ -42,6 +42,8 @@ PUBLIC_API_PATHS = {
     "/api/status",
     "/api/user/status",
     "/api/user/login",
+    "/api/rental",
+    "/api/ai/chat/stream",
 }
 
 

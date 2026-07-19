@@ -130,9 +130,9 @@ def dispatch(table, action, data):
         if action == "get":
             return db.get_room(data.get("id"))
         if action == "add":
-            return db.add_room(data.get("building_id"), data.get("room_number", ""), data.get("floor", 1), data.get("status", "idle"))
+            return db.add_room(data.get("building_id"), data.get("room_number", ""), data.get("floor", 1), data.get("status", "idle"), data.get("room_type", "单间"))
         if action == "update":
-            db.update_room(data.get("id"), data.get("building_id"), data.get("room_number", ""), data.get("floor", 1), data.get("status", "idle"))
+            db.update_room(data.get("id"), data.get("building_id"), data.get("room_number", ""), data.get("floor", 1), data.get("status", "idle"), data.get("room_type", "单间"))
             return {"success": True}
 
     if table == "tenants":
@@ -155,9 +155,23 @@ def dispatch(table, action, data):
         if action == "get":
             return db.get_contract(data.get("id"))
         if action == "add":
+            tenant_id = data.get("tenant_id")
+            room_id = data.get("room_id")
+            if not tenant_id and str(data.get("tenant_name") or "").strip():
+                room = db.get_room(room_id) or {}
+                tenant_id = db.add_tenant(
+                    str(data.get("tenant_name") or "").strip(),
+                    str(data.get("tenant_phone") or "").strip(),
+                    str(data.get("tenant_id_card") or "").strip(),
+                    "active",
+                    room.get("building_id") or data.get("building_id"),
+                    str(room_id) if room_id not in {None, ""} else None,
+                )
+            if not tenant_id:
+                return {"error": "tenant is required"}
             return db.add_contract(
-                data.get("tenant_id"),
-                data.get("room_id"),
+                tenant_id,
+                room_id,
                 data.get("start_date", ""),
                 data.get("end_date", ""),
                 data.get("monthly_rent", 0),

@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sqlite3
 import threading
 from datetime import date
 from typing import Any, Dict, List, Optional, TypedDict
@@ -20,6 +19,11 @@ import local_db as db
 from ai_service import ai_svc
 
 from app.services.ai_context import build_rental_ai_context
+from app.services.ai_memory import build_memory_layers, format_memory_layers
+from app.services.ai_state_store import append_trace as store_append_trace
+from app.services.ai_state_store import load_thread_state as store_load_thread_state
+from app.services.ai_state_store import save_thread_state as store_save_thread_state
+from app.services.business_knowledge import format_business_knowledge_hits, search_business_knowledge
 from app.services.skill_executor import execute_tool, get_tool_schemas
 from app.services.skill_registry import format_skill_hits
 from app.services.skill_vector_store import search_skills
@@ -29,16 +33,6 @@ try:
 except Exception:  # pragma: no cover - dependency may be installed only in deployed env
     END = START = None
     StateGraph = None
-
-try:
-    from langgraph.checkpoint.memory import MemorySaver
-except Exception:  # pragma: no cover - optional local dependency
-    MemorySaver = None
-
-try:
-    from langgraph.checkpoint.sqlite import SqliteSaver
-except Exception:  # pragma: no cover - optional local dependency
-    SqliteSaver = None
 
 
 class AIChatGraphState(TypedDict, total=False):
@@ -55,12 +49,13 @@ class AIChatGraphState(TypedDict, total=False):
     model_response: Dict[str, Any]
     last_tool_results: List[Dict[str, Any]]
     skill_hits: List[Dict[str, Any]]
+    business_hits: List[Dict[str, Any]]
+    memory_layers: Dict[str, Any]
     tool_round: int
     result: Dict[str, Any]
 
 
 _CHAT_GRAPH = None
-_CHAT_CHECKPOINTER_CONN = None
 _SEMANTIC_INTENT_CACHE: Dict[str, Dict[str, Any]] = {}
 _SEMANTIC_INTENT_CACHE_LIMIT = 64
 _STATUS_LISTENERS: Dict[str, List[Any]] = {}
@@ -120,13 +115,6 @@ def _emit_status(thread_id: str, event: str, payload: Optional[Dict[str, Any]] =
 
 
 def _create_chat_checkpointer():
-    global _CHAT_CHECKPOINTER_CONN
-    if SqliteSaver is not None:
-        os.makedirs(os.path.dirname(db.DB_PATH), exist_ok=True)
-        _CHAT_CHECKPOINTER_CONN = sqlite3.connect(db.DB_PATH, check_same_thread=False)
-        return SqliteSaver(_CHAT_CHECKPOINTER_CONN)
-    if MemorySaver is not None:
-        return MemorySaver()
     return None
 
 
@@ -144,6 +132,24 @@ WORKFLOW_CONFIGS: Dict[str, Dict[str, Any]] = {
         "label": "修改合同",
         "required_fields": [],
         "tools": ["contract_tenant_get_contract_detail", "contract_update_from_ai"],
+        "max_tool_rounds": 3,
+    },
+    "room_manage": {
+        "label": "修改房间信息",
+        "required_fields": [],
+        "tools": ["room_update_from_ai"],
+        "max_tool_rounds": 3,
+    },
+    "meter_manage": {
+        "label": "修改表具初始信息",
+        "required_fields": [],
+        "tools": ["meter_update_from_ai"],
+        "max_tool_rounds": 3,
+    },
+    "meter_analysis": {
+        "label": "水电分析看板",
+        "required_fields": ["month"],
+        "tools": ["meter_reading_list_month_status", "rent_plan_list_month_status"],
         "max_tool_rounds": 3,
     },
     "meter_reading": {
@@ -187,6 +193,8 @@ DOMAIN_RULES = [
     "合同结束日期可以为空；合同开始日期不能为空。",
     "覆盖账单或修改已收账单时必须提示新旧金额差异。",
     "录入水电读数时要结合楼栋、房间、月份、表类型和历史读数校验。",
+    "修改房间信息时只允许改房间号、楼层、户型和状态；一房一厅、单间、开间等都属于户型；房间退租后可把状态改为闲置。",
+    "修改表具初始信息时只允许改表号和初始读数；不要让 AI 直接改表具所属房间、表具类型或楼栋。",
 ]
 
 
@@ -254,6 +262,11 @@ GUIDED_HELP_REPLY = (
     "我会根据这些信息告诉你下一步怎么处理。"
 )
 
+GREETING_REPLY = (
+    "你好，我在。你可以直接说：查某个月水电表、看收益看板、建合同、改房间户型，"
+    "或者录入读数和收款。"
+)
+
 
 def _normalize_uploaded_meter_type(value: Any) -> str:
     """兼容前端英文枚举和模型返回的中文表具类型。"""
@@ -275,6 +288,18 @@ def _looks_like_technical_failure(reply: str) -> bool:
     return any(marker in text for marker in markers)
 
 
+def _looks_like_greeting(prompt: str) -> bool:
+    text = str(prompt or "").strip().lower()
+    if not text:
+        return False
+    greetings = (
+        "你好", "您好", "嗨", "在吗", "hello", "hi", "哈喽", "早上好", "晚上好",
+    )
+    if text in greetings:
+        return True
+    return len(text) <= 8 and any(word in text for word in greetings)
+
+
 def _has_internal_tool_failure(tool_results: List[Dict[str, Any]]) -> bool:
     return any(isinstance(result, dict) and result.get("ok") is False for result in tool_results)
 
@@ -291,6 +316,51 @@ def _looks_like_contract_create(prompt: str) -> bool:
     if any(word in text for word in create_words) and any(word in text for word in contract_words):
         return True
     return "入住" in text and ("房" in text or re.search(r"\d{2,5}", text))
+
+
+def _looks_like_room_update(prompt: str) -> bool:
+    text = str(prompt or "").strip()
+    if not text:
+        return False
+    change_words = ("修改", "更改", "变更", "更新", "调整", "改成", "改为", "设为", "换成")
+    room_words = ("房间", "房号", "房间号", "户型", "房型", "楼层", "状态")
+    room_type_hint = _room_type_hint(text)
+    return any(word in text for word in change_words) and (any(word in text for word in room_words) or bool(room_type_hint))
+
+
+def _room_type_hint(prompt: str) -> str:
+    text = str(prompt or "")
+    patterns = (
+        r"(一房一厅|两房一厅|三房一厅|四房一厅|一室一厅|两室一厅|三室一厅|单间|开间|套间|复式|loft|LOFT)",
+        r"(?<!\w)(?:户型|房型)\s*(?:是|为|=|:|：)?\s*([^\s，。,.!?]{2,20})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        value = match.group(1) if match.lastindex else match.group(0)
+        value = str(value or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _looks_like_meter_update(prompt: str) -> bool:
+    text = str(prompt or "").strip()
+    if not text:
+        return False
+    change_words = ("修改", "更改", "变更", "更新", "调整", "改成", "改为", "设为", "换成", "改一下")
+    meter_words = ("表具", "表号", "初始读数", "初始信息", "水表", "电表")
+    return any(word in text for word in change_words) and any(word in text for word in meter_words)
+
+
+def _looks_like_meter_analysis(prompt: str) -> bool:
+    text = str(prompt or "").strip()
+    if not text:
+        return False
+    analysis_words = ("看板", "分析", "变化", "趋势", "收益", "利润", "成本", "对比", "统计", "汇总")
+    meter_words = ("水电", "水表", "电表", "表具", "读数")
+    return any(word in text for word in analysis_words) and any(word in text for word in meter_words)
 
 
 def _recent_text(data: Dict[str, Any], limit: int = 4) -> str:
@@ -323,7 +393,7 @@ def _load_thread_state(thread_id: str) -> Dict[str, Any]:
     if not thread_id or thread_id == "transient":
         return {}
     try:
-        state = db.load_ai_thread_state(thread_id)
+        state = store_load_thread_state(thread_id)
         return state if isinstance(state, dict) else {}
     except Exception:
         return {}
@@ -339,8 +409,9 @@ def _persist_thread_state(thread_id: str, result: Dict[str, Any]) -> None:
             "last_intent": result.get("intent") or {},
             "workflow_state": result.get("workflow_state") or {},
             "tool_plan": result.get("tool_plan") or {},
+            "memory_layers": result.get("memory_layers") or {},
         }
-        db.save_ai_thread_state(thread_id, state)
+        store_save_thread_state(thread_id, state)
     except Exception:
         pass
 
@@ -371,7 +442,7 @@ def _trace_thread(thread_id: str, event: str, payload: Optional[Dict[str, Any]] 
     compact_payload = _compact_trace_payload(payload or {})
     _emit_status(thread_id, event, compact_payload)
     try:
-        db.append_ai_trace(thread_id, event, compact_payload)
+        store_append_trace(thread_id, event, compact_payload)
     except Exception:
         pass
 
@@ -432,10 +503,26 @@ def _looks_like_meter_reading_statement(prompt: str) -> bool:
     return bool(_extract_meter_reading_values(text))
 
 
+def _looks_like_rent_only_text(prompt: str) -> bool:
+    text = str(prompt or "").strip()
+    if not text:
+        return False
+    explicit = ("单房租", "仅房租", "只看房租", "单看房租", "房租收入", "月租收入", "租金收入")
+    if any(word in text for word in explicit):
+        return True
+    return "房租" in text and any(word in text for word in ("呢", "收入", "多少", "仅", "只", "单独", "单看"))
+
+
 def _prompt_workflow(prompt: str) -> str:
     text = str(prompt or "").strip()
     if not text:
         return ""
+    if _looks_like_room_update(text):
+        return "room_manage"
+    if _looks_like_meter_update(text):
+        return "meter_manage"
+    if _looks_like_meter_analysis(text):
+        return "meter_analysis"
     if _looks_like_meter_reading_statement(text):
         return "meter_reading"
     if any(word in text for word in ("水电表", "水表", "电表", "抄表", "表读数", "录读数", "录入读数")):
@@ -448,8 +535,10 @@ def _prompt_workflow(prompt: str) -> str:
         return "contract_manage"
     if any(word in text for word in ("生成账单", "新建账单", "录账单", "账单草稿")):
         return "bill_create"
-    if any(word in text for word in ("确认收款", "登记收款", "已经交租", "已交租")):
+    if any(word in text for word in ("确认收款", "登记收款", "已经交租", "已交租")) or re.search(r"确认.{0,20}收款", text):
         return "payment"
+    if _looks_like_rent_only_text(text):
+        return "query"
     if any(word in text for word in ("查询", "查一下", "看看", "多少", "哪些", "有没有", "待收", "收租进度", "合同详情", "空置", "到期")):
         return "query"
     return ""
@@ -489,6 +578,9 @@ def _extract_common_fields(prompt: str) -> Dict[str, Any]:
     room_number = _room_number_hint(prompt)
     if room_number:
         fields["room_number"] = room_number
+    room_type = _room_type_hint(prompt)
+    if room_type:
+        fields["room_type"] = room_type
     month = _month_hint(prompt)
     if month:
         fields["month"] = month
@@ -569,6 +661,11 @@ def _semantic_workflow_name(value: Any) -> str:
         "create_contract": "contract_create",
         "new_contract": "contract_create",
         "contract_update": "contract_manage",
+        "room_update": "room_manage",
+        "room_manage": "room_manage",
+        "meter_update": "meter_manage",
+        "meter_manage": "meter_manage",
+        "meter_analysis": "meter_analysis",
         "contract_query": "query",
         "contract_detail": "query",
         "meter": "meter_reading",
@@ -617,7 +714,7 @@ def _should_reclassify_with_ai(data: Dict[str, Any], rules_workflow: str) -> boo
         return False
     context = _session_context(data)
     active = str(context.get("active_workflow") or "")
-    if rules_workflow in {"meter_reading", "contract_create", "contract_manage", "bill_create", "payment", "image_ocr"}:
+    if rules_workflow in {"meter_reading", "contract_create", "contract_manage", "room_manage", "meter_manage", "meter_analysis", "bill_create", "payment", "image_ocr"}:
         return False
     if rules_workflow == "query" and active:
         return True
@@ -654,12 +751,15 @@ def _semantic_intent_from_ai(data: Dict[str, Any]) -> Dict[str, Any]:
             "role": "system",
             "content": (
                 "你是租房管理系统的语义意图识别器，只返回 JSON 对象，不要 Markdown。"
-                "workflow 只能是 contract_create、contract_manage、meter_reading、bill_create、payment、query、image_ocr、empty。"
+                "workflow 只能是 contract_create、contract_manage、room_manage、meter_manage、meter_analysis、meter_reading、bill_create、payment、query、image_ocr、empty。"
                 "active_workflow 只是上下文线索，不能强行覆盖当前用户的新意图。"
                 "如果用户问“有合同了吗/住哪/查一下/多少/哪些”，优先判为 query；"
                 "如果用户说“水电读数/抄表/6月份水电是346 9150”，判为 meter_reading；"
+                "如果用户想看某个月水电表分析、变化、照片、收益、成本或看板，判为 meter_analysis；"
                 "如果用户明确新建/新增/签订合同，判为 contract_create；"
                 "如果用户是在修改已有合同，判为 contract_manage。"
+                "如果用户要修改房间号、楼层、户型、房型、单间、一房一厅或状态，判为 room_manage；"
+                "如果用户要修改表具表号或初始读数，判为 meter_manage。"
                 "返回字段：workflow、confidence(0-1)、fields、reason。"
             ),
         },
@@ -745,6 +845,12 @@ def _tool_plan_for_intent(intent: Dict[str, Any], data: Dict[str, Any]) -> Dict[
         steps = ["定位账单", "校验应收已收", "生成收款确认卡片"]
     elif workflow == "contract_manage":
         steps = ["定位有效合同", "解析要修改的字段", "校验业务规则", "生成修改确认卡片"]
+    elif workflow == "room_manage":
+        steps = ["定位房间", "解析要修改的字段", "校验房间号重复和状态", "生成房间修改确认卡片"]
+    elif workflow == "meter_manage":
+        steps = ["定位表具", "解析表号或初始读数", "校验初始读数", "生成表具修改确认卡片"]
+    elif workflow == "meter_analysis":
+        steps = ["定位月份与楼栋", "整理水电录入和收益数据", "生成照片卡片和看板"]
     else:
         steps = ["查询实时业务数据", "整理结果", "给出下一步建议"]
     return {
@@ -834,6 +940,7 @@ def _room_number_hint(prompt: str) -> str:
         r"(?<!\d)(\d{2,5})\s*(?:房|室|号房)(?!\d)",
         r"(?<!\d)(\d{2,5})\s*(?:的|房)?\s*(?:房租|月租|租金|水费|电费|押金|保证金|水|电)(?:\s*(?:是|为|=|:|：))?",
         r"(?<!\d)(\d{2,5})(?:的)?(?:水电表|水表|电表)",
+        r"(?<!\d)(\d{2,5})\s*(?:改成|改为|变成|设为|换成).{0,16}(?:一房一厅|两房一厅|三房一厅|一室一厅|单间|开间|套间|复式|户型|房型)",
         r"(?:帮我|给我|接着录|继续录|再录)\D{0,8}(\d{2,5})(?!\d)",
         r"(?<!\d)(\d{2,5})\D{0,8}(?:新建|新增|创建|录入|签订|建(?:个|一个)?|办(?:个|一个)?|做(?:个|一个)?).{0,6}(?:合同|租约)",
         r"(?:新建|新增|创建|录入|签订|建(?:个|一个)?|办(?:个|一个)?|做(?:个|一个)?)\D{0,8}(\d{2,5})\D{0,6}(?:合同|租约)",
@@ -898,6 +1005,7 @@ def _contract_create_args(data: Dict[str, Any]) -> Dict[str, Any]:
         }
     for key in (
         "building_id", "building_name", "room_id", "room_number", "tenant_id", "tenant_name",
+        "tenant_phone", "tenant_id_card",
         "start_date", "end_date", "monthly_rent", "water_unit_price", "electric_unit_price",
         "deposit", "water_meter_id", "electric_meter_id",
     ):
@@ -944,6 +1052,8 @@ def _extract_contract_create_hint(prompt: str) -> Dict[str, Any]:
         "room_number": r"房间号\s*([^，,。]+)",
         "tenant_id": r"租户ID\s*([^，,。]+)",
         "tenant_name": r"租户姓名\s*([^，,。]+)",
+        "tenant_phone": r"租客手机号\s*([^，,。]+)",
+        "tenant_id_card": r"证件号\s*([^，,。]+)",
         "start_date": r"合同开始日期\s*([^，,。]+)",
         "end_date": r"合同结束日期\s*([^，,。]+)",
         "monthly_rent": r"月租\s*([^，,。]+)",
@@ -959,6 +1069,10 @@ def _extract_contract_create_hint(prompt: str) -> Dict[str, Any]:
         value = match.group(1).strip()
         if value:
             args[key] = value
+    if not args.get("tenant_name"):
+        tenant_match = re.search(r"(?:租客|租户|房客)(?:叫|是|为|名叫)?\s*([\u4e00-\u9fffA-Za-z·]{2,12})", text)
+        if tenant_match:
+            args["tenant_name"] = tenant_match.group(1).strip()
     room_number = _room_number_hint(text)
     if room_number and not args.get("room_number"):
         args["room_number"] = room_number
@@ -971,6 +1085,12 @@ def _extract_contract_create_hint(prompt: str) -> Dict[str, Any]:
     deposit_match = re.search(r"(?:押金|保证金)\s*(\d+(?:\.\d+)?)", text)
     if deposit_match and not args.get("deposit"):
         args["deposit"] = deposit_match.group(1)
+    phone_match = re.search(r"(?:手机|手机号|电话|联系方式)\s*(?:是|为|=|:|：)?\s*(1\d{10})", text)
+    if phone_match and not args.get("tenant_phone"):
+        args["tenant_phone"] = phone_match.group(1)
+    id_card_match = re.search(r"(?:身份证|证件号|证件)\s*(?:是|为|=|:|：)?\s*([0-9A-Za-z]{6,32})", text)
+    if id_card_match and not args.get("tenant_id_card"):
+        args["tenant_id_card"] = id_card_match.group(1)
     deposit_months = _deposit_month_count(text)
     monthly_rent_value = _float_hint(args.get("monthly_rent"))
     if deposit_months is not None and monthly_rent_value is not None and not args.get("deposit"):
@@ -1124,6 +1244,8 @@ def _assistant_identity() -> tuple[str, str]:
 def _build_system_prompt(
     prompt: str,
     skill_context: str,
+    business_context: str,
+    memory_context: str,
     data_context: str,
     image_context: str = "",
     session_context: Optional[Dict[str, Any]] = None,
@@ -1153,6 +1275,10 @@ def _build_system_prompt(
         "即使该月份已经存在相同读数，只要用户上传了新照片并要求录入，也要调用 meter_reading_save_from_ai 生成更新确认事项，以便保存照片，不能只回复无需重复录入。"
         "上传图片上下文中的类型、读数、表号、楼栋、房间和租客是结构化识别结果；优先使用这些值，不要重新猜测。"
         "涉及图片识别、录入读数或保存账单时，先返回待确认操作，不能因为用户上传图片就直接写入数据库。"
+        "当用户查看某个月水表、电表或水电表时，调用 meter_reading_list_month_status；该工具会返回带照片的卡片数据，有照片时必须让前端展示卡片。"
+        "当用户查看某个房间某个月的水表、电表或水电表读数时，调用 meter_reading_get_room_reading；如果工具结果里有照片卡片，必须让前端展示照片。"
+        "当用户要求水电表分析、用量变化、租户水电变化、收益、成本、利润或看板时，调用 meter_reading_list_month_status 和 rent_plan_list_month_status，让前端展示分析看板和收益看板。"
+        "水电收益看板固定按水成本 2.1、电成本 0.6 计算，不要改口径或让模型自行估算成本。"
         "当用户继续要求生成账单时，在读数保存成功后调用 bill_create_from_ai。"
         "生成账单时，合同中约定的其它费用会默认带入账单草稿；用户本轮明确添加、删除、清空或修改其它费用时，以用户本轮要求为准。"
         "用户要求添加网费、卫生费等其他费用时，调用 bill_create_from_ai 并通过 other_fee_details 按项目名称和金额逐项传递，不能只传其他费用汇总。"
@@ -1163,13 +1289,19 @@ def _build_system_prompt(
         "如果缺少房间号、月份或水表/电表类型，不要猜测，先请用户补充。"
         "当用户查询合同详情、某租户住哪、某房间当前合同、有效合同列表或合同绑定表具时，优先调用 contract_tenant_get_contract_detail、contract_tenant_list_active_contracts、contract_tenant_get_room_tenant 或 contract_tenant_get_contract_meter_binding。"
         "当用户要求新建、新增、签订或录入租房合同时，调用 contract_create_from_ai；即使缺少租户、房间、合同开始日期或月租，也要调用该工具返回表单卡片，不要只用文字追问。"
-        "新建合同表单要尽量带出用户已提供的信息，例如楼栋名称传 building_name、房间号传 room_number、租客姓名传 tenant_name、已说出的月租/押金/水电单价/其它费用也要传入。"
+        "新建合同表单要尽量带出用户已提供的信息，例如楼栋名称传 building_name、房间号传 room_number、租客姓名传 tenant_name、手机号传 tenant_phone、证件号传 tenant_id_card、已说出的月租/押金/水电单价/其它费用也要传入。"
+        "用户要给空置房间签新租客时，可以用 tenant_name、tenant_phone、tenant_id_card 准备新租户；如果是已有租户则传 tenant_id。"
         "业务会话上下文中的楼栋、房间只用于承接省略表达；用户本轮明确说出的业务意图和楼栋房间永远优先。"
+        "当用户要修改房间号、楼层、户型、房型、单间、一房一厅或状态时，调用 room_update_from_ai；房间修改也必须先返回待确认操作。"
+        "房间修改只允许改 room_number、floor、room_type、status；不要直接改楼栋。房间退租后可把状态改成闲置。"
+        "room_type 就是户型字段；如果用户说一房一厅、单间、开间、套间等，直接当作户型修改，不要说系统没有户型字段。"
+        "当用户要修改表具表号或初始读数时，调用 meter_update_from_ai；表具修改也必须先返回待确认操作。"
+        "表具修改只允许改 meter_no 和 init_reading；不要直接改表具所属房间、表具类型或楼栋。"
         "用户说先做、改做或录入水电表时，应切换到抄表流程，不能因为此前正在新建合同而继续生成合同表单。"
         "当用户要求修改现有合同的月租、水电单价、保证金、合同日期、水电表绑定或合同约定其它费用时，调用 contract_update_from_ai；其它费用通过 other_fee_details 按项目名称和金额逐项传递。"
         "合同结束日期可以改成空值；合同开始日期不能为空，修改开始日期时必须提供具体的 YYYY-MM-DD 日期。"
         "用户只说租户姓名时，可以把姓名作为 tenant_name 传给合同查询和合同修改工具；如果匹配到多个合同，要让用户补充楼栋或房间。"
-        "合同新建和合同修改都必须先返回待确认操作；如果同一房间号存在于多个楼栋，要先请用户明确楼栋。"
+        "合同新建、合同修改、房间修改和表具修改都必须先返回待确认操作；如果同一房间号存在于多个楼栋，要先请用户明确楼栋。"
         "退租、恢复合同、变更租客或更换房间不是普通合同字段修改，也不是新建合同，不能调用 contract_update_from_ai，需明确告诉用户应使用对应业务流程。"
         "当用户要求确认收款、登记收款或标记某房间已经交租时，调用 payment_confirm_from_ai。"
         "确认收款必须先返回待确认操作；未指定金额时默认使用该账单当前全部待收金额，未指定日期时默认今天。"
@@ -1188,6 +1320,8 @@ def _build_system_prompt(
         + ("\n\n工具执行计划：\n" + json.dumps(tool_plan, ensure_ascii=False, default=str) if tool_plan else "")
         + "\n\n命中的业务 Skill 文档：\n"
         + skill_context
+        + ("\n\n命中的业务规则文档：\n" + business_context if business_context else "")
+        + ("\n\n分层记忆摘要：\n" + memory_context if memory_context else "")
         + "\n\n实时系统数据快照：\n"
         + data_context
         + ("\n\n上传图片上下文：\n" + image_context if image_context else "")
@@ -1436,6 +1570,79 @@ def _pending_action_followup_suggestions(action: Dict[str, Any], action_result: 
     ]
 
 
+def _recent_prompt_context_text(data: Dict[str, Any]) -> str:
+    parts = [str(data.get("prompt") or "")]
+    history = data.get("history") or []
+    if isinstance(history, list):
+        for message in history[-8:]:
+            if isinstance(message, dict):
+                parts.append(str(message.get("content") or ""))
+    context = _session_context(data)
+    for key in ("building_name", "room_number"):
+        if context.get(key):
+            parts.append(str(context.get(key)))
+    return "\n".join(part for part in parts if part)
+
+
+def _money_text(value: Any) -> str:
+    try:
+        return "{:.2f}".format(float(value or 0))
+    except (TypeError, ValueError):
+        return "0.00"
+
+
+def _rent_only_summary_response(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    prompt = str(data.get("prompt") or "")
+    if not _looks_like_rent_only_text(prompt):
+        return None
+    context_text = _recent_prompt_context_text(data)
+    building_hint = _known_building_hint(context_text)
+    month = _month_hint(context_text) or date.today().strftime("%Y-%m")
+    building_id = building_hint.get("building_id")
+    tool_result = execute_tool("rent_plan_list_month_status", {"month": month, "building_id": building_id})
+    if not tool_result.get("ok"):
+        return None
+    payload = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
+    rows = payload.get("rows") if isinstance(payload, dict) else []
+    rows = rows if isinstance(rows, list) else []
+    rent_receivable = 0.0
+    rent_paid = 0.0
+    details = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        components = row.get("components") if isinstance(row.get("components"), dict) else {}
+        rent = float(components.get("rent") or 0)
+        paid = float(row.get("paid") or 0)
+        paid_rent = min(max(paid, 0.0), rent)
+        due_rent = max(rent - paid_rent, 0.0)
+        rent_receivable += rent
+        rent_paid += paid_rent
+        if due_rent > 0.01:
+            details.append("{}{}".format(row.get("room_number") or "", "({})".format(row.get("tenant") or "") if row.get("tenant") else ""))
+    rent_due = max(rent_receivable - rent_paid, 0.0)
+    scope = (str(building_hint.get("building_name") or "") + month).strip() or month
+    pending_text = "；房租未收齐：" + "、".join(details[:8]) if details else "；房租已收齐"
+    reply = (
+        "{}仅房租口径：应收 {} 元，已收 {} 元，待收 {} 元{}。"
+        "这里不含水费、电费和其它费用；部分收款按先抵房租估算。"
+    ).format(scope, _money_text(rent_receivable), _money_text(rent_paid), _money_text(rent_due), pending_text)
+    session_context = _next_session_context(data, [tool_result])
+    return {
+        "reply": reply,
+        "bill_images": [],
+        "pending_actions": [],
+        "suggested_actions": [],
+        "form_actions": [],
+        "session_context": session_context,
+        "intent": session_context.get("last_intent") or {"workflow": "query", "name": "query"},
+        "workflow_state": session_context.get("workflow_state") or {},
+        "tool_plan": session_context.get("tool_plan") or {},
+        "response": {"type": "assistant_message", "content": reply, "pending_actions": [], "bill_images": [], "suggested_actions": [], "form_actions": [], "session_context": session_context},
+        "skill_hits": [],
+    }
+
+
 def _pending_action_command_response(data: Dict[str, Any], command: str) -> Dict[str, Any]:
     pending_actions = data.get("pending_actions") or []
     action_id = str(data.get("pending_action_id") or "")
@@ -1613,6 +1820,31 @@ def _collect_form_actions(tool_results: List[Dict[str, Any]]) -> List[Dict[str, 
     return forms
 
 
+def _collect_analysis_cards(tool_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    cards: List[Dict[str, Any]] = []
+    seen = set()
+    for result in tool_results:
+        data = result.get("data") if isinstance(result, dict) else None
+        if not isinstance(data, dict):
+            continue
+        for item in data.get("analysis_cards") or []:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("id") or json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+            if key in seen:
+                continue
+            seen.add(key)
+            cards.append({
+                "id": str(item.get("id") or ""),
+                "type": str(item.get("type") or "html"),
+                "title": str(item.get("title") or ""),
+                "description": str(item.get("description") or ""),
+                "html": str(item.get("html") or ""),
+                "items": item.get("items") if isinstance(item.get("items"), list) else [],
+            })
+    return cards
+
+
 def _tool_result_payloads(tool_results: List[Dict[str, Any]]) -> List[tuple[str, Dict[str, Any]]]:
     payloads: List[tuple[str, Dict[str, Any]]] = []
     for result in tool_results:
@@ -1717,6 +1949,8 @@ def _prepare_chat_context(data: Dict[str, Any], prompt: str, history: List[Dict[
     workflow_state = _workflow_state_from_data(data, intent, [])
     skill_hits = search_skills(prompt, top_k=5)
     skill_context = format_skill_hits(skill_hits)
+    business_hits = search_business_knowledge(prompt, top_k=4)
+    business_context = format_business_knowledge_hits(business_hits)
     data_context = build_rental_ai_context(prompt)
     image_context = _image_context_from_data(data)
     pending_context = _pending_actions_context(data)
@@ -1724,9 +1958,20 @@ def _prepare_chat_context(data: Dict[str, Any], prompt: str, history: List[Dict[
     if pending_context:
         merged_image_context = (merged_image_context + "\n\n待确认操作：\n" + pending_context).strip()
     session_context = _session_context(data)
+    memory_layers = build_memory_layers(
+        session_context=session_context,
+        prompt=prompt,
+        intent=intent,
+        workflow_state=workflow_state,
+        tool_plan=tool_plan,
+        pending_actions=data.get("pending_actions") if isinstance(data.get("pending_actions"), list) else [],
+    )
+    memory_context = format_memory_layers(memory_layers)
     system_prompt = _build_system_prompt(
         prompt,
         skill_context,
+        business_context,
+        memory_context,
         data_context,
         merged_image_context,
         session_context,
@@ -1743,9 +1988,11 @@ def _prepare_chat_context(data: Dict[str, Any], prompt: str, history: List[Dict[
         "messages": messages,
         "tools": tools,
         "skill_hits": skill_hits,
+        "business_hits": business_hits,
         "intent": intent,
         "workflow_state": workflow_state,
         "tool_plan": tool_plan,
+        "memory_layers": memory_layers,
     }
 
 
@@ -1759,6 +2006,26 @@ def _execute_ai_tool_call(raw_call: Dict[str, Any], data: Dict[str, Any]) -> Dic
     if call["name"] == "ai_cancel_pending_action":
         return {"ok": True, "tool": call["name"], "data": _cancel_pending_action(call["arguments"], data)}
     tool_args = _tool_args_with_upload(call["name"], call["arguments"], data)
+    if call["name"] in {"room_update_from_ai", "meter_update_from_ai"} and isinstance(tool_args, dict):
+        prompt = str(data.get("prompt") or "")
+        context = _session_context(data)
+        merged_args = dict(tool_args)
+        for key, value in _context_location_fields(context).items():
+            if value not in {None, ""} and key not in merged_args:
+                merged_args[key] = value
+        building_hint = _known_building_hint(prompt)
+        if building_hint:
+            for key, value in building_hint.items():
+                if value not in {None, ""} and key not in merged_args:
+                    merged_args[key] = value
+        room_number = _room_number_hint(prompt)
+        if room_number and not merged_args.get("room_number"):
+            merged_args["room_number"] = room_number
+        if call["name"] == "room_update_from_ai" and not merged_args.get("room_type"):
+            room_type = _room_type_hint(prompt)
+            if room_type:
+                merged_args["room_type"] = room_type
+        tool_args = merged_args
     if call["name"] == "contract_create_from_ai" and isinstance(tool_args, dict):
         prompt = str(data.get("prompt") or "")
         merged_args = {**_contract_create_args(data), **tool_args}
@@ -1826,8 +2093,11 @@ def _finalize_chat_response(
     data: Dict[str, Any],
     last_tool_results: List[Dict[str, Any]],
     skill_hits: List[Dict[str, Any]],
+    business_hits: Optional[List[Dict[str, Any]]] = None,
+    memory_layers: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     bill_images = _collect_bill_images(last_tool_results)
+    analysis_cards = _collect_analysis_cards(last_tool_results)
     pending_actions = _merge_pending_actions(data.get("pending_actions") or [], last_tool_results)
     suggested_actions = _collect_suggested_actions(last_tool_results)
     form_actions = _collect_form_actions(last_tool_results)
@@ -1835,6 +2105,15 @@ def _finalize_chat_response(
     intent = session_context.get("last_intent") if isinstance(session_context.get("last_intent"), dict) else _detect_intent({**data, "session_context": session_context})
     tool_plan = session_context.get("tool_plan") if isinstance(session_context.get("tool_plan"), dict) else _tool_plan_for_intent(intent, data)
     workflow_state = session_context.get("workflow_state") if isinstance(session_context.get("workflow_state"), dict) else _workflow_state_from_data({**data, "session_context": session_context}, intent, last_tool_results)
+    memory_layers = memory_layers if isinstance(memory_layers, dict) else build_memory_layers(
+        session_context=session_context,
+        prompt=str(data.get("prompt") or ""),
+        intent=intent,
+        workflow_state=workflow_state,
+        tool_plan=tool_plan,
+        pending_actions=pending_actions,
+    )
+    session_context["memory_layers"] = memory_layers
     has_bill_confirmation = any(
         isinstance(action, dict) and action.get("type") == "create_bill"
         for action in pending_actions
@@ -1860,10 +2139,14 @@ def _finalize_chat_response(
         reply = "收款信息已准备，请核对账单、金额和日期，并使用卡片按钮确认或取消。"
     elif not reply and bill_images:
         reply = "账单图片已生成，可在下方预览、复制或保存。"
+    elif not reply and analysis_cards:
+        reply = "分析看板已生成，可在下方查看照片卡片和图表。"
     elif not reply and last_tool_results:
         reply = "我已经拿到相关数据，但还不确定你希望继续查询、录入还是生成账单。请告诉我你想完成的下一步。"
     if bill_images and "账单图片" not in reply and "收据图片" not in reply:
         reply = (reply.rstrip() + "\n\n账单图片已生成，可在下方预览、复制或保存。").strip()
+    if analysis_cards and "看板" not in reply and "分析" not in reply:
+        reply = (reply.rstrip() + "\n\n分析看板已生成，可在下方查看。").strip()
     if not reply:
         reply = GUIDED_HELP_REPLY
     if not suggested_actions and not pending_actions and not form_actions:
@@ -1872,6 +2155,7 @@ def _finalize_chat_response(
     return {
         "reply": reply,
         "bill_images": bill_images,
+        "analysis_cards": analysis_cards,
         "pending_actions": pending_actions,
         "suggested_actions": suggested_actions,
         "form_actions": form_actions,
@@ -1879,13 +2163,20 @@ def _finalize_chat_response(
         "intent": intent,
         "tool_plan": tool_plan,
         "workflow_state": workflow_state,
-        "response": {"type": "assistant_message", "content": reply, "pending_actions": pending_actions, "bill_images": bill_images, "suggested_actions": suggested_actions, "form_actions": form_actions, "session_context": session_context, "intent": intent, "tool_plan": tool_plan, "workflow_state": workflow_state},
+        "memory_layers": memory_layers,
+        "response": {"type": "assistant_message", "content": reply, "pending_actions": pending_actions, "bill_images": bill_images, "analysis_cards": analysis_cards, "suggested_actions": suggested_actions, "form_actions": form_actions, "session_context": session_context, "intent": intent, "tool_plan": tool_plan, "workflow_state": workflow_state},
         "skill_hits": [{
             "skill": hit.get("skill"),
             "title": hit.get("title"),
             "backend": hit.get("backend"),
             "score": hit.get("score"),
         } for hit in skill_hits],
+        "business_hits": [{
+            "title": hit.get("title"),
+            "path": hit.get("path"),
+            "backend": hit.get("backend"),
+            "score": hit.get("score"),
+        } for hit in (business_hits or [])],
     }
 
 
@@ -1897,14 +2188,32 @@ def _chat_linear(data: Dict[str, Any]) -> Dict[str, Any]:
         return _pending_action_command_response(data, pending_action_command)
     if not prompt:
         return {"reply": "请先输入你想查询的问题。"}
+    if _looks_like_greeting(prompt):
+        session_context = _session_context(data)
+        return {
+            "reply": GREETING_REPLY,
+            "session_context": session_context,
+            "response": {
+                "type": "assistant_message",
+                "content": GREETING_REPLY,
+                "session_context": session_context,
+                "pending_actions": [],
+                "bill_images": [],
+            },
+        }
     meter_fallback = _meter_reading_fallback(data)
     if meter_fallback:
         return meter_fallback
+    rent_only = _rent_only_summary_response(data)
+    if rent_only:
+        return rent_only
 
     context = _prepare_chat_context(data, prompt, history)
     messages = context["messages"]
     tools = context["tools"]
     skill_hits = context["skill_hits"]
+    business_hits = context.get("business_hits") or []
+    memory_layers = context.get("memory_layers") or {}
     last_tool_results: List[Dict[str, Any]] = []
     resp = ai_svc.call_with_tools(messages, tools=tools, max_tokens=1200, temperature=0.2)
     max_tool_rounds = int((context.get("tool_plan") or {}).get("max_tool_rounds") or 2)
@@ -1918,16 +2227,19 @@ def _chat_linear(data: Dict[str, Any]) -> Dict[str, Any]:
         last_tool_results.extend(round_result["tool_results"])
         resp = ai_svc.call_with_tools(messages, tools=tools, max_tokens=1200, temperature=0.2)
 
-    return _finalize_chat_response(resp.get("content") or "", data, last_tool_results, skill_hits)
+    return _finalize_chat_response(resp.get("content") or "", data, last_tool_results, skill_hits, business_hits, memory_layers)
 
 
 def _graph_route(state: AIChatGraphState) -> str:
     command = str(state.get("pending_action_command") or "").strip().lower()
     if command in {"confirm", "cancel"}:
         return "pending_command"
-    if not str(state.get("prompt") or "").strip():
+    prompt = str(state.get("prompt") or "").strip()
+    if not prompt:
         return "empty_prompt"
     data = state.get("data") or {}
+    if _looks_like_greeting(prompt):
+        return "greeting"
     intent = _detect_intent(data)
     workflow = str(intent.get("workflow") or "")
     _trace_state(state, "route", {"intent": intent})
@@ -1935,6 +2247,8 @@ def _graph_route(state: AIChatGraphState) -> str:
         return "meter_reading"
     if workflow == "contract_create" and _should_fallback_contract_create(data):
         return "contract_form"
+    if _looks_like_rent_only_text(str(data.get("prompt") or "")):
+        return "rent_only_summary"
     return "normal_chat"
 
 
@@ -1954,6 +2268,23 @@ def _graph_empty_prompt_node(state: AIChatGraphState) -> AIChatGraphState:
     return {"result": {"reply": "请先输入你想查询的问题。", "session_context": session_context, "response": {"type": "assistant_message", "content": "请先输入你想查询的问题。", "session_context": session_context}}}
 
 
+def _graph_greeting_node(state: AIChatGraphState) -> AIChatGraphState:
+    data = state.get("data") or {}
+    _trace_state(state, "greeting", {"prompt": data.get("prompt")})
+    session_context = _session_context(data)
+    return {
+        "result": {
+            "reply": GREETING_REPLY,
+            "session_context": session_context,
+            "response": {
+                "type": "assistant_message",
+                "content": GREETING_REPLY,
+                "session_context": session_context,
+            },
+        }
+    }
+
+
 def _graph_contract_form_node(state: AIChatGraphState) -> AIChatGraphState:
     data = state.get("data") or {}
     intent = _detect_intent(data)
@@ -1967,6 +2298,13 @@ def _graph_meter_reading_node(state: AIChatGraphState) -> AIChatGraphState:
     return {"result": _meter_reading_fallback(data) or _chat_linear(data)}
 
 
+def _graph_rent_only_summary_node(state: AIChatGraphState) -> AIChatGraphState:
+    data = state.get("data") or {}
+    result = _rent_only_summary_response(data) or _chat_linear(data)
+    _trace_state(state, "rent_only_summary", {"reply": result.get("reply")})
+    return {"result": result}
+
+
 def _graph_prepare_context_node(state: AIChatGraphState) -> AIChatGraphState:
     context = _prepare_chat_context(
         state.get("data") or {},
@@ -1977,14 +2315,18 @@ def _graph_prepare_context_node(state: AIChatGraphState) -> AIChatGraphState:
         "intent": context.get("intent"),
         "workflow_state": context.get("workflow_state"),
         "tool_plan": context.get("tool_plan"),
+        "business_hits": context.get("business_hits") or [],
+        "memory_layers": context.get("memory_layers") or {},
     })
     return {
         "messages": context["messages"],
         "tools": context["tools"],
         "skill_hits": context["skill_hits"],
+        "business_hits": context.get("business_hits") or [],
         "intent": context.get("intent") or {},
         "workflow_state": context.get("workflow_state") or {},
         "tool_plan": context.get("tool_plan") or {},
+        "memory_layers": context.get("memory_layers") or {},
         "last_tool_results": [],
         "tool_round": 0,
     }
@@ -2047,6 +2389,8 @@ def _graph_finalize_node(state: AIChatGraphState) -> AIChatGraphState:
         state.get("data") or {},
         state.get("last_tool_results") or [],
         state.get("skill_hits") or [],
+        state.get("business_hits") or [],
+        state.get("memory_layers") or {},
     )
     _trace_state(state, "finalize", {
         "reply": result.get("reply"),
@@ -2067,8 +2411,10 @@ def _get_chat_graph() -> Any:
     graph.add_node("route", lambda state: {})
     graph.add_node("pending_command", _graph_pending_command_node)
     graph.add_node("empty_prompt", _graph_empty_prompt_node)
+    graph.add_node("greeting", _graph_greeting_node)
     graph.add_node("contract_form", _graph_contract_form_node)
     graph.add_node("meter_reading", _graph_meter_reading_node)
+    graph.add_node("rent_only_summary", _graph_rent_only_summary_node)
     graph.add_node("prepare_context", _graph_prepare_context_node)
     graph.add_node("call_model", _graph_call_model_node)
     graph.add_node("run_tools", _graph_run_tools_node)
@@ -2081,15 +2427,19 @@ def _get_chat_graph() -> Any:
         {
             "pending_command": "pending_command",
             "empty_prompt": "empty_prompt",
+            "greeting": "greeting",
             "contract_form": "contract_form",
             "meter_reading": "meter_reading",
+            "rent_only_summary": "rent_only_summary",
             "normal_chat": "prepare_context",
         },
     )
     graph.add_edge("pending_command", END)
     graph.add_edge("empty_prompt", END)
+    graph.add_edge("greeting", END)
     graph.add_edge("contract_form", END)
     graph.add_edge("meter_reading", END)
+    graph.add_edge("rent_only_summary", END)
     graph.add_edge("prepare_context", "call_model")
     graph.add_conditional_edges(
         "call_model",
@@ -2101,7 +2451,7 @@ def _get_chat_graph() -> Any:
     )
     graph.add_edge("run_tools", "call_model")
     graph.add_edge("finalize", END)
-    _CHAT_GRAPH = graph.compile(checkpointer=_CHAT_CHECKPOINTER)
+    _CHAT_GRAPH = graph.compile()
     return _CHAT_GRAPH
 
 

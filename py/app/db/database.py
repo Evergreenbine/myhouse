@@ -1,18 +1,19 @@
-from pathlib import Path
-
-from app.core.config import DATA_DIR
-
-DATABASE_PATH = DATA_DIR / "local.db"
-DATABASE_URL = "sqlite:///" + str(DATABASE_PATH).replace("\\", "/")
+from os import getenv
 
 try:
     from sqlalchemy import create_engine
+    from sqlalchemy.engine import URL
     from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-    engine = create_engine(
-        DATABASE_URL,
-        connect_args={"check_same_thread": False},
+    mysql_url = URL.create(
+        "mysql+pymysql",
+        username=getenv("MYSQL_USER", "myhouse"),
+        password=getenv("MYSQL_PASSWORD", ""),
+        host=getenv("MYSQL_HOST", "127.0.0.1"),
+        port=int(getenv("MYSQL_PORT", "3306")),
+        database=getenv("MYSQL_DATABASE", "myhouse"),
     )
+    engine = create_engine(mysql_url, pool_pre_ping=True, future=True)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
     class Base(DeclarativeBase):
@@ -34,4 +35,3 @@ def get_db():
         yield db
     finally:
         db.close()
-

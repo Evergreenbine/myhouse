@@ -1,9 +1,7 @@
-"""Compatibility repository around the existing sqlite helpers.
+"""Compatibility repository around the existing MySQL helpers.
 
-The first FastAPI migration keeps the proven sqlite functions in local_db.py
-behind a repository boundary. Individual tables can now be moved to
-SQLAlchemy models incrementally without changing the HTTP layer.
+The repository boundary stays in place so the HTTP layer does not need to
+change while the backend continues to use ``local_db.py``.
 """
 
 import local_db
-

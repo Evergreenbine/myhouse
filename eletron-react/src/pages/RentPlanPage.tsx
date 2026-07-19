@@ -11,13 +11,18 @@ interface Contract { id: number; tenant_name: string; tenant_id: number; room_nu
 interface Bill { id: number; contract_id: number; total_amount: number; status: string; water_fee: number; electric_fee: number; other_fee: number; other_fee_details?: string; remark?: string; water_current_reading: number; water_last_reading: number; electric_current_reading: number; electric_last_reading: number; water_photo: string; electric_photo: string }
 interface MeterReading { id: number; meter_no: string; room_number: string; reading: number | null; previous_reading: number; usage: number | null; photo: string; status: string }
 interface Building { id: number; name: string; rent_day: number }
+interface Payment { id: number; bill_id: number; amount: number }
 interface OtherFeeItem { id: string; name: string; amount: string }
 interface OtherFeeDetail { name: string; amount: number }
+
+const WATER_COST_PRICE = 2.1
+const ELECTRIC_COST_PRICE = 0.6
 
 interface State {
   buildings: Building[]
   contracts: Contract[]
   bills: Bill[]
+  payments: Payment[]
   curBid: number | null
   planYear: number
   planMonth: number
@@ -52,6 +57,7 @@ export class RentPlanPage extends React.Component<{}, State> {
     buildings: [],
     contracts: [],
     bills: [],
+    payments: [],
     curBid: null,
     planYear: this.initialUiState.planYear,
     planMonth: this.initialUiState.planMonth,
@@ -90,9 +96,10 @@ export class RentPlanPage extends React.Component<{}, State> {
     const timer = setTimeout(() => {
       if (seq === this.planLoadSeq) this.setState({ loading: true })
     }, 200)
-    const [allContracts, bs] = await Promise.all([
+    const [allContracts, bs, ps] = await Promise.all([
       rental('contracts', 'list', { active_only: false, building_id: bid }),
       rental('bills', 'list', { month }),
+      rental('payments', 'list', { month, building_id: bid }),
     ])
     clearTimeout(timer)
     if (seq !== this.planLoadSeq || this.state.curBid !== bid || this.billingMonth !== month) return
@@ -100,7 +107,7 @@ export class RentPlanPage extends React.Component<{}, State> {
     const visibleContracts = (allContracts || []).filter((c: Contract) =>
       c.status === 'active' || billContractIds.has(Number(c.id))
     )
-    this.setState({ contracts: visibleContracts, bills: bs || [], loading: false })
+    this.setState({ contracts: visibleContracts, bills: bs || [], payments: ps || [], loading: false })
   }
 
   switchBuilding = (id: number) => {
@@ -223,6 +230,16 @@ export class RentPlanPage extends React.Component<{}, State> {
   getOtherFeeDetails = (): OtherFeeDetail[] => this.state.otherFees
     .map(item => ({ name: item.name.trim(), amount: Number(item.amount) }))
     .filter(item => item.name && Number.isFinite(item.amount) && item.amount > 0)
+
+  getBillUsage = (bill: Bill, type: 'water' | 'electric', contract?: Contract) => {
+    const current = Number(type === 'water' ? bill.water_current_reading : bill.electric_current_reading)
+    const last = Number(type === 'water' ? bill.water_last_reading : bill.electric_last_reading)
+    if (Number.isFinite(current) && Number.isFinite(last) && current > last) return current - last
+    const fee = Number(type === 'water' ? bill.water_fee : bill.electric_fee)
+    const unitPrice = Number(type === 'water' ? contract?.water_unit_price : contract?.electric_unit_price)
+    if (Number.isFinite(fee) && fee > 0 && Number.isFinite(unitPrice) && unitPrice > 0) return fee / unitPrice
+    return 0
+  }
 
   openDrawer = async (contract: Contract) => {
     const billSummary = this.state.bills.find(b => Number(b.contract_id) === Number(contract.id))
@@ -508,7 +525,7 @@ export class RentPlanPage extends React.Component<{}, State> {
   ))
 
   render() {
-    const { buildings, contracts, bills, curBid, planYear, planMonth, loading } = this.state
+    const { buildings, contracts, bills, payments, curBid, planYear, planMonth, loading } = this.state
     if (this.state.firstLoad) return <div style={{padding:40,textAlign:'center',color:'var(--text-third)'}}>加载中...</div>
 
     if (buildings.length === 0) return (
@@ -517,13 +534,37 @@ export class RentPlanPage extends React.Component<{}, State> {
 
     // 汇总统计
     var totalRent = 0, paidAmount = 0, paidCount = 0, unpaidCount = 0
+    var utilityReceivable = 0, utilityPaid = 0, utilityCost = 0
+    const contractById: Record<number, Contract> = {}
+    contracts.forEach(c => { contractById[Number(c.id)] = c })
+    const paymentsByBill: Record<number, number> = {}
+    payments.forEach(p => {
+      const billId = Number(p.bill_id || 0)
+      if (!billId) return
+      paymentsByBill[billId] = (paymentsByBill[billId] || 0) + Number(p.amount || 0)
+    })
     contracts.forEach(c => {
       const bill = bills.find(b => Number(b.contract_id) === Number(c.id))
       const ta = bill ? Number(bill.total_amount || 0) : Number(c.monthly_rent || 0)
       totalRent += ta
       if (bill && bill.status === 'paid') { paidCount++; paidAmount += ta }
       if (!bill || bill.status !== 'paid') unpaidCount++
+      if (bill) {
+        const waterFee = Number(bill.water_fee || 0)
+        const electricFee = Number(bill.electric_fee || 0)
+        const utilityAmount = waterFee + electricFee
+        const billTotal = Number(bill.total_amount || 0)
+        const recordedPaid = paymentsByBill[Number(bill.id)] || 0
+        const paidForBill = bill.status === 'paid' && recordedPaid <= 0 ? billTotal : recordedPaid
+        const utilityRatio = billTotal > 0 ? utilityAmount / billTotal : 0
+        const waterUsage = this.getBillUsage(bill, 'water', c)
+        const electricUsage = this.getBillUsage(bill, 'electric', c)
+        utilityReceivable += utilityAmount
+        utilityPaid += Math.min(utilityAmount, paidForBill * utilityRatio)
+        utilityCost += waterUsage * WATER_COST_PRICE + electricUsage * ELECTRIC_COST_PRICE
+      }
     })
+    const utilityProfit = utilityPaid - utilityCost
 
     return (
       <div>
@@ -548,10 +589,13 @@ export class RentPlanPage extends React.Component<{}, State> {
         {loading ? <div style={{padding:40,textAlign:'center',color:'var(--text-third)'}}>加载中...</div> : (
           <>
             {/* 汇总 */}
-            <div className="summary-row">
+            <div className="summary-row summary-row-rent-plan">
               <div className="stat-card"><div>当月应收</div><div className="stat-val" style={{color:'var(--blue)'}}>¥{totalRent.toFixed(2)}</div></div>
               <div className="stat-card"><div>当月已收</div><div className="stat-val" style={{color:'var(--green)'}}>¥{paidAmount.toFixed(2)}</div></div>
-              <div className="stat-card"><div>已收户数</div><div className="stat-val" style={{color:'var(--text-sec)'}}>{paidCount}户</div></div>
+              <div className="stat-card"><div>水电应收</div><div className="stat-val" style={{color:'var(--blue)'}}>¥{utilityReceivable.toFixed(2)}</div></div>
+              <div className="stat-card"><div>水电实收</div><div className="stat-val" style={{color:'var(--green)'}}>¥{utilityPaid.toFixed(2)}</div></div>
+              <div className="stat-card"><div>水电收益</div><div className="stat-val" style={{color: utilityProfit >= 0 ? 'var(--green)' : 'var(--red)'}}>¥{utilityProfit.toFixed(2)}</div></div>
+              <div className="stat-card"><div>已收户数</div><div className="stat-val" style={{color:'var(--green)'}}>{paidCount}户</div></div>
               <div className="stat-card"><div>未收户数</div><div className="stat-val" style={{color:'var(--red)'}}>{unpaidCount}户</div></div>
             </div>
 

@@ -1,9 +1,5 @@
 # -*- coding: utf-8 -*-
-"""本地数据库访问层。
-
-默认使用 SQLite；设置 DB_BACKEND=mysql 或提供 db_config.local.env 后使用 MySQL。
-"""
-import sqlite3
+"""MySQL database access layer."""
 import os
 import json
 import re
@@ -14,7 +10,6 @@ from datetime import datetime, date
 from decimal import Decimal
 from functools import wraps
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "local.db")
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "db_config.local.env")
 
 
@@ -33,11 +28,7 @@ def _load_env_file(path):
 
 
 _LOCAL_DB_CONFIG = _load_env_file(CONFIG_PATH)
-DB_BACKEND = (
-    os.environ.get("DB_BACKEND")
-    or _LOCAL_DB_CONFIG.get("DB_BACKEND")
-    or ("mysql" if _LOCAL_DB_CONFIG.get("MYSQL_HOST") else "sqlite")
-).lower()
+DB_BACKEND = "mysql"
 _MYSQL_ENGINE = None
 _MYSQL_ENGINE_LOCK = threading.Lock()
 _REDIS_CLIENT = None
@@ -228,13 +219,7 @@ def _mysql_conn():
 
 
 def _conn():
-    if DB_BACKEND == "mysql":
-        return _mysql_conn()
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    c = sqlite3.connect(DB_PATH)
-    c.row_factory = sqlite3.Row
-    c.execute('PRAGMA foreign_keys=ON')
-    return c
+    return _mysql_conn()
 
 
 def _json_default(value):
@@ -363,196 +348,6 @@ def init():
         finally:
             c.close()
         return
-
-    c = _conn()
-    
-    # 基础设施表
-    c.execute("CREATE TABLE IF NOT EXISTS user_config (key TEXT PRIMARY KEY, value TEXT DEFAULT '')")
-    c.execute("CREATE TABLE IF NOT EXISTS app_user (key TEXT PRIMARY KEY, value TEXT DEFAULT '')")
-    c.execute("""CREATE TABLE IF NOT EXISTS chat_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT DEFAULT '',
-        messages TEXT DEFAULT '[]', created_at TEXT DEFAULT ''
-    )""")
-    try:
-        c.execute("ALTER TABLE chat_history ADD COLUMN archived INTEGER DEFAULT 0")
-    except:
-        pass
-    c.execute("""CREATE TABLE IF NOT EXISTS ai_thread_state (
-        thread_id TEXT PRIMARY KEY,
-        state TEXT DEFAULT '{}',
-        updated_at TEXT DEFAULT (datetime('now','localtime'))
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS ai_trace (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        thread_id TEXT DEFAULT '',
-        event TEXT DEFAULT '',
-        payload TEXT DEFAULT '{}',
-        created_at TEXT DEFAULT (datetime('now','localtime'))
-    )""")
-
-    # AI 知识库表（向量存储用 SQLite 文本，实际用 TF-IDF）
-    c.execute("""CREATE TABLE IF NOT EXISTS ai_knowledge (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        content TEXT NOT NULL,
-        category TEXT DEFAULT '',
-        embedding TEXT DEFAULT '',
-        created_at TEXT DEFAULT (datetime('now','localtime'))
-    )""")
-
-    # 租房管理表
-    c.execute("""CREATE TABLE IF NOT EXISTS buildings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
-        address TEXT DEFAULT '',
-        created_at TEXT DEFAULT (datetime('now','localtime'))
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS rooms (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        building_id INTEGER NOT NULL REFERENCES buildings(id),
-        room_number TEXT NOT NULL,
-        floor INTEGER DEFAULT 1,
-        status TEXT DEFAULT 'idle',
-        created_at TEXT DEFAULT (datetime('now','localtime'))
-    )""")
-    try:
-        c.execute("ALTER TABLE rooms ADD COLUMN floor INTEGER DEFAULT 1")
-    except:
-        pass
-    try:
-        c.execute("ALTER TABLE rooms ADD COLUMN status TEXT DEFAULT 'idle'")
-    except:
-        pass
-    c.execute("""CREATE TABLE IF NOT EXISTS tenants (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
-        building_id INTEGER REFERENCES buildings(id),
-        phone TEXT DEFAULT '', id_card TEXT DEFAULT '',
-        status TEXT DEFAULT 'active',
-        created_at TEXT DEFAULT (datetime('now','localtime'))
-    )""")
-    try:
-        c.execute("ALTER TABLE tenants ADD COLUMN building_id INTEGER REFERENCES buildings(id)")
-    except:
-        pass
-    try:
-        c.execute("ALTER TABLE tenants ADD COLUMN room_id INTEGER REFERENCES rooms(id)")
-    except:
-        pass
-    try:
-        c.execute("ALTER TABLE tenants ADD COLUMN room_id TEXT")
-    except:
-        pass
-    # 如果 room_id 字段存在外键约束，则重建表去掉约束
-    cols = [row[1] for row in c.execute("PRAGMA table_info(tenants)").fetchall()]
-    if 'room_id' in cols:
-        fks = c.execute("PRAGMA foreign_key_list(tenants)").fetchall()
-        room_has_fk = any(fk[3] == 'room_id' for fk in fks)
-        if room_has_fk:
-            c.execute("PRAGMA foreign_keys=OFF")
-            c.execute("""
-                CREATE TABLE tenants_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    building_id INTEGER REFERENCES buildings(id),
-                    phone TEXT DEFAULT '',
-                    id_card TEXT DEFAULT '',
-                    status TEXT DEFAULT 'active',
-                    created_at TEXT DEFAULT (datetime('now','localtime')),
-                    room_id TEXT
-                )
-            """)
-            c.execute("INSERT INTO tenants_new (id,name,building_id,phone,id_card,status,created_at,room_id) SELECT id,name,building_id,phone,id_card,status,created_at,room_id FROM tenants")
-            c.execute("DROP TABLE tenants")
-            c.execute("ALTER TABLE tenants_new RENAME TO tenants")
-            c.execute("PRAGMA foreign_keys=ON")
-    c.execute("""CREATE TABLE IF NOT EXISTS contracts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-        room_id INTEGER NOT NULL REFERENCES rooms(id),
-        start_date TEXT NOT NULL, end_date TEXT DEFAULT '',
-        monthly_rent REAL DEFAULT 0,
-        water_unit_price REAL DEFAULT 0,
-        electric_unit_price REAL DEFAULT 0,
-        deposit REAL DEFAULT 0, contract_file TEXT DEFAULT '',
-        other_fee_details TEXT DEFAULT '[]',
-        water_meter_id INTEGER, electric_meter_id INTEGER,
-        status TEXT DEFAULT 'active',
-        created_at TEXT DEFAULT (datetime('now','localtime'))
-    )""")
-    try:
-        c.execute("ALTER TABLE contracts ADD COLUMN other_fee_details TEXT DEFAULT '[]'")
-    except: pass
-    try:
-        c.execute("ALTER TABLE contracts ADD COLUMN water_meter_id INTEGER")
-    except: pass
-    try:
-        c.execute("ALTER TABLE contracts ADD COLUMN electric_meter_id INTEGER")
-    except: pass
-    c.execute("""CREATE TABLE IF NOT EXISTS meters (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        room_id INTEGER NOT NULL REFERENCES rooms(id),
-        type TEXT NOT NULL CHECK(type IN ('water','electric')),
-        meter_no TEXT DEFAULT '', init_reading REAL DEFAULT 0,
-        photo TEXT DEFAULT '',
-        created_at TEXT DEFAULT (datetime('now','localtime'))
-    )""")
-    try:
-        c.execute("ALTER TABLE meters ADD COLUMN photo TEXT DEFAULT ''")
-    except: pass
-    c.execute("""CREATE TABLE IF NOT EXISTS meter_readings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        meter_id INTEGER NOT NULL REFERENCES meters(id),
-        reading_date TEXT NOT NULL, reading REAL NOT NULL,
-        photo TEXT DEFAULT '', remark TEXT DEFAULT '',
-        created_at TEXT DEFAULT (datetime('now','localtime'))
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS bills (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        contract_id INTEGER NOT NULL REFERENCES contracts(id),
-        billing_month TEXT NOT NULL,
-        rent_amount REAL DEFAULT 0, water_fee REAL DEFAULT 0,
-        electric_fee REAL DEFAULT 0, other_fee REAL DEFAULT 0,
-        other_fee_details TEXT DEFAULT '[]',
-        total_amount REAL DEFAULT 0, status TEXT DEFAULT 'unpaid',
-        water_last_reading REAL DEFAULT 0, water_current_reading REAL DEFAULT 0,
-        electric_last_reading REAL DEFAULT 0, electric_current_reading REAL DEFAULT 0,
-        water_photo TEXT DEFAULT '', electric_photo TEXT DEFAULT '',
-        remark TEXT DEFAULT '',
-        created_at TEXT DEFAULT (datetime('now','localtime'))
-    )""")
-    try:
-        c.execute("ALTER TABLE bills ADD COLUMN water_last_reading REAL DEFAULT 0")
-    except: pass
-    try:
-        c.execute("ALTER TABLE bills ADD COLUMN water_current_reading REAL DEFAULT 0")
-    except: pass
-    try:
-        c.execute("ALTER TABLE bills ADD COLUMN electric_last_reading REAL DEFAULT 0")
-    except: pass
-    try:
-        c.execute("ALTER TABLE bills ADD COLUMN electric_current_reading REAL DEFAULT 0")
-    except: pass
-    try:
-        c.execute("ALTER TABLE bills ADD COLUMN water_photo TEXT DEFAULT ''")
-    except: pass
-    try:
-        c.execute("ALTER TABLE bills ADD COLUMN electric_photo TEXT DEFAULT ''")
-    except: pass
-    try:
-        c.execute("ALTER TABLE bills ADD COLUMN other_fee_details TEXT DEFAULT '[]'")
-    except: pass
-    c.execute("""CREATE TABLE IF NOT EXISTS payments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        bill_id INTEGER NOT NULL REFERENCES bills(id),
-        amount REAL NOT NULL,
-        pay_date TEXT DEFAULT (date('now')),
-        pay_method TEXT DEFAULT '', remark TEXT DEFAULT '',
-        created_at TEXT DEFAULT (datetime('now','localtime'))
-    )""")
-
-    c.execute("DROP TABLE IF EXISTS ot_reasons")
-    c.commit()
-    c.close()
-
 
 # === 用户配置 ===
 def get_config(key, default=""):
@@ -726,7 +521,7 @@ def delete_family_account(account_id):
 
 def load_chats(search='', archived=False):
     c = _conn()
-    wh = ["archived=?"]
+    wh = ["COALESCE(archived,0)=?"]
     params = [1 if archived else 0]
     if search:
         wh.append("(title LIKE ? OR messages LIKE ?)")
@@ -754,7 +549,7 @@ def set_chat_archived(conv_id, archived=True):
 
 def save_chat(title, messages):
     c = _conn()
-    c.execute("INSERT INTO chat_history (title, messages, created_at) VALUES (?,?,datetime('now','localtime'))", (title, json.dumps(messages, ensure_ascii=False)))
+    c.execute("INSERT INTO chat_history (title, messages, archived, created_at) VALUES (?,?,0,datetime('now','localtime'))", (title, json.dumps(messages, ensure_ascii=False)))
     c.commit()
     conv_id = c.lastrowid
     c.close()
@@ -873,9 +668,9 @@ def delete_building(bid):
     c.commit(); c.close()
     clear_rental_cache()
 
-def add_room(building_id, room_number, floor=1, status='idle'):
+def add_room(building_id, room_number, floor=1, status='idle', room_type='单间'):
     c = _conn()
-    cur = c.execute("INSERT INTO rooms (building_id, room_number, floor, status) VALUES (?,?,?,?)", (building_id, room_number, floor, status))
+    cur = c.execute("INSERT INTO rooms (building_id, room_number, room_type, floor, status) VALUES (?,?,?,?,?)", (building_id, room_number, room_type or '单间', floor, status))
     c.commit(); pk = cur.lastrowid; c.close()
     clear_rental_cache()
     return pk
@@ -896,9 +691,9 @@ def get_room(rid):
     c.close()
     return dict(r) if r else None
 
-def update_room(rid, building_id, room_number, floor=1, status='idle'):
+def update_room(rid, building_id, room_number, floor=1, status='idle', room_type='单间'):
     c = _conn()
-    c.execute("UPDATE rooms SET building_id=?,room_number=?,floor=?,status=? WHERE id=?", (building_id, room_number, floor, status, rid))
+    c.execute("UPDATE rooms SET building_id=?,room_number=?,room_type=?,floor=?,status=? WHERE id=?", (building_id, room_number, room_type or '单间', floor, status, rid))
     c.commit(); c.close()
     clear_rental_cache()
 
@@ -968,7 +763,7 @@ def add_contract(tenant_id, room_id, start_date, end_date='',
 def get_contracts(active_only=True, building_id=None):
     c = _conn()
     sql = ("SELECT c.*,t.name AS tenant_name,t.phone AS tenant_phone,"
-           "r.room_number,b.name AS building_name "
+           "r.room_number,r.room_type,b.name AS building_name "
            "FROM contracts c "
            "JOIN tenants t ON c.tenant_id=t.id "
            "JOIN rooms r ON c.room_id=r.id "
@@ -990,7 +785,7 @@ def get_contracts(active_only=True, building_id=None):
 def get_contract(cid):
     c = _conn()
     r = c.execute("SELECT c.*,t.name AS tenant_name,t.phone AS tenant_phone,"
-                  "r.room_number,b.name AS building_name "
+                  "r.room_number,r.room_type,b.name AS building_name "
                   "FROM contracts c "
                   "JOIN tenants t ON c.tenant_id=t.id "
                   "JOIN rooms r ON c.room_id=r.id "

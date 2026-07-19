@@ -4,10 +4,10 @@ import { rental } from '../api'
 import { showToast, DatePicker } from '../components/ui'
 import { resolveBuildingId, useUIStore } from '../store'
 
-interface Contract { id: number; tenant_name: string; tenant_id: number; room_number: string; room_id: number; monthly_rent: number; start_date: string; end_date: string; deposit: number; status: string; water_unit_price: number; electric_unit_price: number; water_meter_id: number | null; electric_meter_id: number | null; other_fee_details?: string }
+interface Contract { id: number; tenant_name: string; tenant_id: number; room_number: string; room_type?: string; room_id: number; monthly_rent: number; start_date: string; end_date: string; deposit: number; status: string; water_unit_price: number; electric_unit_price: number; water_meter_id: number | null; electric_meter_id: number | null; other_fee_details?: string }
 interface Building { id: number; name: string; rent_day: number }
-interface Room { id: number; room_number: string; floor: number }
-interface Tenant { id: number; name: string; room_id: string }
+interface Room { id: number; room_number: string; room_type?: string; floor: number; status?: string }
+interface Tenant { id: number; name: string; phone?: string; id_card?: string; room_id: string }
 interface Meter { id: number; meter_no: string; room_number: string }
 interface OtherFeeItem { id: string; name: string; amount: string }
 interface OtherFeeDetail { name: string; amount: number }
@@ -23,6 +23,10 @@ interface State {
   editId: number | null
   roomId: string
   tenantId: string
+  tenantMode: 'existing' | 'new'
+  newTenantName: string
+  newTenantPhone: string
+  newTenantIdCard: string
   monthlyRent: string
   startDate: string
   endDate: string
@@ -61,7 +65,8 @@ export class ContractsPage extends React.Component<{}, State> {
     firstLoad: true,
     modal: false,
     editId: null,
-    roomId: '', tenantId: '', monthlyRent: '', startDate: '', endDate: '', rentDay: '1',
+    roomId: '', tenantId: '', tenantMode: 'existing', newTenantName: '', newTenantPhone: '', newTenantIdCard: '',
+    monthlyRent: '', startDate: '', endDate: '', rentDay: '1',
     waterInit: '', waterMeterId: '', waterPrice: '',
     elecInit: '', electricMeterId: '', electricPrice: '',
     deposit: '', otherFees: [{ id: 'contract-fee-initial', name: '', amount: '' }], status: 'active',
@@ -131,6 +136,11 @@ export class ContractsPage extends React.Component<{}, State> {
     if (!items.length) return '-'
     const total = items.reduce((sum, item) => sum + item.amount, 0)
     return `${items.length} 项 / ¥${total.toFixed(2)}`
+  }
+
+  formatRoomLabel = (room?: Room | null) => {
+    if (!room) return ''
+    return room.room_type ? `${room.room_number} · ${room.room_type}` : room.room_number
   }
 
   componentDidMount() { this.loadBuildings() }
@@ -214,11 +224,14 @@ export class ContractsPage extends React.Component<{}, State> {
       rental('meters', 'list', { building_id: bid, type: 'water' }),
       rental('meters', 'list', { building_id: bid, type: 'electric' }),
     ])
-    if (!tenants || tenants.length === 0) { showToast('该楼栋没有租客，请先添加租客'); return }
     if (!rooms || rooms.length === 0) { showToast('该楼栋没有房间，请先添加房间'); return }
+    const initialTenant = tenants?.[0]
+    const initialRoom = rooms.find((room: Room) => room.status !== 'rented') || rooms[0]
     this.setState({
       editId: null, modal: true,
-      roomId: rooms[0]?.id || '', tenantId: tenants[0]?.id || '',
+      roomId: initialRoom?.id ? String(initialRoom.id) : '', tenantId: initialTenant?.id ? String(initialTenant.id) : '',
+      tenantMode: initialTenant ? 'existing' : 'new',
+      newTenantName: '', newTenantPhone: '', newTenantIdCard: '',
       monthlyRent: '', startDate: '', endDate: '', rentDay: String(bld.rent_day || 1),
       waterInit: '', waterMeterId: '', waterPrice: '',
       elecInit: '', electricMeterId: '', electricPrice: '',
@@ -247,6 +260,7 @@ export class ContractsPage extends React.Component<{}, State> {
     this.setState({
       editId: id, modal: true,
       roomId: String(c.room_id || ''), tenantId: String(c.tenant_id || ''),
+      tenantMode: 'existing', newTenantName: '', newTenantPhone: '', newTenantIdCard: '',
       monthlyRent: String(c.monthly_rent || ''), startDate: c.start_date || '', endDate: c.end_date || '',
       rentDay: String(bld.rent_day || 1),
       waterInit: '', waterMeterId: String(c.water_meter_id || ''), waterPrice: String(c.water_unit_price || ''),
@@ -259,8 +273,18 @@ export class ContractsPage extends React.Component<{}, State> {
   }
 
   save = async () => {
-    const { startDate, roomId, tenantId, monthlyRent, rentDay, deposit, waterMeterId, waterPrice, electricMeterId, electricPrice, editId, curBid, otherFees } = this.state
+    const { startDate, roomId, tenantId, tenantMode, newTenantName, newTenantPhone, newTenantIdCard, monthlyRent, rentDay, deposit, waterMeterId, waterPrice, electricMeterId, electricPrice, editId, curBid, otherFees } = this.state
     if (!startDate) { showToast('请选择合同开始日期'); return }
+    if (!roomId) { showToast('请选择房间'); return }
+    const resolvedTenantId = parseInt(tenantId)
+    if (!editId && tenantMode === 'existing' && !resolvedTenantId) {
+      showToast('请选择租客')
+      return
+    }
+    if (!editId && tenantMode === 'new' && !newTenantName.trim()) {
+      showToast('请填写新租客姓名')
+      return
+    }
     const enteredOtherFees = otherFees.filter(item => item.name.trim() || item.amount.trim())
     for (const item of enteredOtherFees) {
       if (!item.name.trim()) { showToast('请填写其它费用的项目名称'); return }
@@ -272,7 +296,10 @@ export class ContractsPage extends React.Component<{}, State> {
     }
     const otherFeeDetails = this.getOtherFeeDetails()
     const data: any = {
-      tenant_id: parseInt(tenantId), room_id: parseInt(roomId),
+      tenant_id: resolvedTenantId || null, tenant_name: tenantMode === 'new' ? newTenantName.trim() : undefined,
+      tenant_phone: tenantMode === 'new' ? newTenantPhone.trim() : undefined,
+      tenant_id_card: tenantMode === 'new' ? newTenantIdCard.trim() : undefined,
+      room_id: parseInt(roomId),
       start_date: startDate, end_date: this.state.endDate,
       monthly_rent: parseFloat(monthlyRent) || 0, deposit: parseFloat(deposit) || 0,
       water_unit_price: parseFloat(waterPrice) || 0, electric_unit_price: parseFloat(electricPrice) || 0,
@@ -333,12 +360,13 @@ export class ContractsPage extends React.Component<{}, State> {
           ) : (
             <div className="table-wrap">
               <table>
-                <thead><tr><th>租客</th><th>房间</th><th>月租</th><th>合同期</th><th>保证金</th><th>其它费用</th><th className="status-cell">状态</th><th>操作</th></tr></thead>
+                <thead><tr><th>租客</th><th>房间</th><th>户型</th><th>月租</th><th>合同期</th><th>保证金</th><th>其它费用</th><th className="status-cell">状态</th><th>操作</th></tr></thead>
                 <tbody>
                   {curContracts.map(c => (
                     <tr key={c.id}>
                       <td><span className="name-link" onClick={() => this.openEdit(c.id)}>{c.tenant_name || ''}</span></td>
                       <td>{c.room_number || ''}</td>
+                      <td>{c.room_type || '单间'}</td>
                       <td>¥{Number(c.monthly_rent || 0).toFixed(2)}</td>
                       <td>{(c.start_date || '') + ' ~ ' + (c.end_date || '')}</td>
                       <td>¥{Number(c.deposit || 0).toFixed(2)}</td>
@@ -379,6 +407,7 @@ export class ContractsPage extends React.Component<{}, State> {
           <div className="checkout-summary">
             <div><span>租客</span><b>{contract.tenant_name}</b></div>
             <div><span>房间</span><b>{contract.room_number}</b></div>
+            <div><span>户型</span><b>{contract.room_type || '单间'}</b></div>
             <div><span>月租</span><b>¥{Number(contract.monthly_rent || 0).toFixed(2)}</b></div>
           </div>
           <div className="form-group">
@@ -396,7 +425,7 @@ export class ContractsPage extends React.Component<{}, State> {
   }
 
   renderModal() {
-    const { modal, editId, roomId, tenantId, monthlyRent, startDate, endDate, rentDay, waterInit, waterMeterId, waterPrice, elecInit, electricMeterId, electricPrice, deposit, otherFees, status, modalRooms, modalTenants, modalWaterMeters, modalElectricMeters } = this.state
+    const { modal, editId, roomId, tenantId, tenantMode, newTenantName, newTenantPhone, newTenantIdCard, monthlyRent, startDate, endDate, rentDay, waterInit, waterMeterId, waterPrice, elecInit, electricMeterId, electricPrice, deposit, otherFees, status, modalRooms, modalTenants, modalWaterMeters, modalElectricMeters } = this.state
     if (!modal) return null
 
     const roomMap: Record<string,string> = {}
@@ -419,13 +448,13 @@ export class ContractsPage extends React.Component<{}, State> {
                 <label>房间</label>
                 <div className="custom-select" style={{position:'relative'}}>
                   <div className="select-trigger" onClick={() => this.setState({ roomMenuOpen: !this.state.roomMenuOpen })}>
-                    <span>{selRoom?.room_number || '请选择'}</span>
+                    <span>{this.formatRoomLabel(selRoom) || '请选择'}</span>
                   </div>
                   {this.state.roomMenuOpen && (
                     <div className="select-menu" style={{display:'block',position:'absolute',left:0,right:0,top:'100%',marginTop:4,zIndex:10}}>
                       {modalRooms.map(r => (
                         <div key={r.id} className={'select-option' + (String(r.id) === roomId ? ' active' : '')}
-                          onClick={() => this.setState({ roomId: String(r.id), roomMenuOpen: false })}>{r.room_number}</div>
+                          onClick={() => this.setState({ roomId: String(r.id), roomMenuOpen: false })}>{this.formatRoomLabel(r)}</div>
                       ))}
                     </div>
                   )}
@@ -434,41 +463,64 @@ export class ContractsPage extends React.Component<{}, State> {
 
               <div className="form-group">
                 <label>租客</label>
-                <div className="custom-select" style={{position:'relative'}}>
-                  <div className="select-trigger" onClick={() => this.setState({ tenantMenuOpen: !this.state.tenantMenuOpen })}>
-                    <span id="contract_tenant_label">
-                      {selTenant ? (
-                        <>
-                          {selTenant.room_id && String(selTenant.room_id).split(',').map(rid => (
-                            <span key={rid} className="ms-tag" style={{marginRight:2}}>{roomMap[rid] || rid}</span>
-                          ))}
-                          {selTenant.name}
-                        </>
-                      ) : '请选择'}
-                    </span>
+                {!editId && (
+                  <div className="tenant-source-segment">
+                    <button type="button" className={tenantMode === 'existing' ? 'active' : ''} onClick={() => this.setState({ tenantMode: 'existing' })}>选择</button>
+                    <button type="button" className={tenantMode === 'new' ? 'active' : ''} onClick={() => this.setState({ tenantMode: 'new' })}>新建</button>
                   </div>
-                  {this.state.tenantMenuOpen && (
-                    <div className="select-menu cs-tenant-menu" style={{display:'block',position:'absolute',left:0,right:0,top:'100%',marginTop:4,zIndex:10}}>
-                      {modalTenants.map(t => (
-                        <div key={t.id} className={'select-option' + (String(t.id) === tenantId ? ' active' : '')}
-                          onClick={() => this.setState({ tenantId: String(t.id), tenantMenuOpen: false })}>
-                          <span className="ct-tags">
-                            {t.room_id && String(t.room_id).split(',').map(rid => (
-                              <span key={rid} className="ms-tag">{roomMap[rid] || rid}</span>
+                )}
+                {tenantMode === 'existing' || editId ? (
+                  <div className="custom-select" style={{position:'relative'}}>
+                    <div className="select-trigger" onClick={() => this.setState({ tenantMenuOpen: !this.state.tenantMenuOpen })}>
+                      <span id="contract_tenant_label">
+                        {selTenant ? (
+                          <>
+                            {selTenant.room_id && String(selTenant.room_id).split(',').map(rid => (
+                              <span key={rid} className="ms-tag" style={{marginRight:2}}>{roomMap[rid] || rid}</span>
                             ))}
-                          </span>
-                          <span className="ct-name">{t.name}</span>
-                        </div>
-                      ))}
+                            {selTenant.name}
+                          </>
+                        ) : '请选择'}
+                      </span>
                     </div>
-                  )}
-                </div>
+                    {this.state.tenantMenuOpen && (
+                      <div className="select-menu cs-tenant-menu" style={{display:'block',position:'absolute',left:0,right:0,top:'100%',marginTop:4,zIndex:10}}>
+                        {modalTenants.map(t => (
+                          <div key={t.id} className={'select-option' + (String(t.id) === tenantId ? ' active' : '')}
+                            onClick={() => this.setState({ tenantId: String(t.id), tenantMenuOpen: false })}>
+                            <span className="ct-tags">
+                              {t.room_id && String(t.room_id).split(',').map(rid => (
+                                <span key={rid} className="ms-tag">{roomMap[rid] || rid}</span>
+                              ))}
+                            </span>
+                            <span className="ct-name">{t.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <input className="soft-input" value={newTenantName} onChange={e => this.setState({ newTenantName: e.target.value })} placeholder="如：张三" />
+                )}
               </div>
 
               <div className="form-group">
                 <label>月租（元）</label>
                 <input className="soft-input" type="number" value={monthlyRent} onChange={e => this.setState({ monthlyRent: e.target.value })} placeholder="0.00" />
               </div>
+
+              {!editId && tenantMode === 'new' && (
+                <>
+                  <div className="form-group">
+                    <label>手机号</label>
+                    <input className="soft-input" value={newTenantPhone} onChange={e => this.setState({ newTenantPhone: e.target.value })} placeholder="如：13800000000" />
+                  </div>
+                  <div className="form-group">
+                    <label>证件号</label>
+                    <input className="soft-input" value={newTenantIdCard} onChange={e => this.setState({ newTenantIdCard: e.target.value })} placeholder="身份证或其他证件" />
+                  </div>
+                </>
+              )}
 
               {/* Row 2: 合同开始 合同结束 收租日 */}
               <div className="form-group">
