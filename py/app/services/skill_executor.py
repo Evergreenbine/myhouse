@@ -511,7 +511,26 @@ def _contract_create_form_action(
 
 def _bill_for_contract(contract_id: Any, month: str) -> Optional[Dict[str, Any]]:
     bills = db.get_bills(month, _int_or_none(contract_id)) or []
-    return bills[0] if bills else None
+    if not bills:
+        return None
+
+    def rank(bill: Dict[str, Any]) -> tuple:
+        amount = (
+            _num(bill.get("total_amount")) +
+            _num(bill.get("rent_amount")) +
+            _num(bill.get("water_fee")) +
+            _num(bill.get("electric_fee")) +
+            _num(bill.get("other_fee"))
+        )
+        reading = (
+            _num(bill.get("water_last_reading")) +
+            _num(bill.get("water_current_reading")) +
+            _num(bill.get("electric_last_reading")) +
+            _num(bill.get("electric_current_reading"))
+        )
+        return (amount > 0, reading > 0, _int_or_none(bill.get("id")) or 0)
+
+    return max(bills, key=rank)
 
 
 def _rent_plan_row(contract: Dict[str, Any], month: str) -> Dict[str, Any]:
@@ -1663,6 +1682,15 @@ def bill_create_from_ai(
     }.items():
         if value is not None and value != "":
             draft[key] = _num(value)
+
+    if draft.get("water_curr") is not None and draft.get("water_last") is not None:
+        draft["water_usage"] = round(max(0, _num(draft.get("water_curr")) - _num(draft.get("water_last"))), 2)
+        if water_fee in {None, ""}:
+            draft["water_fee"] = round(_num(draft.get("water_usage")) * _num(contract.get("water_unit_price")), 2)
+    if draft.get("electric_curr") is not None and draft.get("electric_last") is not None:
+        draft["electric_usage"] = round(max(0, _num(draft.get("electric_curr")) - _num(draft.get("electric_last"))), 2)
+        if electric_fee in {None, ""}:
+            draft["electric_fee"] = round(_num(draft.get("electric_usage")) * _num(contract.get("electric_unit_price")), 2)
 
     remove_fee_names = _normalize_other_fee_names(remove_other_fee_names)
     clear_other_fee_requested = _is_clear_other_fee_request(remove_fee_names, clear_other_fees)

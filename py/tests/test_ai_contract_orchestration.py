@@ -66,6 +66,90 @@ class ContractOrchestrationTests(unittest.TestCase):
         self.assertIn("你好，我在", result["reply"])
         self.assertIn("查某个月水电表", result["reply"])
 
+    def test_bill_create_room_followup_inherits_context(self):
+        data = {
+            "prompt": "202呢",
+            "history": [{"role": "user", "content": "石潭布201生成7月账单"}],
+            "session_context": {
+                "active_workflow": "bill_create",
+                "building_id": 2,
+                "building_name": "石潭布",
+                "workflow_state": {"name": "bill_create", "fields": {"month": "2026-07"}},
+            },
+        }
+        with patch.object(ai_orchestrator.db, "get_buildings", return_value=BUILDINGS):
+            args = ai_orchestrator._bill_create_followup_args(data)
+
+        self.assertEqual(args["building_id"], 2)
+        self.assertEqual(args["building_name"], "石潭布")
+        self.assertEqual(args["room_number"], "202")
+        self.assertEqual(args["month"], "2026-07")
+
+    def test_bill_create_room_followup_returns_pending_bill_image(self):
+        data = {
+            "prompt": "202呢",
+            "history": [{"role": "user", "content": "石潭布201生成7月账单"}],
+            "session_context": {
+                "active_workflow": "bill_create",
+                "building_id": 2,
+                "building_name": "石潭布",
+                "workflow_state": {"name": "bill_create", "fields": {"month": "2026-07"}},
+            },
+        }
+        pending_action = {
+            "id": "bill-202",
+            "type": "create_bill",
+            "label": "保存202 2026-07 账单",
+            "tool": "confirm_create_bill",
+            "args": {"contract_id": 7, "month": "2026-07", "draft": {}},
+            "preview": {"room_number": "202", "month": "2026-07"},
+            "status": "pending",
+        }
+        receipt_image = {
+            "image_type": "bill_receipt",
+            "receipt": {
+                "no": "202607-202",
+                "title": "房租及费用收据",
+                "room_number": "202",
+                "tenant_name": "张培英",
+                "month": "2026-07",
+                "items": [],
+                "total_amount": 874,
+            },
+        }
+        tool_result = {
+            "ok": True,
+            "tool": "bill_create_from_ai",
+            "data": {
+                "success": True,
+                "requires_confirmation": True,
+                "pending_action": pending_action,
+                "receipt_image": receipt_image,
+            },
+        }
+        with patch.object(ai_orchestrator.db, "get_buildings", return_value=BUILDINGS), \
+             patch.object(ai_orchestrator, "execute_tool", return_value=tool_result) as execute_mock, \
+             patch.object(ai_orchestrator, "search_skills", return_value=[]), \
+             patch.object(ai_orchestrator, "_detect_intent", return_value={
+                 "name": "bill_create",
+                 "workflow": "bill_create",
+                 "confidence": 1.0,
+                 "fields": {"month": "2026-07"},
+             }):
+            result = ai_orchestrator._bill_create_followup_fallback(data)
+
+        execute_mock.assert_called_once_with("bill_create_from_ai", {
+            "building_id": 2,
+            "building_name": "石潭布",
+            "room_number": "202",
+            "month": "2026-07",
+        })
+        self.assertEqual(result["pending_actions"][0]["id"], "bill-202")
+        self.assertEqual(result["bill_images"][0]["receipt"]["room_number"], "202")
+
+    def test_meter_history_backfill_text_confirms_pending_action(self):
+        self.assertTrue(ai_orchestrator._looks_like_pending_action_text_confirm("把6月底的读数补录到历史记录"))
+
     def test_colloquial_contract_request_extracts_building_and_room(self):
         prompt = "石潭布302帮我建个合同"
         with patch.object(ai_orchestrator.db, "get_buildings", return_value=BUILDINGS):

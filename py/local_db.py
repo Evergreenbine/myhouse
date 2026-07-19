@@ -1024,6 +1024,31 @@ def add_bill(contract_id, billing_month, rent_amount, water_fee=0,
              electric_fee=0, other_fee=0, remark='',
              water_last=0, water_curr=0, electric_last=0, electric_curr=0,
              water_photo='', electric_photo='', other_fee_details='[]'):
+    existing_conn = _conn()
+    existing = existing_conn.execute(
+        "SELECT id FROM bills WHERE contract_id=? AND billing_month=? ORDER BY id DESC LIMIT 1",
+        (contract_id, billing_month),
+    ).fetchone()
+    existing_conn.close()
+    if existing:
+        update_bill(
+            existing["id"],
+            contract_id,
+            billing_month,
+            rent_amount,
+            water_fee,
+            electric_fee,
+            other_fee,
+            remark,
+            water_last,
+            water_curr,
+            electric_last,
+            electric_curr,
+            water_photo,
+            electric_photo,
+            other_fee_details,
+        )
+        return existing["id"]
     total = round(rent_amount + water_fee + electric_fee + other_fee, 2)
     conn = _conn()
     cur = conn.cursor()

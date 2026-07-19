@@ -309,9 +309,12 @@ export class RentPlanPage extends React.Component<{}, State> {
     }))
   }
 
-  handlePhoto = (type: 'water' | 'electric', e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
+  handlePhotoFile = (type: 'water' | 'electric', file: File | undefined) => {
     if (!file) return
+    if (!file.type.startsWith('image/')) {
+      showToast('请选择图片文件')
+      return
+    }
     const reader = new FileReader()
     reader.onload = async () => {
       const dataUrl = reader.result as string
@@ -334,6 +337,24 @@ export class RentPlanPage extends React.Component<{}, State> {
       }
     }
     reader.readAsDataURL(file)
+  }
+
+  handlePhoto = (type: 'water' | 'electric', e: React.ChangeEvent<HTMLInputElement>) => {
+    this.handlePhotoFile(type, e.target.files?.[0])
+    e.target.value = ''
+  }
+
+  handlePhotoDrag = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+
+  handlePhotoDrop = (type: 'water' | 'electric', e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const files = Array.from(e.dataTransfer.files || [])
+    this.handlePhotoFile(type, files.find(file => file.type.startsWith('image/')) || files[0])
   }
 
   removePhoto = (type: 'water' | 'electric') => {
@@ -653,7 +674,7 @@ export class RentPlanPage extends React.Component<{}, State> {
     const rentAmount = Number(drawerContract.monthly_rent || 0)
     const otherFeeAmount = this.getOtherFeeAmount()
     const calculatedTotal = rentAmount + waterFee + elecFee + otherFeeAmount
-    const totalAmount = Number(drawerStep === 1 ? calculatedTotal : (drawerBill?.total_amount ?? calculatedTotal)).toFixed(2)
+    const totalAmount = Number(calculatedTotal).toFixed(2)
 
     return (
       <>
@@ -693,7 +714,12 @@ export class RentPlanPage extends React.Component<{}, State> {
                     <div style={{flex:1}}><label style={{fontSize:11,color:'var(--text-sec)'}}>水费（元）</label>
                       <div className="locked-field" style={{height:32}}>¥{waterFee.toFixed(2)}</div></div>
                   </div>
-                  <div className={'upload-area' + (wPhoto ? ' has-image' : '')}>
+                  <div
+                    className={'upload-area' + (wPhoto ? ' has-image' : '')}
+                    onDragEnter={this.handlePhotoDrag}
+                    onDragOver={this.handlePhotoDrag}
+                    onDrop={e => this.handlePhotoDrop('water', e)}
+                  >
                     <input type="file" accept="image/*" onChange={e => this.handlePhoto('water', e)} id="file_water" style={{display:'none'}} />
                     <div className="upload-preview" style={{flexDirection:'column',gap:6}}>
                       {wPhoto ? (
@@ -726,7 +752,12 @@ export class RentPlanPage extends React.Component<{}, State> {
                     <div style={{flex:1}}><label style={{fontSize:11,color:'var(--text-sec)'}}>电费（元）</label>
                       <div className="locked-field" style={{height:32}}>¥{elecFee.toFixed(2)}</div></div>
                   </div>
-                  <div className={'upload-area' + (ePhoto ? ' has-image' : '')}>
+                  <div
+                    className={'upload-area' + (ePhoto ? ' has-image' : '')}
+                    onDragEnter={this.handlePhotoDrag}
+                    onDragOver={this.handlePhotoDrag}
+                    onDrop={e => this.handlePhotoDrop('electric', e)}
+                  >
                     <input type="file" accept="image/*" onChange={e => this.handlePhoto('electric', e)} id="file_electric" style={{display:'none'}} />
                     <div className="upload-preview" style={{flexDirection:'column',gap:6}}>
                       {ePhoto ? (

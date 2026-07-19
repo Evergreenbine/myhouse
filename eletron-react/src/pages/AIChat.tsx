@@ -2078,14 +2078,18 @@ export class AIChat extends React.Component<{ currentUser: AuthUser }, AIChatSta
                         <button type="button" className={item.meterType === "电表" ? "active" : ""} onClick={() => this.setAttachmentMeterType(item.id, "电表")}>电</button>
                       </div>
                       <div className="ai-attachment-fields">
-                        <select value={item.buildingId || ""} onChange={e => this.setAttachmentBuilding(item.id, e.target.value)} title="选择楼栋">
-                          <option value="">选择楼栋</option>
-                          {s.meterBuildings.map(building => <option key={building.id} value={building.id}>{building.name}</option>)}
-                        </select>
-                        <select value={item.roomId || ""} onChange={e => this.setAttachmentRoom(item.id, e.target.value)} disabled={!item.buildingId} title="选择房间">
-                          <option value="">选择房间</option>
-                          {(s.meterRooms[item.buildingId || 0] || []).map(room => <option key={room.id} value={room.id}>{room.room_number}</option>)}
-                        </select>
+                        <Select
+                          value={item.buildingId || ""}
+                          onChange={value => this.setAttachmentBuilding(item.id, value)}
+                          placeholder="选择楼栋"
+                          options={s.meterBuildings.map(building => ({ value: String(building.id), label: building.name }))}
+                        />
+                        <Select
+                          value={item.roomId || ""}
+                          onChange={value => this.setAttachmentRoom(item.id, value)}
+                          placeholder={item.buildingId ? "选择房间" : "先选楼栋"}
+                          options={(s.meterRooms[item.buildingId || 0] || []).map(room => ({ value: String(room.id), label: room.room_number }))}
+                        />
                         <div className="ai-attachment-tenant">租客：{item.tenantName || "未匹配"}</div>
                         {item.meterNumber && <div className="ai-attachment-meter-no">表号：{item.meterNumber}</div>}
                       </div>

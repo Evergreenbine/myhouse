@@ -489,6 +489,18 @@ def _extract_meter_reading_values(prompt: str) -> Dict[str, str]:
     return values
 
 
+def _looks_like_meter_reading_followup(prompt: str) -> bool:
+    text = str(prompt or "").strip()
+    if not text:
+        return False
+    followup_words = (
+        "\u786e\u8ba4", "\u53ef\u4ee5", "\u5bf9", "\u662f\u7684", "\u55ef", "\u597d",
+        "\u5f55\u5165", "\u8865\u5f55", "\u8bb0\u5f55", "\u4fdd\u5b58", "\u5199\u5165",
+        "\u5f55\u5230\u5386\u53f2", "\u5386\u53f2\u8bb0\u5f55",
+    )
+    return any(word in text for word in followup_words)
+
+
 def _looks_like_meter_reading_statement(prompt: str) -> bool:
     text = str(prompt or "").strip()
     if not text or not re.search(r"\d", text):
@@ -935,6 +947,21 @@ def _known_building_hint(prompt: str) -> Dict[str, Any]:
 
 def _room_number_hint(prompt: str) -> str:
     text = str(prompt or "")
+    direct_patterns = (
+        r"(?:\u623f\u95f4|\u623f\u53f7)\s*[:\uff1a]?\s*(\d{2,5})(?!\d)",
+        r"(?<!\d)(\d{2,5})\s*(?:\u623f|\u5ba4|\u53f7\u623f)(?!\d)",
+    )
+    for pattern in direct_patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1)
+    for building in db.get_buildings() or []:
+        name = str(building.get("name") or "").strip()
+        if not name:
+            continue
+        match = re.search(re.escape(name) + r"\s*(\d{2,5})(?!\d)", text)
+        if match:
+            return match.group(1)
     patterns = (
         r"(?:房间号|房号)\s*[:：]?\s*(\d{2,5})(?!\d)",
         r"(?<!\d)(\d{2,5})\s*(?:房|室|号房)(?!\d)",
@@ -950,6 +977,105 @@ def _room_number_hint(prompt: str) -> str:
         if match:
             return match.group(1)
     return ""
+
+
+def _known_tenant_location_hint(prompt: str) -> Dict[str, Any]:
+    text = re.sub(r"[\s,\uff0c\u3002\uff01\uff1f.!?()\uff08\uff09]", "", str(prompt or ""))
+    if not text:
+        return {}
+    matches = []
+    for tenant in db.get_tenants(True) or []:
+        name = str(tenant.get("name") or "").strip()
+        if name and name in text:
+            matches.append(tenant)
+    if len(matches) != 1:
+        return {}
+    tenant = matches[0]
+    fields: Dict[str, Any] = {
+        "tenant_id": tenant.get("id"),
+        "tenant_name": tenant.get("name"),
+    }
+    room = db.get_room(tenant.get("room_id")) if tenant.get("room_id") else None
+    if room:
+        fields.update({
+            "room_id": room.get("id"),
+            "room_number": room.get("room_number"),
+            "building_id": room.get("building_id") or tenant.get("building_id"),
+        })
+        building = db.get_building(fields.get("building_id")) if fields.get("building_id") else None
+        if building:
+            fields["building_name"] = building.get("name")
+    else:
+        if tenant.get("building_id") not in {None, ""}:
+            fields["building_id"] = tenant.get("building_id")
+        if tenant.get("building_name") not in {None, ""}:
+            fields["building_name"] = tenant.get("building_name")
+    return {k: v for k, v in fields.items() if v not in {None, ""}}
+
+
+def _location_fields_from_text(text: str) -> Dict[str, Any]:
+    fields: Dict[str, Any] = {}
+    fields.update(_known_building_hint(text))
+    tenant_fields = _known_tenant_location_hint(text)
+    if tenant_fields:
+        fields.update(tenant_fields)
+    room_number = _room_number_hint(text)
+    if room_number:
+        fields["room_number"] = room_number
+        if "room_id" in fields:
+            room = db.get_room(fields.get("room_id"))
+            if room and str(room.get("room_number") or "") != str(room_number):
+                fields.pop("room_id", None)
+    return fields
+
+
+def _single_uploaded_value(images: List[Dict[str, Any]], *keys: str) -> Any:
+    values = []
+    for image in images:
+        if not isinstance(image, dict):
+            continue
+        for key in keys:
+            value = image.get(key)
+            if value not in {None, ""}:
+                values.append(value)
+                break
+    normalized = {str(value) for value in values}
+    if len(normalized) == 1:
+        return values[0]
+    return None
+
+
+def _uploaded_location_fields(data: Dict[str, Any]) -> Dict[str, Any]:
+    images = _uploaded_images_from_data(data)
+    if not images:
+        return {}
+    fields: Dict[str, Any] = {}
+    for target, keys in {
+        "building_id": ("building_id", "buildingId"),
+        "building_name": ("building_name", "buildingName"),
+        "room_id": ("room_id", "roomId"),
+        "room_number": ("room_number", "roomNumber"),
+        "tenant_id": ("tenant_id", "tenantId"),
+        "tenant_name": ("tenant_name", "tenantName"),
+    }.items():
+        value = _single_uploaded_value(images, *keys)
+        if value not in {None, ""}:
+            fields[target] = value
+    return fields
+
+
+def _meter_reading_location_fields(data: Dict[str, Any]) -> Dict[str, Any]:
+    fields = _context_location_fields(_session_context(data))
+    recent_fields = _location_fields_from_text(_recent_text(data, limit=6))
+    if recent_fields:
+        fields.update(recent_fields)
+    uploaded_fields = _uploaded_location_fields(data)
+    if uploaded_fields:
+        fields.update(uploaded_fields)
+    prompt_fields = _location_fields_from_text(str(data.get("prompt") or ""))
+    if prompt_fields:
+        fields.update(prompt_fields)
+    return {k: v for k, v in fields.items() if v not in {None, ""}}
 
 
 def _float_hint(value: Any) -> Optional[float]:
@@ -1152,19 +1278,27 @@ def _contract_create_form_fallback(data: Dict[str, Any]) -> Dict[str, Any] | Non
 
 def _meter_reading_fallback_args(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     prompt = str(data.get("prompt") or "")
-    if not _looks_like_meter_reading_statement(prompt):
+    recent_text = _recent_text(data, limit=6)
+    prompt_readings = _extract_meter_reading_values(prompt)
+    recent_readings = _extract_meter_reading_values(recent_text)
+    can_reuse_recent = _looks_like_meter_reading_followup(prompt) and bool(recent_readings)
+    if not _looks_like_meter_reading_statement(prompt) and not can_reuse_recent:
         return []
-    context = _session_context(data)
-    location = _context_location_fields(context)
+    location = _meter_reading_location_fields(data)
     prompt_fields = _extract_common_fields(prompt)
-    location.update({k: v for k, v in prompt_fields.items() if k in {"building_id", "building_name", "room_number"} and v not in {None, ""}})
+    recent_fields = _extract_common_fields(recent_text)
+    for key in ("building_id", "building_name", "room_number"):
+        if recent_fields.get(key) not in {None, ""}:
+            location[key] = recent_fields[key]
+        if prompt_fields.get(key) not in {None, ""}:
+            location[key] = prompt_fields[key]
     room_number = str(location.get("room_number") or "").strip()
     if not room_number:
         return []
-    month = prompt_fields.get("month") or _month_hint(prompt)
+    month = prompt_fields.get("month") or recent_fields.get("month") or _month_hint(prompt) or _month_hint(recent_text)
     if not month:
         return []
-    readings = _extract_meter_reading_values(prompt)
+    readings = prompt_readings or recent_readings
     tool_args = []
     for meter_type in ("water", "electric"):
         reading = readings.get(meter_type)
@@ -1189,6 +1323,102 @@ def _meter_reading_fallback(data: Dict[str, Any]) -> Dict[str, Any] | None:
     tool_results = [execute_tool("meter_reading_save_from_ai", args) for args in tool_args]
     skill_hits = search_skills(str(data.get("prompt") or ""), top_k=5)
     return _finalize_chat_response("已识别到水电表读数，请核对下方待确认操作。", data, tool_results, skill_hits)
+
+
+def _looks_like_bill_create_with_upload(data: Dict[str, Any]) -> bool:
+    if not _uploaded_images_from_data(data):
+        return False
+    prompt = str(data.get("prompt") or "")
+    if _prompt_workflow(prompt) == "bill_create":
+        return True
+    return "\u8d26\u5355" in prompt and any(word in prompt for word in ("\u5f55\u5165", "\u751f\u6210", "\u51fa", "\u505a", "\u4fdd\u5b58"))
+
+
+def _bill_create_fallback(data: Dict[str, Any]) -> Dict[str, Any] | None:
+    if not _looks_like_bill_create_with_upload(data):
+        return None
+    prompt = str(data.get("prompt") or "")
+    month = _month_hint(prompt) or date.today().strftime("%Y-%m")
+    args = _tool_args_with_upload("bill_create_from_ai", {"month": month}, data)
+    tool_result = execute_tool("bill_create_from_ai", args)
+    skill_hits = search_skills(prompt, top_k=5)
+    return _finalize_chat_response("", data, [tool_result], skill_hits)
+
+
+def _room_only_followup_number(prompt: str) -> str:
+    text = str(prompt or "").strip()
+    if not text:
+        return ""
+    match = re.fullmatch(
+        r"(?:那|那么|还有|再来|接着|继续|下一个|这个|那个|同样)?\s*"
+        r"(\d{2,5})\s*(?:房|房间|室|号房)?\s*(?:的|也|呢|吧|吗|嘛|那个|这个|一样|同样)*[？?]?",
+        text,
+    )
+    return match.group(1) if match else ""
+
+
+def _bill_context_month(context: Dict[str, Any]) -> str:
+    sources: List[Dict[str, Any]] = []
+    for value in (
+        context,
+        context.get("last_intent"),
+        context.get("workflow_state"),
+        context.get("tool_plan"),
+    ):
+        if isinstance(value, dict):
+            sources.append(value)
+            fields = value.get("fields")
+            if isinstance(fields, dict):
+                sources.append(fields)
+    for source in sources:
+        month = str(source.get("month") or "").strip()
+        if re.fullmatch(r"20\d{2}-\d{2}", month):
+            return month
+    return ""
+
+
+def _has_bill_create_followup_context(data: Dict[str, Any]) -> bool:
+    context = _session_context(data)
+    for source in (
+        context,
+        context.get("last_intent"),
+        context.get("workflow_state"),
+        context.get("tool_plan"),
+    ):
+        if not isinstance(source, dict):
+            continue
+        if source.get("workflow") == "bill_create" or source.get("name") == "bill_create":
+            return True
+        if source.get("active_workflow") == "bill_create":
+            return True
+    recent = _recent_text(data, limit=4)
+    bill_words = ("账单草稿", "待确认账单", "确认保存", "确认覆盖", "生成账单", "录账单")
+    return any(word in recent for word in bill_words)
+
+
+def _bill_create_followup_args(data: Dict[str, Any]) -> Dict[str, Any]:
+    prompt = str(data.get("prompt") or "")
+    room_number = _room_only_followup_number(prompt)
+    if not room_number or not _has_bill_create_followup_context(data):
+        return {}
+    context = _session_context(data)
+    args = _context_location_fields(context)
+    args.update(_known_building_hint(prompt))
+    args["room_number"] = room_number
+    args.pop("room_id", None)
+    month = _month_hint(prompt) or _bill_context_month(context) or date.today().strftime("%Y-%m")
+    args["month"] = month
+    return {key: value for key, value in args.items() if value not in {None, ""}}
+
+
+def _bill_create_followup_fallback(data: Dict[str, Any]) -> Dict[str, Any] | None:
+    args = _bill_create_followup_args(data)
+    if not args:
+        return None
+    prompt = str(data.get("prompt") or "")
+    tool_result = execute_tool("bill_create_from_ai", args)
+    skill_hits = search_skills(prompt, top_k=5)
+    return _finalize_chat_response("", data, [tool_result], skill_hits)
 
 
 def _history_messages(history: List[Dict[str, Any]]) -> List[Dict[str, str]]:
@@ -1448,8 +1678,21 @@ def _tool_args_with_upload(name: str, raw_args: Any, data: Dict[str, Any]) -> An
             args = json.loads(raw_args) if raw_args.strip() else {}
         except Exception:
             return raw_args
+    uploaded_images = _uploaded_images_from_data(data)
+    if name in {"meter_reading_save_from_ai", "bill_create_from_ai", "bill_generate_draft", "bill_validate_preview", "bill_get_receipt_image_data"}:
+        for key, value in _uploaded_location_fields(data).items():
+            if value not in {None, ""}:
+                args[key] = value
+    if name == "bill_create_from_ai" and uploaded_images:
+        for item in uploaded_images:
+            if not isinstance(item, dict) or item.get("ocr_number") in {None, ""}:
+                continue
+            item_type = _normalize_uploaded_meter_type(item.get("ocr_meter_type") or item.get("meter_type"))
+            if item_type == "water" and args.get("water_curr") in {None, ""}:
+                args["water_curr"] = item.get("ocr_number")
+            elif item_type == "electric" and args.get("electric_curr") in {None, ""}:
+                args["electric_curr"] = item.get("ocr_number")
     if name == "meter_reading_save_from_ai":
-        uploaded_images = _uploaded_images_from_data(data)
         selected = None
         if isinstance(uploaded_images, list) and uploaded_images:
             image_index = args.get("image_index")
@@ -1484,6 +1727,14 @@ def _tool_args_with_upload(name: str, raw_args: Any, data: Dict[str, Any]) -> An
                 args["room_number"] = selected.get("room_number")
             if selected.get("building_id"):
                 args["building_id"] = selected.get("building_id")
+            if selected.get("room_id"):
+                args["room_id"] = selected.get("room_id")
+            if selected.get("building_name"):
+                args["building_name"] = selected.get("building_name")
+            if selected.get("tenant_id"):
+                args["tenant_id"] = selected.get("tenant_id")
+            if selected.get("tenant_name"):
+                args["tenant_name"] = selected.get("tenant_name")
         else:
             if data.get("ocr_number") is not None and args.get("reading") in {None, ""}:
                 args["reading"] = data.get("ocr_number")
@@ -1697,6 +1948,61 @@ def _pending_action_command_response(data: Dict[str, Any], command: str) -> Dict
     }
 
 
+def _looks_like_pending_action_text_confirm(prompt: str) -> bool:
+    text = str(prompt or "").strip()
+    if not text:
+        return False
+    words = (
+        "\u786e\u8ba4", "\u53ef\u4ee5", "\u597d", "\u662f\u7684", "\u5bf9",
+        "\u5f55\u5165", "\u8865\u5f55", "\u8bb0\u5f55", "\u4fdd\u5b58", "\u5199\u5165",
+        "\u5f55\u5230\u5386\u53f2", "\u5386\u53f2\u8bb0\u5f55", "\u6267\u884c", "\u8fdb\u53bb", "\u5f04\u8fdb\u53bb",
+    )
+    return any(word in text for word in words)
+
+
+def _pending_action_text_confirm_response(data: Dict[str, Any]) -> Dict[str, Any] | None:
+    pending_actions = [action for action in (data.get("pending_actions") or []) if isinstance(action, dict)]
+    if not pending_actions or not _looks_like_pending_action_text_confirm(str(data.get("prompt") or "")):
+        return None
+    if len(pending_actions) == 1:
+        return _pending_action_command_response(
+            {**data, "pending_action_id": pending_actions[0].get("id")},
+            "confirm",
+        )
+
+    remaining = pending_actions
+    results = []
+    labels = []
+    for action in pending_actions:
+        action_id = action.get("id")
+        result = _confirm_pending_action({"action_id": action_id}, {**data, "pending_actions": remaining})
+        results.append({"ok": True, "tool": "ai_pending_action_command", "data": result})
+        if result.get("success"):
+            labels.append(str(action.get("label") or "\u5f85\u786e\u8ba4\u64cd\u4f5c"))
+            remaining = _merge_pending_actions(remaining, [results[-1]])
+
+    success_count = sum(1 for item in results if (item.get("data") or {}).get("success"))
+    session_context = _next_session_context(data, results)
+    reply = "\u5df2\u786e\u8ba4\u5e76\u5b8c\u6210 " + str(success_count) + " \u9879\u64cd\u4f5c"
+    if labels:
+        reply += "\uff1a" + "\u3001".join(labels[:4])
+    if success_count < len(pending_actions):
+        reply += "\u3002\u90e8\u5206\u64cd\u4f5c\u672a\u5b8c\u6210\uff0c\u8bf7\u68c0\u67e5\u4e0b\u65b9\u5f85\u786e\u8ba4\u5361\u7247\u3002"
+    else:
+        reply += "\u3002"
+    bill_images = _collect_bill_images(results)
+    suggested_actions = _collect_suggested_actions(results)
+    return {
+        "reply": reply,
+        "bill_images": bill_images,
+        "pending_actions": remaining,
+        "session_context": session_context,
+        "skill_hits": [],
+        "suggested_actions": suggested_actions,
+        "response": {"type": "assistant_message", "content": reply, "pending_actions": remaining, "bill_images": bill_images, "suggested_actions": suggested_actions, "session_context": session_context},
+    }
+
+
 def _merge_pending_actions(existing: List[Dict[str, Any]], tool_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     actions = [a for a in (existing or []) if isinstance(a, dict)]
     by_id = {a.get("id"): a for a in actions if a.get("id")}
@@ -1710,6 +2016,37 @@ def _merge_pending_actions(existing: List[Dict[str, Any]], tool_results: List[Di
         if isinstance(pending, dict) and pending.get("id"):
             by_id[pending["id"]] = pending
     return list(by_id.values())
+
+
+def _has_pending_meter_reading(pending_actions: List[Dict[str, Any]]) -> bool:
+    return any(isinstance(action, dict) and action.get("type") == "save_meter_reading" for action in pending_actions or [])
+
+
+def _has_successful_meter_save(tool_results: List[Dict[str, Any]]) -> bool:
+    for result in tool_results or []:
+        if not isinstance(result, dict):
+            continue
+        tool_name = str(result.get("tool") or "")
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        if tool_name == "confirm_save_meter_reading" and data.get("success"):
+            return True
+        execution = data.get("execution") if isinstance(data, dict) else None
+        execution_data = execution.get("data") if isinstance(execution, dict) and isinstance(execution.get("data"), dict) else {}
+        if data.get("success") and execution_data.get("action") == "meter_reading_saved":
+            return True
+    return False
+
+
+def _looks_like_meter_write_claim(reply: str) -> bool:
+    text = str(reply or "")
+    if not text:
+        return False
+    write_words = (
+        "\u5df2\u8bb0\u5f55", "\u5df2\u5f55\u5165", "\u5df2\u5199\u5165", "\u5df2\u4fdd\u5b58",
+        "\u5df2\u8865\u5f55", "\u5f55\u5230\u5386\u53f2", "\u4fdd\u5b58\u6210\u529f",
+    )
+    meter_words = ("\u8bfb\u6570", "\u7535\u8868", "\u6c34\u8868", "\u6c34\u7535")
+    return any(word in text for word in write_words) and any(word in text for word in meter_words)
 
 
 def _collect_suggested_actions(tool_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -2039,15 +2376,24 @@ def _execute_ai_tool_call(raw_call: Dict[str, Any], data: Dict[str, Any]) -> Dic
         tool_args = merged_args
     if call["name"] == "meter_reading_save_from_ai" and isinstance(tool_args, dict):
         prompt = str(data.get("prompt") or "")
-        context = _session_context(data)
+        recent_text = _recent_text(data, limit=6)
         merged_args = dict(tool_args)
-        for key, value in _context_location_fields(context).items():
+        location_fields = _meter_reading_location_fields(data)
+        for key, value in location_fields.items():
             if value not in {None, ""} and key not in merged_args:
                 merged_args[key] = value
-        month = _month_hint(prompt) or str(merged_args.get("month") or "").strip()
+        recent_location = _location_fields_from_text(recent_text)
+        for key, value in recent_location.items():
+            if value not in {None, ""}:
+                merged_args[key] = value
+        prompt_location = _location_fields_from_text(prompt)
+        for key, value in prompt_location.items():
+            if value not in {None, ""}:
+                merged_args[key] = value
+        month = _month_hint(prompt) or str(merged_args.get("month") or "").strip() or _month_hint(recent_text)
         if month:
             merged_args["month"] = month
-        readings = _extract_meter_reading_values(prompt)
+        readings = _extract_meter_reading_values(prompt) or _extract_meter_reading_values(recent_text)
         if readings.get("water") and str(merged_args.get("meter_type") or "") in {"", "water"} and "reading" not in merged_args:
             merged_args["reading"] = readings["water"]
             merged_args["meter_type"] = "water"
@@ -2126,9 +2472,13 @@ def _finalize_chat_response(
         isinstance(action, dict) and action.get("type") == "record_payment"
         for action in pending_actions
     )
+    has_meter_confirmation = _has_pending_meter_reading(pending_actions)
+    has_meter_save = _has_successful_meter_save(last_tool_results)
 
     if _has_internal_tool_failure(last_tool_results) or _looks_like_technical_failure(reply):
         reply = GUIDED_HELP_REPLY
+    elif has_meter_confirmation:
+        reply = "\u8bfb\u6570\u5df2\u51c6\u5907\u597d\uff0c\u8bf7\u6838\u5bf9\u4e0b\u65b9\u5f85\u786e\u8ba4\u64cd\u4f5c\uff0c\u518d\u7528\u5361\u7247\u6309\u94ae\u786e\u8ba4\u6216\u53d6\u6d88\u3002"
     elif form_actions:
         reply = "还需要补充一些合同信息，请在下方表单填写后提交。"
     elif has_bill_confirmation:
@@ -2143,6 +2493,8 @@ def _finalize_chat_response(
         reply = "分析看板已生成，可在下方查看照片卡片和图表。"
     elif not reply and last_tool_results:
         reply = "我已经拿到相关数据，但还不确定你希望继续查询、录入还是生成账单。请告诉我你想完成的下一步。"
+    if not has_meter_save and not has_meter_confirmation and _looks_like_meter_write_claim(reply):
+        reply = "\u6211\u8fd8\u6ca1\u6709\u771f\u6b63\u5199\u5165\u8fd9\u6761\u8bfb\u6570\u3002\u8bf7\u628a\u697c\u680b\u3001\u623f\u95f4\u3001\u6708\u4efd\u3001\u6c34/\u7535\u8868\u548c\u8bfb\u6570\u53d1\u6211\uff0c\u6211\u4f1a\u5148\u751f\u6210\u5f85\u786e\u8ba4\u64cd\u4f5c\u3002"
     if bill_images and "账单图片" not in reply and "收据图片" not in reply:
         reply = (reply.rstrip() + "\n\n账单图片已生成，可在下方预览、复制或保存。").strip()
     if analysis_cards and "看板" not in reply and "分析" not in reply:
@@ -2186,6 +2538,9 @@ def _chat_linear(data: Dict[str, Any]) -> Dict[str, Any]:
     pending_action_command = str(data.get("pending_action_command") or "").strip().lower()
     if pending_action_command in {"confirm", "cancel"}:
         return _pending_action_command_response(data, pending_action_command)
+    pending_text_confirm = _pending_action_text_confirm_response(data)
+    if pending_text_confirm:
+        return pending_text_confirm
     if not prompt:
         return {"reply": "请先输入你想查询的问题。"}
     if _looks_like_greeting(prompt):
@@ -2201,6 +2556,12 @@ def _chat_linear(data: Dict[str, Any]) -> Dict[str, Any]:
                 "bill_images": [],
             },
         }
+    bill_followup = _bill_create_followup_fallback(data)
+    if bill_followup:
+        return bill_followup
+    bill_fallback = _bill_create_fallback(data)
+    if bill_fallback:
+        return bill_fallback
     meter_fallback = _meter_reading_fallback(data)
     if meter_fallback:
         return meter_fallback
@@ -2238,11 +2599,17 @@ def _graph_route(state: AIChatGraphState) -> str:
     if not prompt:
         return "empty_prompt"
     data = state.get("data") or {}
+    if (data.get("pending_actions") or []) and _looks_like_pending_action_text_confirm(str(data.get("prompt") or "")):
+        return "pending_text_confirm"
     if _looks_like_greeting(prompt):
         return "greeting"
+    if _bill_create_followup_args(data):
+        return "bill_create"
     intent = _detect_intent(data)
     workflow = str(intent.get("workflow") or "")
     _trace_state(state, "route", {"intent": intent})
+    if workflow == "bill_create" and _looks_like_bill_create_with_upload(data):
+        return "bill_create"
     if workflow == "meter_reading" and _meter_reading_fallback_args(data):
         return "meter_reading"
     if workflow == "contract_create" and _should_fallback_contract_create(data):
@@ -2260,6 +2627,12 @@ def _graph_pending_command_node(state: AIChatGraphState) -> AIChatGraphState:
             str(state.get("pending_action_command") or "").strip().lower(),
         )
     }
+
+
+def _graph_pending_text_confirm_node(state: AIChatGraphState) -> AIChatGraphState:
+    data = state.get("data") or {}
+    _trace_state(state, "pending_text_confirm", {"prompt": data.get("prompt")})
+    return {"result": _pending_action_text_confirm_response(data) or _chat_linear(data)}
 
 
 def _graph_empty_prompt_node(state: AIChatGraphState) -> AIChatGraphState:
@@ -2296,6 +2669,12 @@ def _graph_meter_reading_node(state: AIChatGraphState) -> AIChatGraphState:
     data = state.get("data") or {}
     _trace_state(state, "meter_reading", {"prompt": data.get("prompt"), "session_context": _session_context(data)})
     return {"result": _meter_reading_fallback(data) or _chat_linear(data)}
+
+
+def _graph_bill_create_node(state: AIChatGraphState) -> AIChatGraphState:
+    data = state.get("data") or {}
+    _trace_state(state, "bill_create", {"prompt": data.get("prompt"), "uploaded_location": _uploaded_location_fields(data)})
+    return {"result": _bill_create_followup_fallback(data) or _bill_create_fallback(data) or _chat_linear(data)}
 
 
 def _graph_rent_only_summary_node(state: AIChatGraphState) -> AIChatGraphState:
@@ -2410,10 +2789,12 @@ def _get_chat_graph() -> Any:
     graph = StateGraph(AIChatGraphState)
     graph.add_node("route", lambda state: {})
     graph.add_node("pending_command", _graph_pending_command_node)
+    graph.add_node("pending_text_confirm", _graph_pending_text_confirm_node)
     graph.add_node("empty_prompt", _graph_empty_prompt_node)
     graph.add_node("greeting", _graph_greeting_node)
     graph.add_node("contract_form", _graph_contract_form_node)
     graph.add_node("meter_reading", _graph_meter_reading_node)
+    graph.add_node("bill_create", _graph_bill_create_node)
     graph.add_node("rent_only_summary", _graph_rent_only_summary_node)
     graph.add_node("prepare_context", _graph_prepare_context_node)
     graph.add_node("call_model", _graph_call_model_node)
@@ -2426,19 +2807,23 @@ def _get_chat_graph() -> Any:
         _graph_route,
         {
             "pending_command": "pending_command",
+            "pending_text_confirm": "pending_text_confirm",
             "empty_prompt": "empty_prompt",
             "greeting": "greeting",
             "contract_form": "contract_form",
             "meter_reading": "meter_reading",
+            "bill_create": "bill_create",
             "rent_only_summary": "rent_only_summary",
             "normal_chat": "prepare_context",
         },
     )
     graph.add_edge("pending_command", END)
+    graph.add_edge("pending_text_confirm", END)
     graph.add_edge("empty_prompt", END)
     graph.add_edge("greeting", END)
     graph.add_edge("contract_form", END)
     graph.add_edge("meter_reading", END)
+    graph.add_edge("bill_create", END)
     graph.add_edge("rent_only_summary", END)
     graph.add_edge("prepare_context", "call_model")
     graph.add_conditional_edges(
